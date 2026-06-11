@@ -1,0 +1,14 @@
+services:
+  duck-api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DUCK_PUBLIC_BASE_URL: "http://localhost:8000"
+      DUCK_STORAGE_DIR: "/data/downloads"
+      DUCK_MAX_CONCURRENT_DOWNLOADS: "3"
+    volumes:
+      - duck_downloads:/data/downloads
+
+volumes:
+  duck_downloads:

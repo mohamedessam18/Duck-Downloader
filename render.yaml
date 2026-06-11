@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: duck-downloader-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: DUCK_PUBLIC_BASE_URL
+        value: https://duck-downloader-api.onrender.com
+      - key: DUCK_STORAGE_DIR
+        value: /tmp/downloads
+      - key: DUCK_MAX_CONCURRENT_DOWNLOADS
+        value: 1
+      - key: DUCK_MAX_DOWNLOAD_SECONDS
+        value: 900
+      - key: DUCK_PRO_LICENSE_KEYS
+        sync: false

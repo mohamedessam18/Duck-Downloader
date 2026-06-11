@@ -1,0 +1,56 @@
+{
+  "name": "duck-downloader-desktop",
+  "version": "1.0.0",
+  "description": "Duck Downloader desktop app built with Electron, React, and Vite.",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build:electron": "node -e \"fs.rmSync('dist-electron',{recursive:true,force:true})\" && tsc -p tsconfig.node.json",
+    "dev": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "npm run build:electron && tsc -p tsconfig.json && vite build",
+    "dist:win": "npm run build && electron-builder --win nsis portable",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "electron-store": "^11.0.2",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "wait-on": "^9.0.3"
+  },
+  "build": {
+    "appId": "com.duckdownloader.desktop",
+    "productName": "Duck Downloader",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
