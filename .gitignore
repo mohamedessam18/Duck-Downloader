@@ -56,3 +56,10 @@ desktop/release/
 .env.*
 !.env.example
 !**/.env.example
+
+# AI Assistant internal files
+.agents/
+
+# Windows artifacts
+nul
+*.msi
