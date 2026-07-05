@@ -15,32 +15,46 @@ Duck Downloader is a Flutter mobile app with a FastAPI backend. The app detects 
 docker compose up --build
 ```
 
-## Free External Backend on Render
+## Cloudflare Named Tunnel
 
-This project can be deployed to Render Free using the included `render.yaml`.
-This keeps the backend off your own PC, but it is not true 24/7 hosting: Render
-Free can spin down after idle time and local downloaded files can be lost after
-restart, redeploy, or spin-down.
+The mobile app uses the Cloudflare-hosted API URL by default:
 
-Steps:
-
-1. Push the repo to GitHub.
-2. In Render, create a Blueprint from this repo.
-3. Deploy the `duck-downloader-api` free web service.
-4. Check the generated Render URL. If it is not
-   `https://duck-downloader-api.onrender.com`, update `DUCK_PUBLIC_BASE_URL` in
-   the Render service environment to the real URL.
-5. Test the backend:
-
-```powershell
-curl.exe https://duck-downloader-api.onrender.com/health
+```text
+https://api.duckdownloader.site
 ```
 
-Build the Flutter app against the Render backend:
+Run the backend locally, then expose it through a Cloudflare Named Tunnel:
+
+```powershell
+docker compose up --build
+curl.exe http://localhost:8000/health
+```
+
+Create the tunnel and route the fixed hostname:
+
+```powershell
+cloudflared tunnel login
+```
+
+Then run the setup script. It creates the tunnel if needed, writes
+`%USERPROFILE%\.cloudflared\config.yml`, creates the DNS route, and installs the
+Windows service:
+
+```powershell
+.\scripts\setup-cloudflare-tunnel.ps1
+```
+
+Test the public API:
+
+```powershell
+curl.exe https://api.duckdownloader.site/health
+```
+
+Build the Flutter app against the fixed Cloudflare backend:
 
 ```powershell
 & 'C:\Users\me548\develop\flutter\bin\flutter.bat' build apk `
-  --dart-define=DUCK_API_BASE_URL=https://duck-downloader-api.onrender.com
+  --dart-define=DUCK_API_BASE_URL=https://api.duckdownloader.site
 ```
 
 ## Run App
@@ -51,12 +65,17 @@ Android emulator uses `10.0.2.2` by default:
 & 'C:\Users\me548\develop\flutter\bin\flutter.bat' run
 ```
 
-Physical devices need your machine IP:
+Physical devices can use the Cloudflare URL directly:
 
 ```powershell
 & 'C:\Users\me548\develop\flutter\bin\flutter.bat' run `
-  --dart-define=DUCK_API_BASE_URL=http://YOUR_IP:8000 `
-  --dart-define=DUCK_WS_BASE_URL=ws://YOUR_IP:8000
+  --dart-define=DUCK_API_BASE_URL=https://api.duckdownloader.site
+```
+
+Plain `flutter run` also uses the Cloudflare backend by default:
+
+```text
+https://api.duckdownloader.site
 ```
 
 ## API

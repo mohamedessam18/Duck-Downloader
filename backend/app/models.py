@@ -5,6 +5,17 @@ from pydantic import BaseModel, Field, HttpUrl
 class DownloadType(str, Enum):
     video = "video"
     audio = "audio"
+    image = "image"
+
+
+class CookiesRequest(BaseModel):
+    cookies: str
+
+
+class CookiesResponse(BaseModel):
+    active: bool
+    size: int
+    filename: str | None = None
 
 
 class ExtractRequest(BaseModel):
@@ -16,15 +27,7 @@ class DownloadRequest(BaseModel):
     type: DownloadType
     quality: str | None = None
     premium_no_watermark: bool = Field(default=False, alias="premiumNoWatermark")
-    license_key: str | None = Field(default=None, alias="licenseKey")
-
-
-class LicenseRequest(BaseModel):
-    license_key: str = Field(alias="licenseKey")
-
-
-class LicenseResponse(BaseModel):
-    active: bool
+    remove_music: bool = Field(default=False, alias="removeMusic")
 
 
 class FormatInfo(BaseModel):
@@ -59,3 +62,35 @@ class StatusResponse(BaseModel):
     fileUrl: str | None = None
     filename: str | None = None
     error: str | None = None
+
+
+class TrimRequest(BaseModel):
+    downloadId: str = Field(alias="downloadId")
+    startTime: float = Field(alias="startTime")
+    endTime: float = Field(alias="endTime")
+
+
+class TrimResponse(BaseModel):
+    downloadId: str = Field(alias="downloadId")
+    fileUrl: str = Field(alias="fileUrl")
+    filename: str = Field(alias="filename")
+
+
+class PlaylistItemInfo(BaseModel):
+    url: str
+    title: str
+    thumbnail: str | None = None
+    width: int | None = None
+    height: int | None = None
+    source: str | None = None
+    isPreview: bool = Field(default=False, alias="isPreview")
+    isVideo: bool = Field(default=False, alias="isVideo")
+
+class PlaylistExtractRequest(BaseModel):
+    url: HttpUrl
+
+
+class PlaylistExtractResponse(BaseModel):
+    title: str
+    platform: str
+    items: list[PlaylistItemInfo]

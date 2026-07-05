@@ -1,4 +1,6 @@
-enum DownloadType { video, audio }
+import 'package:flutter/foundation.dart';
+
+enum DownloadType { video, audio, image }
 
 enum DownloadStatus {
   queued,
@@ -12,7 +14,9 @@ enum DownloadStatus {
 
 enum DuckFlow { idle, extracting, ready, downloading, success, error }
 
-enum DuckTab { home, videos, audios }
+enum DuckTab { home, videos, audios, images }
+
+const Object _preserveExternalSaveError = Object();
 
 class FormatInfo {
   const FormatInfo({
@@ -92,9 +96,15 @@ class DownloadItem {
     required this.status,
     required this.progress,
     required this.favorite,
+    this.savedToGallery = false,
+    this.savedToMusic = false,
+    this.isPrivate = false,
+    this.externalSaveError,
     this.thumbnail,
     this.quality,
     this.filePath,
+    this.artist,
+    this.album,
   });
 
   final String id;
@@ -109,9 +119,16 @@ class DownloadItem {
   final DownloadStatus status;
   final int progress;
   final bool favorite;
+  final bool savedToGallery;
+  final bool savedToMusic;
+  final bool isPrivate;
+  final String? externalSaveError;
+  final String? artist;
+  final String? album;
 
   bool get isVideo => type == DownloadType.video;
   bool get isAudio => type == DownloadType.audio;
+  bool get isImage => type == DownloadType.image;
 
   DownloadItem copyWith({
     String? id,
@@ -126,6 +143,12 @@ class DownloadItem {
     DownloadStatus? status,
     int? progress,
     bool? favorite,
+    bool? savedToGallery,
+    bool? savedToMusic,
+    bool? isPrivate,
+    Object? externalSaveError = _preserveExternalSaveError,
+    String? artist,
+    String? album,
   }) {
     return DownloadItem(
       id: id ?? this.id,
@@ -140,6 +163,15 @@ class DownloadItem {
       status: status ?? this.status,
       progress: progress ?? this.progress,
       favorite: favorite ?? this.favorite,
+      savedToGallery: savedToGallery ?? this.savedToGallery,
+      savedToMusic: savedToMusic ?? this.savedToMusic,
+      isPrivate: isPrivate ?? this.isPrivate,
+      externalSaveError:
+          identical(externalSaveError, _preserveExternalSaveError)
+          ? this.externalSaveError
+          : externalSaveError as String?,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
     );
   }
 
@@ -157,6 +189,12 @@ class DownloadItem {
       'status': status.name,
       'progress': progress,
       'favorite': favorite,
+      'savedToGallery': savedToGallery,
+      'savedToMusic': savedToMusic,
+      'isPrivate': isPrivate,
+      'externalSaveError': externalSaveError,
+      'artist': artist,
+      'album': album,
     };
   }
 
@@ -178,6 +216,12 @@ class DownloadItem {
       ),
       progress: (json['progress'] as num?)?.toInt() ?? 0,
       favorite: json['favorite'] as bool? ?? false,
+      savedToGallery: json['savedToGallery'] as bool? ?? false,
+      savedToMusic: json['savedToMusic'] as bool? ?? false,
+      isPrivate: json['isPrivate'] as bool? ?? false,
+      externalSaveError: json['externalSaveError'] as String?,
+      artist: json['artist'] as String?,
+      album: json['album'] as String?,
     );
   }
 }
@@ -202,16 +246,147 @@ class DownloadStatusUpdate {
   final String? error;
 
   factory DownloadStatusUpdate.fromJson(Map<String, dynamic> json) {
+    final statusName = json['status']?.toString() ?? 'queued';
     return DownloadStatusUpdate(
       progress: (json['progress'] as num?)?.toInt() ?? 0,
-      status: DownloadStatus.values.byName(
-        json['status']?.toString() ?? 'queued',
-      ),
-      speed: json['speed'] as String?,
-      eta: json['eta'] as String?,
-      fileUrl: json['fileUrl'] as String?,
-      filename: json['filename'] as String?,
-      error: json['error'] as String?,
+      status:
+          DownloadStatus.values.cast<DownloadStatus?>().firstWhere(
+            (status) => status?.name == statusName,
+            orElse: () => DownloadStatus.failed,
+          ) ??
+          DownloadStatus.failed,
+      speed: json['speed']?.toString(),
+      eta: json['eta']?.toString(),
+      fileUrl: json['fileUrl']?.toString(),
+      filename: json['filename']?.toString(),
+      error: json['error']?.toString(),
+    );
+  }
+}
+
+class Playlist {
+  const Playlist({
+    required this.id,
+    required this.name,
+    required this.downloadIds,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String name;
+  final List<String> downloadIds;
+  final DateTime createdAt;
+
+  Playlist copyWith({
+    String? id,
+    String? name,
+    List<String>? downloadIds,
+    DateTime? createdAt,
+  }) {
+    return Playlist(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      downloadIds: downloadIds ?? this.downloadIds,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'downloadIds': downloadIds,
+      'createdAt': createdAt.toIso8601String(),
+    };
+  }
+
+  factory Playlist.fromJson(Map<String, dynamic> json) {
+    return Playlist(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      downloadIds: List<String>.from(json['downloadIds'] as List? ?? const []),
+      createdAt:
+          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.now(),
+    );
+  }
+}
+
+class PlaylistItem {
+  const PlaylistItem({
+    required this.url,
+    required this.title,
+    this.thumbnail,
+    this.width,
+    this.height,
+    this.source,
+    this.isPreview = false,
+    this.isVideo = false,
+  });
+
+  final String url;
+  final String title;
+  final String? thumbnail;
+  final int? width;
+  final int? height;
+  final String? source;
+  final bool isPreview;
+  final bool isVideo;
+
+  factory PlaylistItem.fromJson(Map<String, dynamic> json) {
+    debugPrint('DEBUG JSON: url=${json['url']} isVideo=${json['isVideo']} keys=${json.keys.toList()}');
+    return PlaylistItem(
+      url: json['url']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      thumbnail: json['thumbnail']?.toString(),
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      source: json['source']?.toString(),
+      isPreview: json['isPreview'] as bool? ?? false,
+      isVideo: json['isVideo'] as bool? ?? false,
+    );
+  }
+}
+
+class PlaylistExtractResponse {
+  const PlaylistExtractResponse({
+    required this.title,
+    required this.platform,
+    required this.items,
+  });
+
+  final String title;
+  final String platform;
+  final List<PlaylistItem> items;
+
+  factory PlaylistExtractResponse.fromJson(Map<String, dynamic> json) {
+    return PlaylistExtractResponse(
+      title: json['title']?.toString() ?? '',
+      platform: json['platform']?.toString() ?? '',
+      items: [
+        for (final item in (json['items'] as List? ?? const []))
+          PlaylistItem.fromJson(Map<String, dynamic>.from(item as Map)),
+      ],
+    );
+  }
+}
+
+class BackendCookiesInfo {
+  const BackendCookiesInfo({
+    required this.active,
+    required this.size,
+    this.filename,
+  });
+
+  final bool active;
+  final int size;
+  final String? filename;
+
+  factory BackendCookiesInfo.fromJson(Map<String, dynamic> json) {
+    return BackendCookiesInfo(
+      active: json['active'] as bool? ?? false,
+      size: json['size'] as int? ?? 0,
+      filename: json['filename']?.toString(),
     );
   }
 }

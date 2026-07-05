@@ -4,7 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DUCK_PUBLIC_BASE_URL: "http://localhost:8000"
+      DUCK_PUBLIC_BASE_URL: "https://api.duckdownloader.site"
       DUCK_STORAGE_DIR: "/data/downloads"
       DUCK_MAX_CONCURRENT_DOWNLOADS: "3"
     volumes:

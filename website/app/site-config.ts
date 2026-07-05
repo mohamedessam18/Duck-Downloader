@@ -5,7 +5,7 @@ export const siteConfig = {
   tagline: "Copy. Detect. Download.",
   description:
     "Duck Downloader is a simple downloader for public social media links, available for Android and Windows.",
-  url: "https://duckdownloader.app",
+  url: "https://duckdownloader.site",
   ctaState: "comingSoon",
   futureDownloads: {
     androidApkUrl: null,

@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-import 'screens/duck_app_screen.dart';
+import 'screens/splash_screen.dart';
 import 'services/api_client.dart';
 import 'services/clipboard_service.dart';
 import 'services/download_store.dart';
 import 'services/file_service.dart';
-import 'services/license_store.dart';
+import 'services/premium_manager.dart';
+import 'services/purchase_repository.dart';
+import 'services/subscription_service.dart';
+import 'services/media_save_service.dart';
 import 'state/downloads_controller.dart';
 
 class DuckDownloaderApp extends StatefulWidget {
@@ -17,23 +20,30 @@ class DuckDownloaderApp extends StatefulWidget {
 }
 
 class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
+  late final PremiumManager premiumManager;
   late final DuckDownloadsController controller;
 
   @override
   void initState() {
     super.initState();
+    premiumManager = PremiumManager(
+      subscriptions: SubscriptionService(),
+      purchases: PurchaseRepository(Hive.box('duck-downloads')),
+    );
     controller = DuckDownloadsController(
       api: DuckApiClient(),
       clipboard: DuckClipboardService(),
       files: DuckFileService(),
+      mediaSaver: MediaSaveService(),
       store: DownloadStore(Hive.box('duck-downloads')),
-      licenseStore: LicenseStore(Hive.box('duck-downloads')),
+      premiumManager: premiumManager,
     );
   }
 
   @override
   void dispose() {
     controller.dispose();
+    premiumManager.dispose();
     super.dispose();
   }
 
@@ -42,13 +52,20 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
     return MaterialApp(
       title: 'Duck Downloader',
       debugShowCheckedModeBanner: false,
+      themeMode: ThemeMode.system,
       theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.light,
+        fontFamily: 'Inter',
+        scaffoldBackgroundColor: const Color(0xFFF5F6F8),
+      ),
+      darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
         fontFamily: 'Inter',
         scaffoldBackgroundColor: const Color(0xFF101112),
       ),
-      home: DuckAppScreen(controller: controller),
+      home: SplashScreen(controller: controller),
     );
   }
 }

@@ -1,0 +1,9 @@
+# Web layer — keep the API surface tiny.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# Demucs source separation. torch + torchaudio are pulled with the CUDA build
+# variant via the index URL pinned in the Dockerfile so we do not constrain
+# the wheel here (installing the CPU build would silently disable the GPU).
+demucs>=4.0.0

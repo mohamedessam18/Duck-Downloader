@@ -1,3 +1,9 @@
+﻿---
+title: Duck Downloader API
+sdk: docker
+app_port: 8000
+---
+
 # Duck Downloader API
 
 FastAPI service for extracting public media metadata and downloading public media through `yt-dlp`.
@@ -31,12 +37,6 @@ curl https://duck-downloader-api.onrender.com/health
 For the free plan, downloads are stored in `/tmp/downloads` and can disappear on
 restart, redeploy, or spin-down. Keep `DUCK_MAX_CONCURRENT_DOWNLOADS` low.
 
-Lifetime Pro license keys are read from `DUCK_PRO_LICENSE_KEYS` as a comma-separated list:
-
-```bash
-DUCK_PRO_LICENSE_KEYS=DUCK-PRO-1234,DUCK-PRO-5678
-```
-
 ## Endpoints
 
 `POST /api/extract`
@@ -49,18 +49,6 @@ DUCK_PRO_LICENSE_KEYS=DUCK-PRO-1234,DUCK-PRO-5678
 
 ```json
 {"url":"https://public.example/video","type":"video","quality":"1080"}
-```
-
-`POST /api/license/activate`
-
-```json
-{"licenseKey":"DUCK-PRO-1234"}
-```
-
-`POST /api/license/verify`
-
-```json
-{"licenseKey":"DUCK-PRO-1234"}
 ```
 
 `GET /api/status/{downloadId}`
