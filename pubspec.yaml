@@ -25,6 +25,9 @@ dependencies:
   url_launcher: ^6.3.2
   flutter_local_notifications: ^18.0.1
   permission_handler: ^11.3.1
+  photo_view: ^0.15.0
+  just_audio_background: ^0.0.1-beta.17
+  ffmpeg_kit_flutter_new_min: ^3.3.2
 
 dev_dependencies:
   flutter_test:
@@ -32,16 +35,27 @@ dev_dependencies:
 
   flutter_lints: ^6.0.0
   mocktail: ^1.0.4
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/images/branding/logo_launcher.png
+  adaptive_icon_background: "#101112"
+  adaptive_icon_foreground: assets/images/branding/logo_launcher.png
 
 flutter:
   uses-material-design: true
   assets:
-    - Duck logo.png
-    - New Logo-removed-bg.png
-    - duck_idle.png
-    - duck_loading.png
-    - duck_success.png
-    - duck_error.png
-    - duck_angry.png
-    - assets/boost duck.png
-    - quack_duck_sound.mp3
+    - assets/images/branding/
+    - assets/images/ducks/
+    - assets/images/ducks/premium/
+    - assets/images/ducks/frames/classic/idle/
+    - assets/images/ducks/frames/classic/loading/
+    - assets/images/ducks/frames/classic/success/
+    - assets/images/ducks/frames/classic/error/
+    - assets/images/ducks/frames/premium/idle/
+    - assets/images/ducks/frames/premium/loading/
+    - assets/images/ducks/frames/premium/success/
+    - assets/images/ducks/frames/premium/error/
+    - assets/sounds/

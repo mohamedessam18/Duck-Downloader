@@ -14,6 +14,11 @@
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		D0A1A0011CF9000F007C117D /* quack_tap.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = D0A1A0111CF9000F007C117D /* quack_tap.mp3 */; };
+		D0A1A0021CF9000F007C117D /* quack_success.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = D0A1A0121CF9000F007C117D /* quack_success.mp3 */; };
+		D0A1A0031CF9000F007C117D /* quack_fail.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = D0A1A0131CF9000F007C117D /* quack_fail.mp3 */; };
+		D0A1A0041CF9000F007C117D /* quack_clipboard.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = D0A1A0141CF9000F007C117D /* quack_clipboard.mp3 */; };
+		D0B1A0121CF9000F007C117D /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = D0B1A0111CF9000F007C117D /* AppIcon.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +60,11 @@
 		97C146FD1CF9000F007C117D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D0A1A0111CF9000F007C117D /* quack_tap.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = quack_tap.mp3; sourceTree = "<group>"; };
+		D0A1A0121CF9000F007C117D /* quack_success.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = quack_success.mp3; sourceTree = "<group>"; };
+		D0A1A0131CF9000F007C117D /* quack_fail.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = quack_fail.mp3; sourceTree = "<group>"; };
+		D0A1A0141CF9000F007C117D /* quack_clipboard.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = quack_clipboard.mp3; sourceTree = "<group>"; };
+		D0B1A0111CF9000F007C117D /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,6 +119,7 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				D0B1A0111CF9000F007C117D /* AppIcon.icon */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -117,6 +128,10 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
+				D0A1A0111CF9000F007C117D /* quack_tap.mp3 */,
+				D0A1A0121CF9000F007C117D /* quack_success.mp3 */,
+				D0A1A0131CF9000F007C117D /* quack_fail.mp3 */,
+				D0A1A0141CF9000F007C117D /* quack_clipboard.mp3 */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -216,6 +231,11 @@
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
+				D0A1A0011CF9000F007C117D /* quack_tap.mp3 in Resources */,
+				D0A1A0021CF9000F007C117D /* quack_success.mp3 in Resources */,
+				D0A1A0031CF9000F007C117D /* quack_fail.mp3 in Resources */,
+				D0A1A0041CF9000F007C117D /* quack_clipboard.mp3 in Resources */,
+				D0B1A0121CF9000F007C117D /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

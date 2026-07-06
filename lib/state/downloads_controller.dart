@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 
+import '../constants/asset_paths.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/permissions/permission_service.dart';
 import '../models/browser_image_candidate.dart';
@@ -15,6 +18,7 @@ import '../services/file_service.dart';
 import '../services/premium_entitlement.dart';
 import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
+import '../services/trim_service.dart';
 
 class DuckDownloadsController extends ChangeNotifier
     with WidgetsBindingObserver {
@@ -28,6 +32,7 @@ class DuckDownloadsController extends ChangeNotifier
     NotificationService? notificationService,
     PermissionService? permissionService,
     bool initializePremium = true,
+    bool initializePlatformServices = true,
   }) : _api = api,
        _clipboard = clipboard,
        _files = files,
@@ -37,6 +42,7 @@ class DuckDownloadsController extends ChangeNotifier
        _notifications = notificationService ?? NotificationService(),
        _permissions = permissionService ?? PermissionService() {
     _downloads = _store.readDownloads();
+    _videoResumePositions = _store.readVideoResumePositions();
     autoSaveVideos = _store.readAutoSaveVideos();
     enableClipboardDetection = _store.readEnableClipboardDetection();
     _playlists = _store.readPlaylists();
@@ -49,10 +55,24 @@ class DuckDownloadsController extends ChangeNotifier
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkClipboardOnResume();
     });
-    unawaited(_notifications.initialize());
-    unawaited(_permissions.requestAllRequiredPermissions());
-    unawaited(loadCookiesStatus());
-    _playerStateSubscription = audioPlayer.playerStateStream.listen((_) {
+    unawaited(_notifications.initialize(onTap: _handleNotificationTap));
+    if (initializePlatformServices) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_requestPermissionsSafely());
+        unawaited(loadCookiesStatus());
+      });
+    }
+    unawaited(_configureAudioSession());
+    _playerStateSubscription = audioPlayer.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.completed &&
+          playingItem != null) {
+        if (_loopMode == LoopMode.one) {
+          unawaited(audioPlayer.seek(Duration.zero));
+          unawaited(audioPlayer.play());
+        } else if (hasNextTrack) {
+          unawaited(playNext());
+        }
+      }
       notifyListeners();
     });
     _playerPositionSubscription = audioPlayer.positionStream.listen((_) {
@@ -65,6 +85,25 @@ class DuckDownloadsController extends ChangeNotifier
   late final StreamSubscription<PlayerState> _playerStateSubscription;
   late final StreamSubscription<Duration> _playerPositionSubscription;
   DownloadItem? playingItem;
+  List<DownloadItem> _audioQueue = [];
+  int _audioQueueIndex = 0;
+  LoopMode _loopMode = LoopMode.off;
+  bool shuffleEnabled = false;
+  Map<String, int> _videoResumePositions = {};
+  bool audioBackgroundReady = false;
+  Completer<void>? _audioBackgroundCompleter;
+  String? _lastQueueSourceKey;
+  bool _queueShuffled = false;
+
+  bool get hasNextTrack =>
+      _audioQueue.length > 1 &&
+      (_loopMode == LoopMode.all || _audioQueueIndex < _audioQueue.length - 1);
+
+  bool get hasPreviousTrack =>
+      _audioQueue.length > 1 &&
+      (_loopMode == LoopMode.all || _audioQueueIndex > 0);
+
+  LoopMode get loopMode => _loopMode;
 
   bool get isAudioPlaying => audioPlayer.playing;
   Duration get audioPosition => audioPlayer.position;
@@ -79,6 +118,7 @@ class DuckDownloadsController extends ChangeNotifier
   final PremiumManager premium;
   final NotificationService _notifications;
   final PermissionService _permissions;
+  final TrimService _trimService = TrimService();
 
   List<DownloadItem> _downloads = [];
   List<Playlist> _playlists = [];
@@ -105,6 +145,8 @@ class DuckDownloadsController extends ChangeNotifier
   bool externalSaveBusy = false;
   String? activeId;
   DownloadItem? playerItem;
+  List<DownloadItem>? playerGalleryItems;
+  List<DownloadItem>? _audioQueueSource;
   final Set<String> controlPendingIds = {};
 
   bool removeMusic = false;
@@ -378,13 +420,37 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  void openPlayer(DownloadItem item) {
+  void openPlayer(
+    DownloadItem item, {
+    List<DownloadItem>? galleryItems,
+    List<DownloadItem>? queueItems,
+  }) {
     playerItem = item;
+    playerGalleryItems = galleryItems;
+    _audioQueueSource = queueItems;
     notifyListeners();
+  }
+
+  void openPlayerById(String downloadId) {
+    for (final item in _downloads) {
+      if (item.id == downloadId) {
+        if (item.isImage) {
+          setTab(DuckTab.images);
+        } else if (item.isVideo) {
+          setTab(DuckTab.videos);
+        } else if (item.isAudio) {
+          setTab(DuckTab.audios);
+        }
+        openPlayer(item);
+        return;
+      }
+    }
   }
 
   void closePlayer() {
     playerItem = null;
+    playerGalleryItems = null;
+    _audioQueueSource = null;
     notifyListeners();
   }
 
@@ -501,7 +567,7 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<void> _playQuack() async {
     try {
-      await _quackPlayer.setAsset('quack_duck_sound.mp3');
+      await _quackPlayer.setAsset(DuckAssets.quackTap);
       await _quackPlayer.play();
     } catch (_) {}
   }
@@ -742,6 +808,7 @@ class DuckDownloadsController extends ChangeNotifier
                           : next.isVideo
                           ? 'Video'
                           : 'Audio',
+                      downloadId: next.id,
                     ),
                   );
                 } catch (error) {
@@ -925,25 +992,186 @@ class DuckDownloadsController extends ChangeNotifier
         : '${item.title}.$ext';
   }
 
-  Future<void> playItem(DownloadItem item) async {
+  Future<void> markAudioBackgroundReady() async {
+    if (audioBackgroundReady) return;
+    audioBackgroundReady = true;
+    if (_audioBackgroundCompleter != null && !_audioBackgroundCompleter!.isCompleted) {
+      _audioBackgroundCompleter!.complete();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _ensureAudioBackgroundReady() async {
+    if (audioBackgroundReady) return;
+    _audioBackgroundCompleter ??= Completer<void>();
+    try {
+      await _audioBackgroundCompleter!.future.timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+
+  Uri? _artUriFor(DownloadItem item) {
+    final thumb = item.thumbnail;
+    if (thumb == null || thumb.isEmpty) return null;
+    if (thumb.startsWith('http://') || thumb.startsWith('https://')) {
+      return Uri.tryParse(thumb);
+    }
+    return null;
+  }
+
+  Future<void> playItem(DownloadItem item, {bool advanceQueue = false}) async {
     if (item.filePath == null) return;
     if (item.isAudio) {
+      if (!advanceQueue) {
+        _buildAudioQueue(item);
+      }
       await audioPlayer.stop();
       playingItem = item;
       notifyListeners();
       try {
-        await audioPlayer.setFilePath(item.filePath!);
+        await _ensureAudioBackgroundReady();
+        if (audioBackgroundReady) {
+          await audioPlayer.setAudioSource(
+            AudioSource.file(
+              item.filePath!,
+              tag: MediaItem(
+                id: item.id,
+                title: item.title,
+                artist: item.artist ?? item.platform,
+                album: item.album,
+                artUri: _artUriFor(item),
+              ),
+            ),
+          );
+        } else {
+          await audioPlayer.setFilePath(item.filePath!);
+        }
+        await audioPlayer.setLoopMode(_loopMode);
         await audioPlayer.play();
       } catch (e) {
-        playingItem = null;
-        status = 'Failed to play audio: $e';
-        notifyListeners();
+        try {
+          await audioPlayer.setFilePath(item.filePath!);
+          await audioPlayer.play();
+        } catch (fallbackError) {
+          playingItem = null;
+          status = 'Failed to play audio: $fallbackError';
+          notifyListeners();
+        }
       }
     } else {
       await audioPlayer.stop();
       playingItem = null;
       openPlayer(item);
     }
+  }
+
+  void _buildAudioQueue(DownloadItem item, {bool forceReshuffle = false}) {
+    final source = _audioQueueSource ?? audios;
+    final sourceKey = source.map((entry) => entry.id).join('|');
+    final sourceChanged = sourceKey != _lastQueueSourceKey;
+    _lastQueueSourceKey = sourceKey;
+
+    _audioQueue =
+        source.where((entry) => entry.filePath != null && entry.isAudio).toList();
+    _audioQueueIndex = _audioQueue.indexWhere((entry) => entry.id == item.id);
+    if (_audioQueueIndex < 0) {
+      _audioQueue = [item];
+      _audioQueueIndex = 0;
+    }
+
+    if (shuffleEnabled && _audioQueue.length > 1) {
+      if (forceReshuffle || (sourceChanged && !_queueShuffled)) {
+        final current = _audioQueue.removeAt(_audioQueueIndex);
+        _audioQueue.shuffle();
+        _audioQueue.insert(0, current);
+        _audioQueueIndex = 0;
+        _queueShuffled = true;
+      }
+    } else {
+      _queueShuffled = false;
+    }
+  }
+
+  Future<void> playNext() async {
+    if (!hasNextTrack || _audioQueue.isEmpty) return;
+    if (_audioQueueIndex < _audioQueue.length - 1) {
+      _audioQueueIndex++;
+    } else if (_loopMode == LoopMode.all) {
+      _audioQueueIndex = 0;
+    } else {
+      return;
+    }
+    await playItem(_audioQueue[_audioQueueIndex], advanceQueue: true);
+  }
+
+  Future<void> playPrevious() async {
+    if (_audioQueue.isEmpty) return;
+    if (audioPlayer.position.inSeconds > 3) {
+      await audioPlayer.seek(Duration.zero);
+      notifyListeners();
+      return;
+    }
+    if (!hasPreviousTrack) return;
+    if (_audioQueueIndex > 0) {
+      _audioQueueIndex--;
+    } else if (_loopMode == LoopMode.all) {
+      _audioQueueIndex = _audioQueue.length - 1;
+    } else {
+      return;
+    }
+    await playItem(_audioQueue[_audioQueueIndex], advanceQueue: true);
+  }
+
+  Future<void> toggleShuffle() async {
+    shuffleEnabled = !shuffleEnabled;
+    if (playingItem != null) {
+      _buildAudioQueue(playingItem!, forceReshuffle: shuffleEnabled);
+    }
+    notifyListeners();
+  }
+
+  Future<void> toggleLoopMode() async {
+    _loopMode = switch (_loopMode) {
+      LoopMode.off => LoopMode.all,
+      LoopMode.all => LoopMode.one,
+      LoopMode.one => LoopMode.off,
+    };
+    await audioPlayer.setLoopMode(_loopMode);
+    notifyListeners();
+  }
+
+  Duration videoResumePosition(String id) {
+    final ms = _videoResumePositions[id];
+    if (ms == null || ms <= 0) return Duration.zero;
+    return Duration(milliseconds: ms);
+  }
+
+  void saveVideoResumePosition(String id, Duration position) {
+    final ms = position.inMilliseconds;
+    if (ms <= 0) return;
+    final previous = _videoResumePositions[id];
+    if (previous != null && (ms - previous).abs() < 3000) return;
+    _videoResumePositions[id] = ms;
+    unawaited(_store.writeVideoResumePosition(id, ms));
+  }
+
+  Future<void> _requestPermissionsSafely() async {
+    try {
+      await _permissions.requestAllRequiredPermissions();
+    } catch (error) {
+      debugPrint('Permission request failed: $error');
+    }
+  }
+
+  Future<void> _configureAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+    } catch (_) {}
+  }
+
+  void _handleNotificationTap(String? payload) {
+    if (payload == null || payload.isEmpty) return;
+    openPlayerById(payload);
   }
 
   void playAudio() {
@@ -1077,6 +1305,7 @@ class DuckDownloadsController extends ChangeNotifier
     premium.removeListener(_premiumChanged);
     _playerStateSubscription.cancel();
     _playerPositionSubscription.cancel();
+    audioPlayer.dispose();
     _quackPlayer.dispose();
     super.dispose();
   }
@@ -1088,6 +1317,12 @@ class DuckDownloadsController extends ChangeNotifier
       if (url != null && _isPublicMediaCandidate(url)) {
         if (url != _lastDetectedUrl) {
           detectedClipboardUrl = url;
+          unawaited(
+            _notifications.showClipboardDetected(
+              id: url.hashCode,
+              url: url,
+            ),
+          );
           notifyListeners();
         }
       }
@@ -1335,38 +1570,40 @@ class DuckDownloadsController extends ChangeNotifier
     DownloadItem item, {
     required double startTime,
     required double endTime,
+    Duration? totalDuration,
   }) async {
     if (busy) return;
+    final filePath = item.filePath;
+    if (filePath == null) {
+      throw TrimValidationException('File is not available locally.');
+    }
+
+    TrimService.validateRange(
+      startSec: startTime,
+      endSec: endTime,
+      totalDuration: totalDuration ?? Duration(seconds: endTime.ceil()),
+    );
+
     busy = true;
     status = 'Trimming file...';
     notifyListeners();
 
+    String? trimmedTempPath;
     try {
-      final res = await _api.trim(
-        downloadId: item.id,
-        startTime: startTime,
-        endTime: endTime,
-      );
-
-      if (item.filePath != null) {
-        final oldFile = File(item.filePath!);
-        if (await oldFile.exists()) {
-          await oldFile.delete();
-        }
-      }
-
-      final fileUrl = res['fileUrl'] as String;
-      final filename = res['filename'] as String;
-      final downloadUrl = _api.absoluteFileUrl(fileUrl);
-
-      final newPath = await _files.downloadRemoteFile(
-        url: downloadUrl,
-        filename: filename,
+      trimmedTempPath = await _trimService.trimLocalFile(
+        inputPath: filePath,
+        startSec: startTime,
+        endSec: endTime,
         type: item.type,
       );
 
+      final finalPath = await _trimService.replaceOriginal(
+        originalPath: filePath,
+        trimmedPath: trimmedTempPath,
+      );
+
       final next = item.copyWith(
-        filePath: newPath,
+        filePath: finalPath,
         quality: item.quality != null ? '${item.quality} (trimmed)' : 'trimmed',
       );
       await _saveItem(next);
@@ -1374,9 +1611,23 @@ class DuckDownloadsController extends ChangeNotifier
       if (playerItem?.id == item.id) {
         playerItem = next;
       }
+      if (playingItem?.id == item.id) {
+        playingItem = next;
+        if (item.isAudio) {
+          await playItem(next, advanceQueue: true);
+        }
+      }
       status = 'Trimming complete';
     } catch (error) {
-      status = _cleanError(error);
+      if (trimmedTempPath != null) {
+        final temp = File(trimmedTempPath);
+        if (await temp.exists()) {
+          await temp.delete();
+        }
+      }
+      status = error is TrimValidationException
+          ? error.message
+          : _cleanError(error);
       rethrow;
     } finally {
       busy = false;

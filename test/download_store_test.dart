@@ -28,4 +28,14 @@ void main() {
     await store.writeAutoSaveVideos(false);
     expect(store.readAutoSaveVideos(), isFalse);
   });
+
+  test('video resume positions persist in hive', () async {
+    final box = await Hive.openBox('download-store-resume-test');
+    addTearDown(box.close);
+    await box.clear();
+
+    final store = DownloadStore(box);
+    await store.writeVideoResumePosition('vid-1', 45000);
+    expect(store.readVideoResumePositions()['vid-1'], 45000);
+  });
 }

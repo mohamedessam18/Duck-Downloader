@@ -84,6 +84,7 @@ void main() {
             store: DownloadStore(box),
             premiumManager: _premiumManager(box),
             initializePremium: false,
+            initializePlatformServices: false,
           )
           ..flow = DuckFlow.ready
           ..status = 'Choose video or audio'
@@ -161,6 +162,7 @@ void main() {
       store: DownloadStore(box),
       premiumManager: _premiumManager(box),
       initializePremium: false,
+      initializePlatformServices: false,
     );
     addTearDown(controller.dispose);
 
@@ -192,6 +194,7 @@ void main() {
       store: DownloadStore(box),
       premiumManager: _premiumManager(box),
       initializePremium: false,
+      initializePlatformServices: false,
     );
     addTearDown(controller.dispose);
 
@@ -228,6 +231,7 @@ void main() {
       store: DownloadStore(box),
       premiumManager: _premiumManager(box),
       initializePremium: false,
+      initializePlatformServices: false,
     );
     addTearDown(controller.dispose);
 
@@ -258,6 +262,7 @@ void main() {
       store: DownloadStore(box),
       premiumManager: _premiumManager(box),
       initializePremium: false,
+      initializePlatformServices: false,
     );
     addTearDown(controller.dispose);
 

@@ -3,15 +3,19 @@ import 'dart:math';
 import 'dart:ui';
 import 'dart:async';
 
-import 'package:flutter/services.dart';
+
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
-import 'package:video_player/video_player.dart';
 
 import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/premium_entitlement.dart';
 import '../state/downloads_controller.dart';
+import '../widgets/ambient_background.dart';
+import '../widgets/animated_duck.dart';
+import '../widgets/glass_panel.dart';
+import '../widgets/media/media_overlay_router.dart';
+import '../widgets/media/media_thumb.dart';
+import '../widgets/media/mini_player.dart';
 import 'locked_social_browser_screen.dart';
 
 bool get _isLight => PlatformDispatcher.instance.platformBrightness == Brightness.light;
@@ -102,25 +106,15 @@ class DuckAppScreen extends StatelessWidget {
             body: Stack(
               children: [
                 Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: _dark,
-                      gradient: RadialGradient(
-                        center: Alignment(0, -0.18),
-                        radius: .78,
-                        colors: [Color(0x241F1A05), _dark],
-                      ),
+                  child: AmbientBackground(
+                    padding: EdgeInsets.only(
+                      top: MediaQuery.paddingOf(context).top,
+                      bottom: controller.playingItem != null &&
+                              controller.playerItem == null
+                          ? 80
+                          : 0,
                     ),
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        top: MediaQuery.paddingOf(context).top,
-                        bottom: controller.playingItem != null &&
-                                controller.playerItem == null
-                            ? 80
-                            : 0,
-                      ),
-                      child: _bodyForTab(context),
-                    ),
+                    child: _bodyForTab(context),
                   ),
                 ),
                 if (controller.playingItem != null &&
@@ -129,7 +123,7 @@ class DuckAppScreen extends StatelessWidget {
                     bottom: 16 + MediaQuery.paddingOf(context).bottom,
                     left: 16,
                     right: 16,
-                    child: _MiniPlayer(controller: controller),
+                    child: MiniPlayer(controller: controller),
                   ),
                 if (controller.detectedClipboardUrl != null)
                   _ClipboardDetectorOverlay(
@@ -138,15 +132,7 @@ class DuckAppScreen extends StatelessWidget {
                     onAccept: controller.acceptClipboardDetection,
                   ),
                 if (controller.playerItem != null)
-                  (controller.playerItem!.isImage
-                      ? _ImageViewerOverlay(
-                          item: controller.playerItem!,
-                          controller: controller,
-                        )
-                      : _PlayerOverlay(
-                          item: controller.playerItem!,
-                          controller: controller,
-                        )),
+                  MediaOverlayRouter(controller: controller),
               ],
             ),
           ),
@@ -215,7 +201,7 @@ class _HomeView extends StatelessWidget {
                 SizedBox(height: (showQueue ? 8 : 12) * scale),
                 _Brand(compact: showQueue, scale: scale),
                 SizedBox(height: (showQueue ? 16 : 26) * scale),
-                _DuckButton(
+                AnimatedDuck(
                   flow: controller.flow,
                   compact: showQueue,
                   scale: scale,
@@ -252,38 +238,55 @@ class _HomeView extends StatelessWidget {
         ),
         Align(
           alignment: Alignment.bottomCenter,
-          child: Container(
+          child: Padding(
             padding: EdgeInsets.only(
-              bottom: 16 + MediaQuery.paddingOf(context).bottom,
-              top: 16,
+              bottom: 12 + MediaQuery.paddingOf(context).bottom,
+              left: 20,
+              right: 20,
             ),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  _dark.withValues(alpha: 0.0),
-                  _dark.withValues(alpha: 0.8),
-                  _dark,
-                ],
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: _isLight
+                        ? Colors.white.withValues(alpha: 0.82)
+                        : Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: _gold.withValues(alpha: _isLight ? 0.12 : 0.16),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        blurRadius: 24,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _LibraryButton(
+                          label: 'IMAGES',
+                          onTap: () => controller.setTab(DuckTab.images),
+                        ),
+                        _LibraryButton(
+                          label: 'VIDEOS',
+                          onTap: () => controller.setTab(DuckTab.videos),
+                        ),
+                        _LibraryButton(
+                          label: 'AUDIOS',
+                          onTap: () => controller.setTab(DuckTab.audios),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _LibraryButton(
-                  label: 'IMAGES',
-                  onTap: () => controller.setTab(DuckTab.images),
-                ),
-                _LibraryButton(
-                  label: 'VIDEOS',
-                  onTap: () => controller.setTab(DuckTab.videos),
-                ),
-                _LibraryButton(
-                  label: 'AUDIOS',
-                  onTap: () => controller.setTab(DuckTab.audios),
-                ),
-              ],
             ),
           ),
         ),
@@ -302,22 +305,30 @@ class _Brand extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(
-          'DUCK DOWNLOADER',
-          style: TextStyle(
-            color: _text,
-            fontSize: (compact ? 22 : 26) * scale,
-            letterSpacing: 6,
-            fontWeight: FontWeight.w300,
+        ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) => LinearGradient(
+            colors: [_gold, _warmGold, _gold],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ).createShader(bounds),
+          child: Text(
+            'DUCK DOWNLOADER',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: (compact ? 22 : 26) * scale,
+              letterSpacing: 6,
+              fontWeight: FontWeight.w400,
+            ),
           ),
         ),
         const SizedBox(height: 6),
         Text(
           'DOWNLOADER',
           style: TextStyle(
-            color: const Color(0xFF8A8A8F),
+            color: _textMuted.withValues(alpha: 0.85),
             fontSize: (compact ? 10 : 12) * scale,
-            letterSpacing: 8,
+            letterSpacing: 9,
             fontWeight: FontWeight.w300,
           ),
         ),
@@ -802,75 +813,6 @@ class _SubscriptionButton extends StatelessWidget {
   }
 }
 
-class _DuckButton extends StatelessWidget {
-  const _DuckButton({
-    required this.flow,
-    required this.compact,
-    required this.scale,
-    required this.onTap,
-  });
-
-  final DuckFlow flow;
-  final bool compact;
-  final double scale;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Tap duck',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(180),
-        onTap: onTap,
-        child: SizedBox(
-          width: 360 * scale,
-          height: (compact ? 178 : 250) * scale,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Positioned(
-                bottom: (compact ? 20 : 30) * scale,
-                child: Container(
-                  width: (compact ? 230 : 300) * scale,
-                  height: (compact ? 72 : 92) * scale,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: _gold.withValues(alpha: .16),
-                      width: 2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _gold.withValues(alpha: .08),
-                        blurRadius: 40,
-                        spreadRadius: -12,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Image.asset(
-                _duckAsset(flow),
-                width: (compact ? 160 : 240) * scale,
-                fit: BoxFit.contain,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _duckAsset(DuckFlow flow) {
-    return switch (flow) {
-      DuckFlow.extracting || DuckFlow.downloading => 'duck_loading.png',
-      DuckFlow.success => 'duck_success.png',
-      DuckFlow.error => 'duck_error.png',
-      DuckFlow.idle || DuckFlow.ready => 'duck_idle.png',
-    };
-  }
-}
 
 class _StatusBar extends StatelessWidget {
   const _StatusBar({
@@ -979,7 +921,15 @@ class _StatusBar extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
-      child: child,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 280),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        child: KeyedSubtree(
+          key: ValueKey('$flow-$status-$progress'),
+          child: child,
+        ),
+      ),
     );
   }
 }
@@ -1715,6 +1665,9 @@ class _LibraryView extends StatefulWidget {
 
 class _LibraryViewState extends State<_LibraryView> {
   _LibrarySubTab _subTab = _LibrarySubTab.all;
+  bool _useGridLayout = true;
+
+  bool get _isImagesTab => widget.title == 'IMAGES';
 
   Widget _buildSubTabButton(_LibrarySubTab tab, String label) {
     final active = _subTab == tab;
@@ -1781,6 +1734,17 @@ class _LibraryViewState extends State<_LibraryView> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (_isImagesTab && _subTab != _LibrarySubTab.playlists)
+                    IconButton(
+                      icon: Icon(
+                        _useGridLayout ? Icons.view_list : Icons.grid_view,
+                        color: _gold,
+                        size: 24,
+                      ),
+                      tooltip: _useGridLayout ? 'List view' : 'Grid view',
+                      onPressed: () =>
+                          setState(() => _useGridLayout = !_useGridLayout),
+                    ),
                   IconButton(
                     icon: Icon(
                       Icons.lock_outline,
@@ -1837,11 +1801,61 @@ class _LibraryViewState extends State<_LibraryView> {
                       ),
                     ),
                   )
+                : _isImagesTab && _useGridLayout
+                ? GridView.builder(
+                    padding: const EdgeInsets.only(bottom: 28),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1,
+                    ),
+                    itemCount: filteredItems.length,
+                    itemBuilder: (context, index) {
+                      final item = filteredItems[index];
+                      return GestureDetector(
+                        onTap: () => widget.controller.openPlayer(
+                          item,
+                          galleryItems: filteredItems,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              MediaThumb(
+                                url: item.thumbnail,
+                                filePath: item.filePath,
+                                width: double.infinity,
+                                height: double.infinity,
+                                radius: 10,
+                              ),
+                              if (item.favorite)
+                                const Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: Icon(
+                                    Icons.favorite,
+                                    color: _danger,
+                                    size: 16,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  )
                 : ListView.separated(
                     padding: const EdgeInsets.only(bottom: 28),
                     itemBuilder: (context, index) => _DownloadRow(
                       item: filteredItems[index],
                       controller: widget.controller,
+                      galleryItems:
+                          _isImagesTab ? filteredItems : null,
+                      queueItems: widget.title == 'AUDIOS'
+                          ? filteredItems
+                          : null,
                     ),
                     separatorBuilder: (_, _) =>
                         Divider(height: 1, color: _divider),
@@ -1963,10 +1977,17 @@ class _LibraryViewState extends State<_LibraryView> {
 }
 
 class _DownloadRow extends StatelessWidget {
-  const _DownloadRow({required this.item, required this.controller});
+  const _DownloadRow({
+    required this.item,
+    required this.controller,
+    this.galleryItems,
+    this.queueItems,
+  });
 
   final DownloadItem item;
   final DuckDownloadsController controller;
+  final List<DownloadItem>? galleryItems;
+  final List<DownloadItem>? queueItems;
 
   String _getFileSize(DownloadItem item) {
     if (item.filePath == null) return '0.0 MB';
@@ -2026,7 +2047,7 @@ class _DownloadRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final sizeStr = _getFileSize(item);
     final subtitle = item.artist != null && item.artist!.trim().isNotEmpty
-        ? '${item.artist!} • $sizeStr'
+        ? '${item.artist!} â€¢ $sizeStr'
         : sizeStr;
     return SizedBox(
       height: 86,
@@ -2034,11 +2055,16 @@ class _DownloadRow extends StatelessWidget {
         children: [
           Expanded(
             child: InkWell(
-              onTap: () => controller.openPlayer(item),
+              onTap: () => controller.openPlayer(
+                item,
+                galleryItems: galleryItems,
+                queueItems: queueItems,
+              ),
               child: Row(
                 children: [
                   _Thumb(
                     url: item.thumbnail,
+                    filePath: item.filePath,
                     width: 58,
                     height: 66,
                     icon: item.isImage
@@ -2094,7 +2120,11 @@ class _DownloadRow extends StatelessWidget {
             onSelected: (value) {
               switch (value) {
                 case 'view':
-                  controller.openPlayer(item);
+                  controller.openPlayer(
+                    item,
+                    galleryItems: galleryItems,
+                    queueItems: queueItems,
+                  );
                 case 'share':
                   controller.shareDownload(item);
                 case 'rename':
@@ -2253,1515 +2283,6 @@ class _DownloadRow extends StatelessWidget {
 
 
 
-class _MiniPlayer extends StatelessWidget {
-  const _MiniPlayer({required this.controller});
-  final DuckDownloadsController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final item = controller.playingItem;
-    if (item == null) return const SizedBox.shrink();
-
-    final audio = controller.audioPlayer;
-    final playing = audio.playing;
-    final isCompleted = audio.processingState == ProcessingState.completed;
-
-    return GestureDetector(
-      onTap: () => controller.openPlayer(item),
-      child: Container(
-        height: 64,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E20),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: _Thumb(
-                url: item.thumbnail,
-                width: 48,
-                height: 48,
-                icon: Icons.music_note,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    item.artist ?? 'Audio file',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: _warmGold, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              icon: Icon(
-                isCompleted
-                    ? Icons.replay
-                    : playing
-                    ? Icons.pause
-                    : Icons.play_arrow,
-                color: Colors.white,
-                size: 24,
-              ),
-              onPressed: () {
-                if (isCompleted) {
-                  audio.seek(Duration.zero);
-                  audio.play();
-                } else {
-                  playing ? audio.pause() : audio.play();
-                }
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white70, size: 22),
-              onPressed: controller.stopAudio,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PlayerOverlay extends StatefulWidget {
-  const _PlayerOverlay({required this.item, required this.controller});
-
-  final DownloadItem item;
-  final DuckDownloadsController controller;
-
-  @override
-  State<_PlayerOverlay> createState() => _PlayerOverlayState();
-}
-
-class _PlayerOverlayState extends State<_PlayerOverlay> {
-  VideoPlayerController? _video;
-  String? _error;
-  BoxFit _videoFit = BoxFit.contain;
-  bool _muted = false;
-  double _speed = 1;
-  static const _channel = MethodChannel('duck_downloader/media');
-  bool _showControls = true;
-  Timer? _hideTimer;
-  bool _isInPiP = false;
-
-  // Double-tap seek overlays
-  bool _showLeftSeekIndicator = false;
-  bool _showRightSeekIndicator = false;
-  Timer? _leftSeekTimer;
-  Timer? _rightSeekTimer;
-
-  // Center play/pause overlays
-  bool _showCenterPlayIndicator = false;
-  bool _showCenterPauseIndicator = false;
-  Timer? _centerPlayPauseTimer;
-
-  // Aspect ratio fit toast overlay
-  String? _fitLabel;
-  Timer? _fitLabelTimer;
-
-  // Trimming fields
-  bool _isTrimmingMode = false;
-  double _trimStart = 0.0;
-  double _trimEnd = 1.0;
-  bool _isSavingTrim = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == 'pipModeChanged') {
-        final bool inPiP = call.arguments as bool;
-        setState(() {
-          _isInPiP = inPiP;
-          if (inPiP) {
-            _showControls = false;
-          } else {
-            _showControls = true;
-          }
-        });
-      }
-    });
-
-    final filePath = widget.item.filePath;
-    if (filePath == null) return;
-    if (widget.item.isVideo) {
-      _video = VideoPlayerController.file(File(filePath))
-        ..initialize()
-            .then((_) {
-              if (!mounted) return;
-              _video?.setPlaybackSpeed(_speed);
-              _video?.addListener(_videoListener);
-              setState(() {
-                _trimStart = 0.0;
-                _trimEnd = _video!.value.duration.inSeconds.toDouble();
-              });
-              _video?.play();
-              _startHideTimer();
-            })
-            .catchError((Object _) {
-              if (mounted) {
-                setState(() => _error = 'This file could not be played.');
-              }
-            });
-    } else {
-      // Audio is managed persistently in controller
-      if (widget.controller.playingItem?.id != widget.item.id) {
-        widget.controller.playItem(widget.item).then((_) {
-          if (!mounted) return;
-          setState(() {
-            _trimStart = 0.0;
-            _trimEnd = (widget.controller.audioPlayer.duration ?? Duration.zero)
-                .inSeconds
-                .toDouble();
-          });
-        });
-      } else {
-        _trimStart = 0.0;
-        _trimEnd = (widget.controller.audioPlayer.duration ?? Duration.zero)
-            .inSeconds
-            .toDouble();
-      }
-    }
-  }
-
-  void _videoListener() {
-    final video = _video;
-    if (video == null) return;
-    final isPlaying = video.value.isPlaying;
-    _channel.invokeMethod('setVideoPlaying', {'playing': isPlaying});
-  }
-
-  void _startHideTimer() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _video?.value.isPlaying == true) {
-        setState(() => _showControls = false);
-      }
-    });
-  }
-
-  void _resetHideTimer() {
-    if (_showControls) {
-      _startHideTimer();
-    }
-  }
-
-  void _toggleControls() {
-    if (_isInPiP) return;
-    setState(() {
-      _showControls = !_showControls;
-      if (_showControls) {
-        _startHideTimer();
-      } else {
-        _hideTimer?.cancel();
-      }
-    });
-  }
-
-  Future<void> _enterPiP() async {
-    try {
-      await _channel.invokeMethod('enterPiP');
-    } catch (e) {
-      debugPrint("Failed to enter PiP mode: $e");
-    }
-  }
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    _leftSeekTimer?.cancel();
-    _rightSeekTimer?.cancel();
-    _centerPlayPauseTimer?.cancel();
-    _fitLabelTimer?.cancel();
-    _video?.removeListener(_videoListener);
-    _channel.invokeMethod('setVideoPlaying', {'playing': false});
-    _channel.setMethodCallHandler(null);
-    _video?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_error != null) {
-      return Positioned.fill(
-        child: Container(
-          color: Colors.black.withValues(alpha: .9),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _PlayerHeader(
-                    item: widget.item,
-                    onClose: widget.controller.closePlayer,
-                  ),
-                  const SizedBox(height: 12),
-                  _PlayerError(
-                    message: _error!,
-                    onDelete: () =>
-                        widget.controller.deleteDownload(widget.item),
-                    onDismiss: () => setState(() => _error = null),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (widget.item.filePath == null) {
-      return Positioned.fill(
-        child: Container(
-          color: Colors.black.withValues(alpha: .9),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _PlayerHeader(
-                    item: widget.item,
-                    onClose: widget.controller.closePlayer,
-                  ),
-                  const SizedBox(height: 12),
-                  const Expanded(
-                    child: Center(
-                      child: Text(
-                        'File is not available locally.',
-                        style: TextStyle(color: Color(0xFFD9D9D9)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (widget.item.isVideo) {
-      return _buildFullscreenVideoPlayer();
-    } else {
-      return _buildAudioPlayerLayout();
-    }
-  }
-
-  Widget _buildFullscreenVideoPlayer() {
-    final video = _video;
-    if (video == null || !video.value.isInitialized) {
-      return Positioned.fill(
-        child: Container(
-          color: Colors.black,
-          child: Center(child: CircularProgressIndicator(color: _gold)),
-        ),
-      );
-    }
-
-    final value = video.value;
-    final isCompleted =
-        value.isInitialized &&
-        value.duration > Duration.zero &&
-        value.position >= value.duration;
-
-    if (_isInPiP) {
-      return Positioned.fill(
-        child: Container(
-          color: Colors.black,
-          child: Center(
-            child: FittedBox(
-              fit: BoxFit.contain,
-              child: SizedBox(
-                width: value.size.width,
-                height: value.size.height,
-                child: VideoPlayer(video),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleControls,
-                onDoubleTapDown: (details) {
-                  final screenWidth = MediaQuery.sizeOf(context).width;
-                  final tapX = details.globalPosition.dx;
-                  _resetHideTimer();
-                  if (tapX < screenWidth / 2) {
-                    _seekVideo(const Duration(seconds: -10));
-                    _triggerLeftSeek();
-                  } else {
-                    _seekVideo(const Duration(seconds: 10));
-                    _triggerRightSeek();
-                  }
-                },
-                behavior: HitTestBehavior.opaque,
-                child: Center(
-                  child: FittedBox(
-                    fit: _videoFit,
-                    child: SizedBox(
-                      width: value.size.width,
-                      height: value.size.height,
-                      child: VideoPlayer(video),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (_showLeftSeekIndicator)
-              Positioned(
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: MediaQuery.sizeOf(context).width / 2,
-                child: Center(
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0.0, end: 1.0),
-                    duration: const Duration(milliseconds: 600),
-                    builder: (context, value, child) {
-                      return Opacity(
-                        opacity: (1.0 - value).clamp(0.0, 1.0),
-                        child: Transform.scale(
-                          scale: 0.8 + 0.4 * value,
-                          child: child,
-                        ),
-                      );
-                    },
-                    child: Container(
-                      width: 70,
-                      height: 70,
-                      decoration: const BoxDecoration(
-                        color: Colors.black45,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.fast_rewind, color: Colors.white, size: 30),
-                          SizedBox(height: 4),
-                          Text(
-                            '-10s',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_showRightSeekIndicator)
-              Positioned(
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: MediaQuery.sizeOf(context).width / 2,
-                child: Center(
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0.0, end: 1.0),
-                    duration: const Duration(milliseconds: 600),
-                    builder: (context, value, child) {
-                      return Opacity(
-                        opacity: (1.0 - value).clamp(0.0, 1.0),
-                        child: Transform.scale(
-                          scale: 0.8 + 0.4 * value,
-                          child: child,
-                        ),
-                      );
-                    },
-                    child: Container(
-                      width: 70,
-                      height: 70,
-                      decoration: const BoxDecoration(
-                        color: Colors.black45,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.fast_forward, color: Colors.white, size: 30),
-                          SizedBox(height: 4),
-                          Text(
-                            '+10s',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_fitLabel != null)
-              Positioned.fill(
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _fitLabel!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            _buildCenterPlayPauseIndicator(),
-            AnimatedOpacity(
-              opacity: _showControls ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 250),
-              child: IgnorePointer(
-                ignoring: !_showControls,
-                child: Stack(
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: ClipRRect(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                          child: Container(
-                            height: 90,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.25),
-                            ),
-                            child: SafeArea(
-                              bottom: false,
-                              child: Row(
-                                children: [
-                                  IconButton(
-                                    onPressed: widget.controller.closePlayer,
-                                    icon: Icon(
-                                      Icons.keyboard_return,
-                                      color: _warmGold,
-                                      size: 30,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      widget.item.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Picture in Picture',
-                                    onPressed: _enterPiP,
-                                    icon: const Icon(
-                                      Icons.picture_in_picture_alt,
-                                      color: Colors.white,
-                                      size: 28,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (!_isTrimmingMode)
-                      Center(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            IconButton(
-                              icon: const Icon(
-                                Icons.replay_10,
-                                size: 48,
-                                color: Colors.white,
-                              ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                _seekVideo(const Duration(seconds: -10));
-                              },
-                            ),
-                            IconButton(
-                              style: IconButton.styleFrom(
-                                backgroundColor: Colors.black38,
-                                fixedSize: const Size(70, 70),
-                              ),
-                              icon: Icon(
-                                isCompleted
-                                    ? Icons.replay
-                                    : value.isPlaying
-                                    ? Icons.pause
-                                    : Icons.play_arrow,
-                                size: 44,
-                                color: Colors.white,
-                              ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                if (isCompleted) {
-                                  video.seekTo(Duration.zero);
-                                  video.play();
-                                  _triggerPlayPauseOverlay(true);
-                                } else {
-                                  if (value.isPlaying) {
-                                    video.pause();
-                                    _triggerPlayPauseOverlay(false);
-                                  } else {
-                                    video.play();
-                                    _triggerPlayPauseOverlay(true);
-                                  }
-                                }
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.forward_10,
-                                size: 48,
-                                color: Colors.white,
-                              ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                _seekVideo(const Duration(seconds: 10));
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: ClipRRect(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.25),
-                            ),
-                            child: SafeArea(
-                              top: false,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_isTrimmingMode) ...[
-                                    _buildTrimmingSlider(value.duration),
-                                  ] else ...[
-                                    ValueListenableBuilder<VideoPlayerValue>(
-                                      valueListenable: video,
-                                      builder: (context, val, child) {
-                                        return _MediaSlider(
-                                          position: val.position,
-                                          duration: val.duration,
-                                          onChanged: (pos) {
-                                            _resetHideTimer();
-                                            video.seekTo(pos);
-                                          },
-                                        );
-                                      },
-                                    ),
-                                  ],
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  if (!_isTrimmingMode) ...[
-                                    Row(
-                                      children: [
-                                        IconButton(
-                                          icon: Icon(
-                                            _muted
-                                                ? Icons.volume_off
-                                                : Icons.volume_up,
-                                            color: Colors.white,
-                                          ),
-                                          onPressed: () {
-                                            _resetHideTimer();
-                                            _toggleMute();
-                                          },
-                                        ),
-                                        IconButton(
-                                          icon: Icon(
-                                            _videoFit == BoxFit.contain
-                                                ? Icons.fit_screen
-                                                : Icons.crop_free,
-                                            color: Colors.white,
-                                          ),
-                                          onPressed: () {
-                                            _resetHideTimer();
-                                            _toggleFit();
-                                          },
-                                        ),
-                                        const SizedBox(width: 8),
-                                        PopupMenuButton<double>(
-                                          tooltip: 'Speed',
-                                          color: const Color(0xFF202124),
-                                          onSelected: (spd) {
-                                            _resetHideTimer();
-                                            _setSpeed(spd);
-                                          },
-                                          itemBuilder: (context) => const [
-                                            PopupMenuItem(
-                                              value: .75,
-                                              child: Text('0.75x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 1,
-                                              child: Text('1x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 1.25,
-                                              child: Text('1.25x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 1.5,
-                                              child: Text('1.5x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 2,
-                                              child: Text('2x'),
-                                            ),
-                                          ],
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.08,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Text(
-                                              '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                              style: TextStyle(
-                                                color: _gold,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        IconButton(
-                                          tooltip: 'Trim video',
-                                          icon: const Icon(
-                                            Icons.content_cut,
-                                            color: Colors.white,
-                                          ),
-                                          onPressed: () {
-                                            setState(() {
-                                              _isTrimmingMode = true;
-                                              _trimStart = 0.0;
-                                              _trimEnd = value
-                                                  .duration
-                                                  .inSeconds
-                                                  .toDouble();
-                                            });
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.white,
-                                      ),
-                                      onPressed: () {
-                                        widget.controller.closePlayer();
-                                        widget.controller.deleteDownload(
-                                          widget.item,
-                                        );
-                                      },
-                                    ),
-                                  ] else ...[
-                                    Row(
-                                      children: [
-                                        TextButton(
-                                          onPressed: () => setState(
-                                            () => _isTrimmingMode = false,
-                                          ),
-                                          child: const Text(
-                                            'Cancel',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        _isSavingTrim
-                                            ? SizedBox(
-                                                width: 20,
-                                                height: 20,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                      color: _gold,
-                                                      strokeWidth: 2,
-                                                    ),
-                                              )
-                                            : TextButton(
-                                                onPressed: _performTrim,
-                                                child: Text(
-                                                  'Save Trim',
-                                                  style: TextStyle(
-                                                    color: _gold,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                      ],
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    ),
-  ),
-);
-  }
-
-  Widget _buildAudioPlayerLayout() {
-    final audio = widget.controller.audioPlayer;
-    final duration = audio.duration ?? Duration.zero;
-    final position = audio.position;
-    final playing = audio.playing;
-    final isCompleted = audio.processingState == ProcessingState.completed;
-
-    if (_isInPiP) {
-      return const SizedBox.shrink();
-    }
-
-    final screenHeight = MediaQuery.sizeOf(context).height;
-    final scale = (screenHeight / 820).clamp(0.45, 1.0);
-    final diskSize = 220.0 * scale;
-    final spacingSize = 32.0 * scale;
-
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleControls,
-                behavior: HitTestBehavior.opaque,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: diskSize,
-                        height: diskSize,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: _gold.withValues(alpha: 0.15),
-                              blurRadius: 40 * scale,
-                              spreadRadius: 8 * scale,
-                            ),
-                          ],
-                        ),
-                        child: ClipOval(
-                          child: _Thumb(
-                            url: widget.item.thumbnail,
-                            width: diskSize,
-                            height: diskSize,
-                            icon: Icons.music_note,
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: spacingSize),
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 40 * scale),
-                        child: Text(
-                          widget.item.title,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20 * scale,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                      if (widget.item.artist != null &&
-                          widget.item.artist!.isNotEmpty) ...[
-                        SizedBox(height: 8 * scale),
-                        Text(
-                          widget.item.artist!,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: _warmGold,
-                            fontSize: 15 * scale,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            AnimatedOpacity(
-              opacity: _showControls ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 250),
-              child: IgnorePointer(
-                ignoring: !_showControls,
-                child: Stack(
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        height: 90,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.black54, Colors.transparent],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                        child: SafeArea(
-                          bottom: false,
-                          child: Row(
-                            children: [
-                              IconButton(
-                                onPressed: widget.controller.closePlayer,
-                                icon: Icon(
-                                  Icons.keyboard_return,
-                                  color: _warmGold,
-                                  size: 30,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Expanded(
-                                child: Text(
-                                  'NOW PLAYING',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 2,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (!_isTrimmingMode)
-                      Center(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            IconButton(
-                              icon: const Icon(
-                                Icons.replay_10,
-                                size: 48,
-                                color: Colors.white,
-                              ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                _seekAudio(const Duration(seconds: -10));
-                              },
-                            ),
-                            IconButton(
-                              style: IconButton.styleFrom(
-                                backgroundColor: Colors.black38,
-                                fixedSize: const Size(70, 70),
-                              ),
-                              icon: Icon(
-                                isCompleted
-                                    ? Icons.replay
-                                    : playing
-                                    ? Icons.pause
-                                    : Icons.play_arrow,
-                                size: 44,
-                                color: Colors.white,
-                              ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                if (isCompleted) {
-                                  audio.seek(Duration.zero);
-                                  audio.play();
-                                } else {
-                                  playing ? audio.pause() : audio.play();
-                                }
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.forward_10,
-                                size: 48,
-                                color: Colors.white,
-                              ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                _seekAudio(const Duration(seconds: 10));
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.8),
-                            ],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                        child: SafeArea(
-                          top: false,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_isTrimmingMode) ...[
-                                _buildTrimmingSlider(duration),
-                              ] else ...[
-                                _MediaSlider(
-                                  position: position,
-                                  duration: duration,
-                                  onChanged: (pos) {
-                                    _resetHideTimer();
-                                    audio.seek(pos);
-                                  },
-                                ),
-                              ],
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  if (!_isTrimmingMode) ...[
-                                    Row(
-                                      children: [
-                                        PopupMenuButton<double>(
-                                          tooltip: 'Speed',
-                                          color: const Color(0xFF202124),
-                                          onSelected: (spd) {
-                                            _resetHideTimer();
-                                            _setSpeed(spd);
-                                          },
-                                          itemBuilder: (context) => const [
-                                            PopupMenuItem(
-                                              value: .75,
-                                              child: Text('0.75x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 1,
-                                              child: Text('1x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 1.25,
-                                              child: Text('1.25x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 1.5,
-                                              child: Text('1.5x'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 2,
-                                              child: Text('2x'),
-                                            ),
-                                          ],
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.08,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Text(
-                                              '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                              style: TextStyle(
-                                                color: _gold,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        IconButton(
-                                          tooltip: 'Trim audio',
-                                          icon: const Icon(
-                                            Icons.content_cut,
-                                            color: Colors.white,
-                                          ),
-                                          onPressed: () {
-                                            setState(() {
-                                              _isTrimmingMode = true;
-                                              _trimStart = 0.0;
-                                              _trimEnd = duration.inSeconds
-                                                  .toDouble();
-                                            });
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.white,
-                                      ),
-                                      onPressed: () {
-                                        widget.controller.closePlayer();
-                                        widget.controller.deleteDownload(
-                                          widget.item,
-                                        );
-                                      },
-                                    ),
-                                  ] else ...[
-                                    Row(
-                                      children: [
-                                        TextButton(
-                                          onPressed: () => setState(
-                                            () => _isTrimmingMode = false,
-                                          ),
-                                          child: const Text(
-                                            'Cancel',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        _isSavingTrim
-                                            ? SizedBox(
-                                                width: 20,
-                                                height: 20,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                      color: _gold,
-                                                      strokeWidth: 2,
-                                                    ),
-                                              )
-                                            : TextButton(
-                                                onPressed: _performTrim,
-                                                child: Text(
-                                                  'Save Trim',
-                                                  style: TextStyle(
-                                                    color: _gold,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                      ],
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTrimmingSlider(Duration duration) {
-    final maxSec = duration.inSeconds.toDouble();
-    final validMax = maxSec > 0 ? maxSec : 1.0;
-    final currentStart = _trimStart.clamp(0.0, validMax);
-    final currentEnd = _trimEnd.clamp(currentStart, validMax);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        RangeSlider(
-          values: RangeValues(currentStart, currentEnd),
-          min: 0,
-          max: validMax,
-          activeColor: _gold,
-          inactiveColor: Colors.white24,
-          onChanged: (RangeValues val) {
-            setState(() {
-              _trimStart = val.start;
-              _trimEnd = val.end;
-            });
-          },
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _formatDuration(Duration(seconds: currentStart.toInt())),
-                style: TextStyle(
-                  color: _gold,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                _formatDuration(Duration(seconds: currentEnd.toInt())),
-                style: TextStyle(
-                  color: _gold,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _performTrim() async {
-    setState(() => _isSavingTrim = true);
-    try {
-      await widget.controller.trimDownload(
-        widget.item,
-        startTime: _trimStart,
-        endTime: _trimEnd,
-      );
-      widget.controller.closePlayer();
-    } catch (e) {
-      setState(() {
-        _error = 'Trimming failed: $e';
-        _isSavingTrim = false;
-      });
-    }
-  }
-
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-    final hours = duration.inHours;
-    if (hours > 0) {
-      return '$hours:$minutes:$seconds';
-    }
-    return '$minutes:$seconds';
-  }
-
-  Future<void> _seekVideo(Duration delta) async {
-    final video = _video;
-    if (video == null) return;
-    final next = video.value.position + delta;
-    await video.seekTo(_clampDuration(next, video.value.duration));
-  }
-
-  Future<void> _seekAudio(Duration delta) async {
-    final audio = widget.controller.audioPlayer;
-    final next = audio.position + delta;
-    await audio.seek(_clampDuration(next, audio.duration ?? Duration.zero));
-  }
-
-  Duration _clampDuration(Duration value, Duration max) {
-    if (value < Duration.zero) return Duration.zero;
-    if (max > Duration.zero && value > max) return max;
-    return value;
-  }
-
-  Future<void> _toggleMute() async {
-    final video = _video;
-    if (video == null) return;
-    _muted = !_muted;
-    await video.setVolume(_muted ? 0 : 1);
-    setState(() {});
-  }
-
-  void _toggleFit() {
-    _fitLabelTimer?.cancel();
-    setState(() {
-      String label;
-      if (_videoFit == BoxFit.contain) {
-        _videoFit = BoxFit.cover;
-        label = "Zoom";
-      } else if (_videoFit == BoxFit.cover) {
-        _videoFit = BoxFit.fill;
-        label = "Stretch";
-      } else {
-        _videoFit = BoxFit.contain;
-        label = "Fit";
-      }
-      _fitLabel = label;
-    });
-    _fitLabelTimer = Timer(const Duration(milliseconds: 1000), () {
-      if (mounted) {
-        setState(() => _fitLabel = null);
-      }
-    });
-  }
-
-  void _triggerLeftSeek() {
-    _leftSeekTimer?.cancel();
-    setState(() {
-      _showLeftSeekIndicator = true;
-      _showRightSeekIndicator = false;
-    });
-    _leftSeekTimer = Timer(const Duration(milliseconds: 650), () {
-      if (mounted) {
-        setState(() => _showLeftSeekIndicator = false);
-      }
-    });
-  }
-
-  void _triggerRightSeek() {
-    _rightSeekTimer?.cancel();
-    setState(() {
-      _showLeftSeekIndicator = false;
-      _showRightSeekIndicator = true;
-    });
-    _rightSeekTimer = Timer(const Duration(milliseconds: 650), () {
-      if (mounted) {
-        setState(() => _showRightSeekIndicator = false);
-      }
-    });
-  }
-
-  void _triggerPlayPauseOverlay(bool isPlay) {
-    _centerPlayPauseTimer?.cancel();
-    setState(() {
-      if (isPlay) {
-        _showCenterPlayIndicator = true;
-        _showCenterPauseIndicator = false;
-      } else {
-        _showCenterPlayIndicator = false;
-        _showCenterPauseIndicator = true;
-      }
-    });
-    _centerPlayPauseTimer = Timer(const Duration(milliseconds: 600), () {
-      if (mounted) {
-        setState(() {
-          _showCenterPlayIndicator = false;
-          _showCenterPauseIndicator = false;
-        });
-      }
-    });
-  }
-
-  Widget _buildCenterPlayPauseIndicator() {
-    final showPlay = _showCenterPlayIndicator;
-    final showPause = _showCenterPauseIndicator;
-    if (!showPlay && !showPause) return const SizedBox.shrink();
-
-    return Positioned.fill(
-      child: Center(
-        child: TweenAnimationBuilder<double>(
-          key: ValueKey('${showPlay ? "play" : "pause"}_indicator'),
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 450),
-          builder: (context, value, child) {
-            return Opacity(
-              opacity: (1.0 - value).clamp(0.0, 1.0),
-              child: Transform.scale(
-                scale: 0.8 + 0.5 * value,
-                child: child,
-              ),
-            );
-          },
-          child: Container(
-            width: 70,
-            height: 70,
-            decoration: const BoxDecoration(
-              color: Colors.black45,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              showPlay ? Icons.play_arrow : Icons.pause,
-              color: Colors.white,
-              size: 40,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _setSpeed(double speed) async {
-    _speed = speed;
-    await _video?.setPlaybackSpeed(speed);
-    widget.controller.setAudioSpeed(speed);
-    setState(() {});
-  }
-}
-
-class _PlayerHeader extends StatelessWidget {
-  const _PlayerHeader({required this.item, required this.onClose});
-
-  final DownloadItem item;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        IconButton(
-          onPressed: onClose,
-          icon: Icon(Icons.keyboard_return, color: _warmGold, size: 34),
-        ),
-        Expanded(
-          child: Text(
-            item.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MediaSlider extends StatelessWidget {
-  const _MediaSlider({
-    required this.position,
-    required this.duration,
-    required this.onChanged,
-  });
-
-  final Duration position;
-  final Duration duration;
-  final ValueChanged<Duration> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final total = duration.inMilliseconds;
-    final current = total <= 0
-        ? 0.0
-        : position.inMilliseconds.clamp(0, total).toDouble();
-    return Column(
-      children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            trackHeight: 3.0,
-            activeTrackColor: _gold,
-            inactiveTrackColor: Colors.white24,
-            thumbColor: _gold,
-            thumbShape: const RoundSliderThumbShape(
-              enabledThumbRadius: 6.0,
-            ),
-            overlayColor: _gold.withValues(alpha: 0.12),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 18.0),
-          ),
-          child: Slider(
-            value: current,
-            min: 0,
-            max: total <= 0 ? 1 : total.toDouble(),
-            onChanged: total <= 0
-                ? null
-                : (value) => onChanged(Duration(milliseconds: value.round())),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(_formatDuration(position), style: _timeStyle),
-              Text(_formatDuration(duration), style: _timeStyle),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-final _timeStyle = TextStyle(
-  color: _muted,
-  fontSize: 12,
-  fontWeight: FontWeight.w700,
-);
 
 void _showPlaylistSelectionSheet(
   BuildContext context,
@@ -4096,14 +2617,14 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
       ['1', '2', '3'],
       ['4', '5', '6'],
       ['7', '8', '9'],
-      ['C', '0', 'Ã¢Å’Â«'],
+      ['C', '0', 'ÃƒÂ¢Ã…â€™Ã‚Â«'],
     ];
     return Column(
       children: keys.map((row) {
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: row.map((val) {
-            final isAction = val == 'C' || val == 'Ã¢Å’Â«';
+            final isAction = val == 'C' || val == 'ÃƒÂ¢Ã…â€™Ã‚Â«';
             return Container(
               width: 72,
               height: 72,
@@ -4115,7 +2636,7 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
                     onTap: () {
                       if (val == 'C') {
                         setState(() => _pin = '');
-                      } else if (val == 'Ã¢Å’Â«') {
+                      } else if (val == 'ÃƒÂ¢Ã…â€™Ã‚Â«') {
                         _onBackspace();
                       } else {
                         _onKeyPress(val);
@@ -4197,10 +2718,7 @@ class _SecureVaultView extends StatelessWidget {
             children: [
               mainContent,
               if (controller.playerItem != null)
-                _PlayerOverlay(
-                  item: controller.playerItem!,
-                  controller: controller,
-                ),
+                MediaOverlayRouter(controller: controller),
             ],
           );
         },
@@ -4229,6 +2747,7 @@ class _VaultItemTile extends StatelessWidget {
         children: [
           _Thumb(
             url: item.thumbnail,
+            filePath: item.filePath,
             width: 48,
             height: 48,
             icon: item.isAudio ? Icons.music_note : Icons.play_arrow,
@@ -4259,7 +2778,20 @@ class _VaultItemTile extends StatelessWidget {
           ),
           IconButton(
             icon: Icon(Icons.play_circle_outline, color: _gold),
-            onPressed: () => controller.openPlayer(item),
+            onPressed: () {
+              final vaultImages = controller.privateDownloads
+                  .where((entry) => entry.isImage)
+                  .toList();
+              controller.openPlayer(
+                item,
+                galleryItems: item.isImage ? vaultImages : null,
+                queueItems: item.isAudio
+                    ? controller.privateDownloads
+                        .where((entry) => entry.isAudio)
+                        .toList()
+                    : null,
+              );
+            },
           ),
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: _muted),
@@ -4356,11 +2888,20 @@ class _PlaylistItemsView extends StatelessWidget {
                     children: [
                       Expanded(
                         child: InkWell(
-                          onTap: () => controller.openPlayer(item),
+                          onTap: () => controller.openPlayer(
+                            item,
+                            galleryItems: type == DownloadType.image
+                                ? items
+                                : null,
+                            queueItems: type == DownloadType.audio
+                                ? items
+                                : null,
+                          ),
                           child: Row(
                             children: [
                               _Thumb(
                                 url: item.thumbnail,
+                                filePath: item.filePath,
                                 width: 58,
                                 height: 66,
                                 icon: item.isAudio
@@ -4425,10 +2966,7 @@ class _PlaylistItemsView extends StatelessWidget {
             children: [
               mainContent,
               if (controller.playerItem != null)
-                _PlayerOverlay(
-                  item: controller.playerItem!,
-                  controller: controller,
-                ),
+                MediaOverlayRouter(controller: controller),
             ],
           );
         },
@@ -4437,415 +2975,6 @@ class _PlaylistItemsView extends StatelessWidget {
   }
 }
 
-String _formatDuration(Duration duration) {
-  final totalSeconds = duration.inSeconds;
-  final hours = totalSeconds ~/ 3600;
-  final minutes = (totalSeconds % 3600) ~/ 60;
-  final seconds = totalSeconds % 60;
-  if (hours > 0) {
-    return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-  }
-  return '$minutes:${seconds.toString().padLeft(2, '0')}';
-}
-
-class _ImageViewerOverlay extends StatefulWidget {
-  const _ImageViewerOverlay({required this.item, required this.controller});
-
-  final DownloadItem item;
-  final DuckDownloadsController controller;
-
-  @override
-  State<_ImageViewerOverlay> createState() => _ImageViewerOverlayState();
-}
-
-class _ImageViewerOverlayState extends State<_ImageViewerOverlay> {
-  final TransformationController _transformController =
-      TransformationController();
-  String? _loadError;
-  bool _showControls = true;
-
-  @override
-  void dispose() {
-    _transformController.dispose();
-    super.dispose();
-  }
-
-  void _toggleControls() {
-    setState(() => _showControls = !_showControls);
-  }
-
-  void _resetZoom() {
-    _transformController.value = Matrix4.identity();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final filePath = widget.item.filePath;
-    final imageProvider = filePath != null
-        ? FileImage(File(filePath)) as ImageProvider
-        : widget.item.thumbnail != null
-        ? NetworkImage(widget.item.thumbnail!) as ImageProvider
-        : null;
-
-    if (imageProvider == null) {
-      return Positioned.fill(
-        child: Container(
-          color: Colors.black,
-          child: SafeArea(
-            child: Column(
-              children: [
-                _ImageViewerHeader(
-                  item: widget.item,
-                  onClose: widget.controller.closePlayer,
-                ),
-                const Expanded(
-                  child: Center(
-                    child: Text(
-                      'Image file is not available.',
-                      style: TextStyle(color: Color(0xFFD9D9D9)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (_loadError != null) {
-      return Positioned.fill(
-        child: Container(
-          color: Colors.black,
-          child: SafeArea(
-            child: Column(
-              children: [
-                _ImageViewerHeader(
-                  item: widget.item,
-                  onClose: widget.controller.closePlayer,
-                ),
-                const SizedBox(height: 12),
-                _PlayerError(
-                  message: _loadError!,
-                  onDelete: () => widget.controller.deleteDownload(widget.item),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleControls,
-                onScaleEnd: (_) {
-                  // Reset zoom when scale returns to near-1
-                  final scale = _transformController.value.getMaxScaleOnAxis();
-                  if (scale <= 1.05 && scale >= 0.95) {
-                    _resetZoom();
-                  }
-                },
-                child: InteractiveViewer(
-                  transformationController: _transformController,
-                  minScale: 0.5,
-                  maxScale: 5.0,
-                  panEnabled: true,
-                  child: Center(
-                    child: Image(
-                      image: imageProvider,
-                      fit: BoxFit.contain,
-                      errorBuilder: (ctx, error, _) {
-                        if (!mounted) return const SizedBox.shrink();
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) {
-                            setState(() {
-                              _loadError = 'Could not load this image.';
-                            });
-                          }
-                        });
-                        return const SizedBox.shrink();
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            AnimatedOpacity(
-              opacity: _showControls ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 250),
-              child: IgnorePointer(
-                ignoring: !_showControls,
-                child: Stack(
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        height: 90,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.black54, Colors.transparent],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                        child: SafeArea(
-                          bottom: false,
-                          child: Row(
-                            children: [
-                              IconButton(
-                                onPressed: widget.controller.closePlayer,
-                                icon: Icon(
-                                  Icons.keyboard_return,
-                                  color: _warmGold,
-                                  size: 30,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  widget.item.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Reset zoom',
-                                icon: const Icon(
-                                  Icons.zoom_out_map,
-                                  color: Colors.white,
-                                  size: 28,
-                                ),
-                                onPressed: _resetZoom,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.8),
-                            ],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                        child: SafeArea(
-                          top: false,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _ImageViewerAction(
-                                icon: Icons.save_alt,
-                                label: 'Save',
-                                onTap: () => widget.controller
-                                    .saveImageExternally(widget.item),
-                              ),
-                              _ImageViewerAction(
-                                icon: Icons.share,
-                                label: 'Share',
-                                onTap: () => widget.controller.shareDownload(
-                                  widget.item,
-                                ),
-                              ),
-                              _ImageViewerAction(
-                                icon: widget.item.favorite
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                                label: widget.item.favorite
-                                    ? 'Favorited'
-                                    : 'Favorite',
-                                color: widget.item.favorite ? _danger : null,
-                                onTap: () => widget.controller.toggleFavorite(
-                                  widget.item,
-                                ),
-                              ),
-                              _ImageViewerAction(
-                                icon: Icons.delete_outline,
-                                label: 'Delete',
-                                onTap: () {
-                                  widget.controller.closePlayer();
-                                  widget.controller.deleteDownload(widget.item);
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ImageViewerHeader extends StatelessWidget {
-  const _ImageViewerHeader({required this.item, required this.onClose});
-
-  final DownloadItem item;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: onClose,
-            icon: Icon(Icons.keyboard_return, color: _warmGold, size: 34),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ImageViewerAction extends StatelessWidget {
-  const _ImageViewerAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final effectiveColor = color ?? Colors.white;
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: effectiveColor, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: effectiveColor,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PlayerError extends StatelessWidget {
-  const _PlayerError({
-    required this.message,
-    required this.onDelete,
-    this.onDismiss,
-  });
-
-  final String message;
-  final VoidCallback onDelete;
-  final VoidCallback? onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .04),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _gold.withValues(alpha: .18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            message,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, height: 1.5),
-          ),
-          const SizedBox(height: 18),
-          if (onDismiss != null) ...[
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white24),
-                    ),
-                    onPressed: onDismiss,
-                    child: const Text('Dismiss'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-              ],
-            ),
-          ],
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: _gold,
-              foregroundColor: const Color(0xFF151515),
-            ),
-            onPressed: onDelete,
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _Panel extends StatelessWidget {
   const _Panel({required this.child, required this.padding});
@@ -4855,28 +2984,9 @@ class _Panel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        width: double.infinity,
-        constraints: const BoxConstraints(maxWidth: 540),
-        margin: const EdgeInsets.only(top: 12),
-        padding: padding,
-        decoration: BoxDecoration(
-          color: _panel,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: _border),
-          boxShadow: _isLight
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  )
-                ]
-              : null,
-        ),
-        child: child,
-      ),
+    return GlassPanel(
+      padding: padding,
+      child: child,
     );
   }
 }
@@ -4933,11 +3043,13 @@ class _Thumb extends StatelessWidget {
     required this.url,
     required this.width,
     required this.height,
+    this.filePath,
     this.icon = Icons.image,
     this.radius = 8,
   });
 
   final String? url;
+  final String? filePath;
   final double width;
   final double height;
   final IconData icon;
@@ -4945,23 +3057,13 @@ class _Thumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fallback = Container(
+    return MediaThumb(
+      url: url,
+      filePath: filePath,
       width: width,
       height: height,
-      color: const Color(0xFF292A2D),
-      child: Icon(icon, color: _gold),
-    );
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: url == null
-          ? fallback
-          : Image.network(
-              url!,
-              width: width,
-              height: height,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => fallback,
-            ),
+      icon: icon,
+      radius: radius,
     );
   }
 }
@@ -5432,7 +3534,7 @@ class _DottedCirclePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class _LibraryButton extends StatelessWidget {
+class _LibraryButton extends StatefulWidget {
   const _LibraryButton({
     required this.label,
     required this.onTap,
@@ -5442,27 +3544,41 @@ class _LibraryButton extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_LibraryButton> createState() => _LibraryButtonState();
+}
+
+class _LibraryButtonState extends State<_LibraryButton> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DottedCircleIcon(color: _gold, size: 36),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: _gold,
-                fontSize: 11,
-                letterSpacing: 2,
-                fontWeight: FontWeight.w300,
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _pressed ? 0.92 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DottedCircleIcon(color: _gold, size: 36),
+              const SizedBox(height: 8),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: _gold,
+                  fontSize: 11,
+                  letterSpacing: 2,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

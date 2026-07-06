@@ -1,0 +1,75 @@
+{
+  "fill": {
+    "automatic-gradient": "srgb:0.77647,0.57255,0.07843,1.00000",
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1
+      }
+    },
+    "solid": "srgb:0.10196,0.06667,0.05098,1.00000"
+  },
+  "groups": [
+    {
+      "blur-material": 0.3,
+      "hidden": false,
+      "layers": [
+        {
+          "blend-mode": "normal",
+          "fill": "automatic",
+          "glass": true,
+          "hidden": false,
+          "image-name": "layer-download.png",
+          "name": "layer-download",
+          "opacity": 0.92
+        }
+      ],
+      "lighting": "combined",
+      "name": "Download",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.42
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.58
+      }
+    },
+    {
+      "hidden": false,
+      "layers": [
+        {
+          "blend-mode": "normal",
+          "fill": "automatic",
+          "glass": true,
+          "hidden": false,
+          "image-name": "layer-duck.png",
+          "name": "layer-duck",
+          "opacity": 1
+        }
+      ],
+      "lighting": "individual",
+      "name": "Duck",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.48
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.32
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

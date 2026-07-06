@@ -517,6 +517,18 @@ void main() {
         ),
       ),
     );
+
+    expect(controller.flow, DuckFlow.ready);
+    expect(controller.batchItems, hasLength(10));
+    expect(api.startedUrls, isEmpty);
+
+    final urls = controller.batchItems!.map((item) => item.url).toList();
+    await controller.startBatchDownload(
+      urls: urls,
+      type: DownloadType.image,
+      quality: 'Best',
+    );
+
     expect(api.startedUrls, [
       'https://scontent.cdninstagram.com/full-0.jpg',
       'https://scontent.cdninstagram.com/full-1.jpg',
@@ -595,6 +607,7 @@ DuckDownloadsController _controller(
       purchases: PurchaseRepository(box),
     ),
     initializePremium: false,
+    initializePlatformServices: false,
   );
 }
 

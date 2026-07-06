@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import 'theme/duck_theme.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_client.dart';
 import 'services/clipboard_service.dart';
@@ -53,18 +54,8 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
       title: 'Duck Downloader',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.system,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        fontFamily: 'Inter',
-        scaffoldBackgroundColor: const Color(0xFFF5F6F8),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        fontFamily: 'Inter',
-        scaffoldBackgroundColor: const Color(0xFF101112),
-      ),
+      theme: DuckTheme.light,
+      darkTheme: DuckTheme.dark,
       home: SplashScreen(controller: controller),
     );
   }

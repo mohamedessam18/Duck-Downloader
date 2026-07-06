@@ -1,11 +1,11 @@
 {
-    "name": "duck_downloader",
-    "short_name": "duck_downloader",
+    "name": "Duck Downloader",
+    "short_name": "Duck",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#101112",
+    "theme_color": "#101112",
+    "description": "Copy. Detect. Download.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

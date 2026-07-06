@@ -92,4 +92,16 @@ class DownloadStore {
     }
     return _box.put('vaultPin', pin);
   }
+
+  Map<String, int> readVideoResumePositions() {
+    final raw = _box.get('videoResumePositions', defaultValue: <dynamic>{});
+    if (raw is! Map) return {};
+    return raw.map((key, value) => MapEntry('$key', value as int));
+  }
+
+  Future<void> writeVideoResumePosition(String id, int milliseconds) {
+    final positions = readVideoResumePositions();
+    positions[id] = milliseconds;
+    return _box.put('videoResumePositions', positions);
+  }
 }
