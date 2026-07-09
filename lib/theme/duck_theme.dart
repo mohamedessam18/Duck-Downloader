@@ -56,8 +56,8 @@ class DuckColors {
     divider: Color(0x0F000000),
     glassFill: Color(0xB8FFFFFF),
     glassBorder: Color(0x1AC69214),
-    ambientGold: Color(0x1AC69214),
-    ambientAmber: Color(0x12B58032),
+    ambientGold: Color(0x30C69214),
+    ambientAmber: Color(0x24B58032),
   );
 
   static const dark = DuckColors._(
@@ -73,8 +73,8 @@ class DuckColors {
     divider: Color(0x14FFFFFF),
     glassFill: Color(0x0FFFFFFF),
     glassBorder: Color(0x29FFC52F),
-    ambientGold: Color(0x24FFC52F),
-    ambientAmber: Color(0x18F6BD6A),
+    ambientGold: Color(0x48FFC52F),
+    ambientAmber: Color(0x32F6BD6A),
   );
 
   List<BoxShadow> get cardShadow => [

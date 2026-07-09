@@ -74,11 +74,6 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _bootstrap() async {
     try {
       setState(() => _initProgress = 0.35);
-      await JustAudioBackground.init(
-        androidNotificationChannelId: 'com.duck.downloader.audio',
-        androidNotificationChannelName: 'Duck Audio Playback',
-        androidNotificationOngoing: true,
-      );
       await widget.controller.markAudioBackgroundReady();
       if (mounted) {
         setState(() {
@@ -87,7 +82,7 @@ class _SplashScreenState extends State<SplashScreen>
         });
       }
     } catch (error, stackTrace) {
-      debugPrint('JustAudioBackground init failed: $error\n$stackTrace');
+      debugPrint('Bootstrap failed: $error\n$stackTrace');
       if (mounted) setState(() => _initProgress = 1.0);
     } finally {
       await _maybeNavigate();

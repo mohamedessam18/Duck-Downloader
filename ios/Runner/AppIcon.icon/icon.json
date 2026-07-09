@@ -15,32 +15,6 @@
   },
   "groups": [
     {
-      "blur-material": 0.3,
-      "hidden": false,
-      "layers": [
-        {
-          "blend-mode": "normal",
-          "fill": "automatic",
-          "glass": true,
-          "hidden": false,
-          "image-name": "layer-download.png",
-          "name": "layer-download",
-          "opacity": 0.92
-        }
-      ],
-      "lighting": "combined",
-      "name": "Download",
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.42
-      },
-      "specular": true,
-      "translucency": {
-        "enabled": true,
-        "value": 0.58
-      }
-    },
-    {
       "hidden": false,
       "layers": [
         {

@@ -25,7 +25,7 @@ class DuckAssets {
   static const _classicDucks = 'assets/images/ducks';
   static const _premiumDucks = 'assets/images/ducks/premium';
 
-  static const logoSplash = 'assets/images/branding/logo_splash.png';
+  static const logoSplash = 'assets/images/branding/liquid_glass_layers/layer-duck.png';
   static const logoApp = 'assets/images/branding/logo_app.png';
   static const logoMark = 'assets/images/branding/logo_mark.png';
 

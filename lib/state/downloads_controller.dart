@@ -81,7 +81,6 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   final AudioPlayer audioPlayer = AudioPlayer();
-  final AudioPlayer _quackPlayer = AudioPlayer();
   late final StreamSubscription<PlayerState> _playerStateSubscription;
   late final StreamSubscription<Duration> _playerPositionSubscription;
   DownloadItem? playingItem;
@@ -567,8 +566,10 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<void> _playQuack() async {
     try {
-      await _quackPlayer.setAsset(DuckAssets.quackTap);
-      await _quackPlayer.play();
+      if (!audioPlayer.playing) {
+        await audioPlayer.setAsset(DuckAssets.quackTap);
+        await audioPlayer.play();
+      }
     } catch (_) {}
   }
 
@@ -1015,6 +1016,17 @@ class DuckDownloadsController extends ChangeNotifier
     if (thumb.startsWith('http://') || thumb.startsWith('https://')) {
       return Uri.tryParse(thumb);
     }
+    if (Platform.isIOS) {
+      // iOS nowplayingd sandbox restricts reading local app files out-of-process.
+      // Returning null avoids breaking lock screen/Dynamic Island controls.
+      return null;
+    }
+    try {
+      final file = File(thumb);
+      if (file.existsSync()) {
+        return file.uri;
+      }
+    } catch (_) {}
     return null;
   }
 
@@ -1166,6 +1178,7 @@ class DuckDownloadsController extends ChangeNotifier
     try {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.music());
+      await session.setActive(true);
     } catch (_) {}
   }
 
@@ -1306,7 +1319,6 @@ class DuckDownloadsController extends ChangeNotifier
     _playerStateSubscription.cancel();
     _playerPositionSubscription.cancel();
     audioPlayer.dispose();
-    _quackPlayer.dispose();
     super.dispose();
   }
 

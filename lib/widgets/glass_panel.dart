@@ -35,16 +35,32 @@ class GlassPanel extends StatelessWidget {
         width: double.infinity,
         constraints: BoxConstraints(maxWidth: maxWidth),
         margin: margin ?? const EdgeInsets.only(top: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(borderRadius),
+          boxShadow: isLight ? colors.lightCardShadow : colors.cardShadow,
+        ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(borderRadius),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: fill,
+                gradient: tint != null
+                    ? null
+                    : LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Colors.white.withOpacity(isLight ? 0.45 : 0.18),
+                          Colors.white.withOpacity(isLight ? 0.15 : 0.04),
+                        ],
+                      ),
+                color: tint,
                 borderRadius: BorderRadius.circular(borderRadius),
-                border: Border.all(color: colors.glassBorder, width: 1),
-                boxShadow: isLight ? colors.lightCardShadow : colors.cardShadow,
+                border: Border.all(
+                  color: colors.glassBorder.withOpacity(isLight ? 0.12 : 0.28),
+                  width: 1,
+                ),
               ),
               child: Padding(padding: padding, child: child),
             ),

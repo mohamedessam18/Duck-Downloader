@@ -16,6 +16,9 @@ import 'media_colors.dart';
 import 'media_thumb.dart';
 import 'media_utils.dart';
 import 'media_slider.dart';
+import 'liquid_interactive_button.dart';
+import '../../theme/duck_theme.dart';
+import '../glass_panel.dart';
 import 'player_error.dart';
 class DuckPlayerOverlay extends StatefulWidget {
   const DuckPlayerOverlay({
@@ -118,7 +121,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     super.initState();
     _discRotationController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 18),
+      duration: const Duration(milliseconds: 280),
+      value: widget.controller.audioPlayer.playing ? 1.0 : 0.0,
     );
     widget.controller.addListener(_syncDiscRotation);
     _channel.setMethodCallHandler((call) async {
@@ -192,19 +196,20 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     if (!widget.item.isAudio || !mounted) return;
     final playing = widget.controller.audioPlayer.playing;
     if (playing) {
-      if (!_discRotationController.isAnimating) {
-        _discRotationController.repeat();
-      }
+      _discRotationController.forward();
     } else {
-      _discRotationController.stop();
+      _discRotationController.reverse();
     }
+    setState(() {});
   }
 
   void _videoListener() {
     final video = _video;
     if (video == null) return;
     final isPlaying = video.value.isPlaying;
-    _channel.invokeMethod('setVideoPlaying', {'playing': isPlaying});
+    try {
+      _channel.invokeMethod('setVideoPlaying', {'playing': isPlaying});
+    } catch (_) {}
     widget.controller.saveVideoResumePosition(
       widget.item.id,
       video.value.position,
@@ -260,7 +265,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     _centerPlayPauseTimer?.cancel();
     _fitLabelTimer?.cancel();
     _video?.removeListener(_videoListener);
-    _channel.invokeMethod('setVideoPlaying', {'playing': false});
+    try {
+      _channel.invokeMethod('setVideoPlaying', {'playing': false});
+    } catch (_) {}
     _channel.setMethodCallHandler(null);
     _video?.dispose();
     super.dispose();
@@ -269,7 +276,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
-      return Positioned.fill(
+      return SizedBox.expand(
         child: Container(
           color: Colors.black.withValues(alpha: .9),
           child: SafeArea(
@@ -298,7 +305,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     }
 
     if (widget.item.filePath == null) {
-      return Positioned.fill(
+      return SizedBox.expand(
         child: Container(
           color: Colors.black.withValues(alpha: .9),
           child: SafeArea(
@@ -337,7 +344,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   Widget _buildFullscreenVideoPlayer() {
     final video = _video;
     if (video == null || !video.value.isInitialized) {
-      return Positioned.fill(
+      return SizedBox.expand(
         child: Container(
           color: Colors.black,
           child: Center(child: CircularProgressIndicator(color: mediaGold)),
@@ -352,7 +359,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
         value.position >= value.duration;
 
     if (_isInPiP) {
-      return Positioned.fill(
+      return SizedBox.expand(
         child: Container(
           color: Colors.black,
           child: Center(
@@ -369,11 +376,12 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       );
     }
 
-    return Positioned.fill(
+    return SizedBox.expand(
       child: Container(
         color: Colors.black,
         child: Stack(
           children: [
+            // Video display area
             Positioned.fill(
               child: GestureDetector(
                 onTap: _toggleControls,
@@ -402,19 +410,23 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                 ),
               ),
             ),
+
+            // Buffering Indicator
             if (value.isBuffering)
-              Positioned.fill(
+              const Positioned.fill(
                 child: Center(
                   child: SizedBox(
                     width: 48,
                     height: 48,
                     child: CircularProgressIndicator(
-                      color: mediaGold,
+                      color: Colors.white70,
                       strokeWidth: 3,
                     ),
                   ),
                 ),
               ),
+
+            // Skip backward visual indicator
             if (_showLeftSeekIndicator)
               Positioned(
                 left: 0,
@@ -425,11 +437,11 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   child: TweenAnimationBuilder<double>(
                     tween: Tween(begin: 0.0, end: 1.0),
                     duration: const Duration(milliseconds: 600),
-                    builder: (context, value, child) {
+                    builder: (context, val, child) {
                       return Opacity(
-                        opacity: (1.0 - value).clamp(0.0, 1.0),
+                        opacity: (1.0 - val).clamp(0.0, 1.0),
                         child: Transform.scale(
-                          scale: 0.8 + 0.4 * value,
+                          scale: 0.8 + 0.4 * val,
                           child: child,
                         ),
                       );
@@ -460,6 +472,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   ),
                 ),
               ),
+
+            // Skip forward visual indicator
             if (_showRightSeekIndicator)
               Positioned(
                 right: 0,
@@ -470,11 +484,11 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   child: TweenAnimationBuilder<double>(
                     tween: Tween(begin: 0.0, end: 1.0),
                     duration: const Duration(milliseconds: 600),
-                    builder: (context, value, child) {
+                    builder: (context, val, child) {
                       return Opacity(
-                        opacity: (1.0 - value).clamp(0.0, 1.0),
+                        opacity: (1.0 - val).clamp(0.0, 1.0),
                         child: Transform.scale(
-                          scale: 0.8 + 0.4 * value,
+                          scale: 0.8 + 0.4 * val,
                           child: child,
                         ),
                       );
@@ -505,6 +519,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   ),
                 ),
               ),
+
+            // Aspect ratio indicator
             if (_fitLabel != null)
               Positioned.fill(
                 child: Center(
@@ -525,7 +541,10 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   ),
                 ),
               ),
+
             _buildCenterPlayPauseIndicator(),
+
+            // Floating Controls Overlay
             AnimatedOpacity(
               opacity: _showControls ? 1.0 : 0.0,
               duration: const Duration(milliseconds: 250),
@@ -533,379 +552,306 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                 ignoring: !_showControls,
                 child: Stack(
                   children: [
+                    // Top Controls Panel
                     Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: ClipRRect(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                          child: Container(
-                            height: 90,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.25),
+                      top: 16,
+                      left: 16,
+                      right: 16,
+                      child: SafeArea(
+                        bottom: false,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildCircularGlassButton(
+                                  child: const Icon(Icons.close, color: Colors.white, size: 22),
+                                  onPressed: widget.controller.closePlayer,
+                                ),
+                                const SizedBox(width: 8),
+                                _buildCapsuleGlassContainer(
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 20),
+                                        onPressed: _enterPiP,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      IconButton(
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        icon: Icon(
+                                          _videoFit == BoxFit.contain ? Icons.fullscreen : Icons.fullscreen_exit,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
+                                        onPressed: _toggleFit,
+                                      ),
+                                    ],
+                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  height: 48,
+                                ),
+                              ],
                             ),
-                            child: SafeArea(
-                              bottom: false,
-                              child: Row(
-                                children: [
-                                  IconButton(
-                                    onPressed: widget.controller.closePlayer,
-                                    icon: Icon(
-                                      Icons.keyboard_return,
-                                      color: mediaWarmGold,
-                                      size: 30,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      widget.item.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  if (Platform.isAndroid)
-                                    IconButton(
-                                      tooltip: 'Picture in Picture',
-                                      onPressed: _enterPiP,
-                                      icon: const Icon(
-                                        Icons.picture_in_picture_alt,
-                                        color: Colors.white,
-                                        size: 28,
-                                      ),
-                                    ),
-                                ],
+                            _buildCircularGlassButton(
+                              child: Icon(
+                                _muted ? Icons.volume_off : Icons.volume_up,
+                                color: Colors.white,
+                                size: 22,
                               ),
+                              onPressed: () {
+                                _resetHideTimer();
+                                _toggleMute();
+                              },
                             ),
-                          ),
+                          ],
                         ),
                       ),
                     ),
+
+                    // Center Playback Control Row
                     if (!_isTrimmingMode)
-                      _fittedControlRow(
-                        children: [
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
-                            icon: const Icon(
-                              Icons.replay_10,
-                              size: 48,
-                              color: Colors.white,
+                      Center(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildCircularGlassButton(
+                              size: 64,
+                              child: const Icon(Icons.replay_10, color: Colors.white, size: 28),
+                              onPressed: () {
+                                _resetHideTimer();
+                                _seekVideo(const Duration(seconds: -10));
+                              },
                             ),
-                            onPressed: () {
-                              _resetHideTimer();
-                              _seekVideo(const Duration(seconds: -10));
-                            },
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            style: IconButton.styleFrom(
-                              backgroundColor: Colors.black38,
-                              fixedSize: const Size(64, 64),
-                            ),
-                            icon: Icon(
-                              isCompleted
-                                  ? Icons.replay
-                                  : value.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              size: 40,
-                              color: Colors.white,
-                            ),
-                            onPressed: () {
-                              _resetHideTimer();
-                              if (isCompleted) {
-                                video.seekTo(Duration.zero);
-                                video.play();
-                                _triggerPlayPauseOverlay(true);
-                              } else {
-                                if (value.isPlaying) {
-                                  video.pause();
-                                  _triggerPlayPauseOverlay(false);
-                                } else {
+                            const SizedBox(width: 32),
+                            _buildCircularGlassButton(
+                              size: 90,
+                              child: Icon(
+                                isCompleted
+                                    ? Icons.replay
+                                    : value.isPlaying
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                                color: Colors.white,
+                                size: 44,
+                              ),
+                              onPressed: () {
+                                _resetHideTimer();
+                                if (isCompleted) {
+                                  video.seekTo(Duration.zero);
                                   video.play();
                                   _triggerPlayPauseOverlay(true);
+                                } else {
+                                  if (value.isPlaying) {
+                                    video.pause();
+                                    _triggerPlayPauseOverlay(false);
+                                  } else {
+                                    video.play();
+                                    _triggerPlayPauseOverlay(true);
+                                  }
                                 }
-                              }
-                            },
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
-                            icon: const Icon(
-                              Icons.forward_10,
-                              size: 48,
-                              color: Colors.white,
+                              },
                             ),
-                            onPressed: () {
-                              _resetHideTimer();
-                              _seekVideo(const Duration(seconds: 10));
-                            },
-                          ),
-                        ],
+                            const SizedBox(width: 32),
+                            _buildCircularGlassButton(
+                              size: 64,
+                              child: const Icon(Icons.forward_10, color: Colors.white, size: 28),
+                              onPressed: () {
+                                _resetHideTimer();
+                                _seekVideo(const Duration(seconds: 10));
+                              },
+                            ),
+                          ],
+                        ),
                       ),
+
+                    // Bottom Seeker & Options Area
                     Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: ClipRRect(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.25),
-                            ),
-                            child: SafeArea(
-                              top: false,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_isTrimmingMode) ...[
-                                    _buildTrimmingSlider(value.duration),
-                                  ] else ...[
-                                    ValueListenableBuilder<VideoPlayerValue>(
-                                      valueListenable: video,
-                                      builder: (context, val, child) {
-                                        return MediaSlider(
-                                          position: val.position,
-                                          duration: val.duration,
-                                          onChanged: (pos) {
-                                            _resetHideTimer();
-                                            video.seekTo(pos);
-                                          },
-                                        );
-                                      },
-                                    ),
-                                  ],
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  if (!_isTrimmingMode) ...[
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: _fittedToolbar(
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              IconButton(
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                padding: EdgeInsets.zero,
-                                                constraints:
-                                                    _compactIconConstraints,
-                                                icon: Icon(
-                                                  _muted
-                                                      ? Icons.volume_off
-                                                      : Icons.volume_up,
-                                                  color: Colors.white,
-                                                ),
-                                                onPressed: () {
-                                                  _resetHideTimer();
-                                                  _toggleMute();
-                                                },
-                                              ),
-                                              IconButton(
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                padding: EdgeInsets.zero,
-                                                constraints:
-                                                    _compactIconConstraints,
-                                                icon: Icon(
-                                                  _videoFit == BoxFit.contain
-                                                      ? Icons.fit_screen
-                                                      : Icons.crop_free,
-                                                  color: Colors.white,
-                                                ),
-                                                onPressed: () {
-                                                  _resetHideTimer();
-                                                  _toggleFit();
-                                                },
-                                              ),
-                                              const SizedBox(width: 4),
-                                              PopupMenuButton<double>(
-                                                tooltip: 'Speed',
-                                                color: const Color(0xFF202124),
-                                                onSelected: (spd) {
-                                                  _resetHideTimer();
-                                                  _setSpeed(spd);
-                                                },
-                                                itemBuilder: (context) => const [
-                                                  PopupMenuItem(
-                                                    value: .75,
-                                                    child: Text('0.75x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 1,
-                                                    child: Text('1x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 1.25,
-                                                    child: Text('1.25x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 1.5,
-                                                    child: Text('1.5x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 2,
-                                                    child: Text('2x'),
-                                                  ),
-                                                ],
-                                                child: Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 4,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white
-                                                        .withValues(alpha: 0.08),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                      12,
-                                                    ),
-                                                  ),
-                                                  child: Text(
-                                                    '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                                    style: TextStyle(
-                                                      color: mediaGold,
-                                                      fontWeight: FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              if (!kIsWeb)
-                                                IconButton(
-                                                  visualDensity:
-                                                      VisualDensity.compact,
-                                                  padding: EdgeInsets.zero,
-                                                  constraints:
-                                                      _compactIconConstraints,
-                                                  tooltip: 'Trim video',
-                                                  icon: const Icon(
-                                                    Icons.content_cut,
-                                                    color: Colors.white,
-                                                  ),
-                                                  onPressed:
-                                                      value.duration <=
-                                                              Duration.zero
-                                                          ? null
-                                                          : () {
-                                                              setState(() {
-                                                                _isTrimmingMode =
-                                                                    true;
-                                                                _trimStart = 0.0;
-                                                                _trimEnd = value
-                                                                    .duration
-                                                                    .inSeconds
-                                                                    .toDouble();
-                                                              });
-                                                            },
-                                                ),
-                                            ],
+                      bottom: 16,
+                      left: 16,
+                      right: 16,
+                      child: SafeArea(
+                        top: false,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Auxiliary options row (Speed dial on right, Trim/Delete on left)
+                            if (!_isTrimmingMode)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    _buildCapsuleGlassContainer(
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (!kIsWeb) ...[
+                                            IconButton(
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              icon: const Icon(Icons.content_cut, color: Colors.white, size: 20),
+                                              onPressed: value.duration <= Duration.zero
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        _isTrimmingMode = true;
+                                                        _trimStart = 0.0;
+                                                        _trimEnd = value.duration.inSeconds.toDouble();
+                                                      });
+                                                    },
+                                            ),
+                                            const SizedBox(width: 16),
+                                          ],
+                                          IconButton(
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 20),
+                                            onPressed: () {
+                                              widget.controller.closePlayer();
+                                              widget.controller.deleteDownload(widget.item);
+                                            },
                                           ),
-                                        ),
+                                        ],
                                       ),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      height: 48,
                                     ),
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      padding: EdgeInsets.zero,
-                                      constraints: _compactIconConstraints,
-                                      icon: const Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.white,
-                                      ),
-                                      onPressed: () {
-                                        widget.controller.closePlayer();
-                                        widget.controller.deleteDownload(
-                                          widget.item,
-                                        );
+                                    PopupMenuButton<double>(
+                                      tooltip: 'Speed',
+                                      color: const Color(0xFF1E1E1E),
+                                      onSelected: (spd) {
+                                        _resetHideTimer();
+                                        _setSpeed(spd);
                                       },
-                                    ),
-                                  ] else ...[
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.centerRight,
-                                        child: _fittedToolbar(
-                                          alignment: Alignment.centerRight,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              TextButton(
-                                                onPressed: () => setState(
-                                                  () => _isTrimmingMode = false,
-                                                ),
-                                                child: const Text(
-                                                  'Cancel',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              _isSavingTrim
-                                                  ? SizedBox(
-                                                      width: 20,
-                                                      height: 20,
-                                                      child:
-                                                          CircularProgressIndicator(
-                                                        color: mediaGold,
-                                                        strokeWidth: 2,
-                                                      ),
-                                                    )
-                                                  : TextButton(
-                                                      onPressed: _canSaveTrim
-                                                          ? _performTrim
-                                                          : null,
-                                                      child: Text(
-                                                        'Save Trim',
-                                                        style: TextStyle(
-                                                          color: mediaGold,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                    ),
-                                            ],
-                                          ),
-                                        ),
+                                      itemBuilder: (context) => const [
+                                        PopupMenuItem(value: 0.75, child: Text('0.75x')),
+                                        PopupMenuItem(value: 1.0, child: Text('1.0x')),
+                                        PopupMenuItem(value: 1.25, child: Text('1.25x')),
+                                        PopupMenuItem(value: 1.5, child: Text('1.5x')),
+                                        PopupMenuItem(value: 2.0, child: Text('2.0x')),
+                                      ],
+                                      child: _buildCircularGlassButton(
+                                        size: 48,
+                                        child: const Icon(Icons.speed, color: Colors.white, size: 22),
+                                        onPressed: null,
                                       ),
                                     ),
                                   ],
-                                ],
+                                ),
                               ),
-                            ],
-                          ),
+
+                            const SizedBox(height: 8),
+
+                            // Main Seeker Capsule
+                            if (_isTrimmingMode)
+                              _buildCapsuleGlassContainer(
+                                height: null,
+                                defaultRadius: 20,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildTrimmingSlider(value.duration),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        TextButton(
+                                          onPressed: () => setState(() => _isTrimmingMode = false),
+                                          child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        _isSavingTrim
+                                            ? SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child: CircularProgressIndicator(color: mediaGold, strokeWidth: 2),
+                                              )
+                                            : TextButton(
+                                                onPressed: _canSaveTrim ? _performTrim : null,
+                                                child: Text(
+                                                  'Save Trim',
+                                                  style: TextStyle(
+                                                    color: mediaGold,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              _buildCapsuleGlassContainer(
+                                height: 54,
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child: ValueListenableBuilder<VideoPlayerValue>(
+                                  valueListenable: video,
+                                  builder: (context, val, child) {
+                                    final position = val.position;
+                                    final totalDuration = val.duration;
+                                    final totalMs = totalDuration.inMilliseconds;
+                                    final currentMs = totalMs <= 0
+                                        ? 0.0
+                                        : position.inMilliseconds.clamp(0, totalMs).toDouble();
+                                    final remaining = totalDuration - position;
+
+                                    return Row(
+                                      children: [
+                                        Text(
+                                          formatMediaDuration(position),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: MediaSlider(
+                                            position: Duration(milliseconds: currentMs.round()),
+                                            duration: Duration(milliseconds: totalMs.round()),
+                                            showTimeLabels: false,
+                                            activeColor: Colors.white,
+                                            inactiveColor: Colors.white24,
+                                            thumbColor: Colors.white,
+                                            onChanged: (val) {
+                                              _resetHideTimer();
+                                              video.seekTo(val);
+                                            },
+                                          ),
+                                        ),
+                                        Text(
+                                          totalMs <= 0 ? '--:--' : '-${formatMediaDuration(remaining)}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
-      ],
-    ),
-  ),
-);
+      ),
+    );
   }
 
   Widget _buildAudioPlayerLayout() {
@@ -918,469 +864,466 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       return const SizedBox.shrink();
     }
 
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final screenHeight = MediaQuery.sizeOf(context).height;
-    final scale = (screenHeight / 820).clamp(0.45, 1.0);
-    final diskSize = 220.0 * scale;
-    final spacingSize = 32.0 * scale;
+    final colors = DuckColors.of(context);
 
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleControls,
-                behavior: HitTestBehavior.opaque,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+    // Responsive scaling
+    final scale = (screenHeight / 820).clamp(0.5, 1.0);
+    final artworkSize = (screenWidth * 0.72).clamp(180.0, 300.0);
+
+    return SizedBox.expand(
+      child: Stack(
+        children: [
+          // Blurred ambient backdrop
+          Positioned.fill(
+            child: MediaThumb(
+              url: widget.item.thumbnail,
+              preferNetworkThumbnail: true,
+              width: double.infinity,
+              height: double.infinity,
+              icon: Icons.music_note,
+            ),
+          ),
+          Positioned.fill(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 55, sigmaY: 55),
+              child: Container(
+                color: Colors.black.withOpacity(0.6),
+              ),
+            ),
+          ),
+
+          // Foreground UI
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Top Header Row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Container(
-                        width: diskSize,
-                        height: diskSize,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: mediaGold.withValues(alpha: 0.15),
-                              blurRadius: 40 * scale,
-                              spreadRadius: 8 * scale,
-                            ),
-                          ],
+                      _buildCircularGlassButton(
+                        child: const Icon(Icons.close, color: Colors.white, size: 22),
+                        onPressed: widget.controller.closePlayer,
+                      ),
+                      const Text(
+                        'Now Playing',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
                         ),
-                        child: RotationTransition(
-                          turns: _discRotationController,
-                          child: ClipOval(
+                      ),
+                      Builder(
+                        builder: (context) {
+                          final currentItem = widget.controller.playerItem ?? widget.item;
+                          final isFav = currentItem.favorite;
+                          return _buildCircularGlassButton(
+                            child: Icon(
+                              isFav ? Icons.favorite : Icons.favorite_border,
+                              color: isFav ? mediaDanger : Colors.white70,
+                              size: 20,
+                            ),
+                            onPressed: () {
+                              widget.controller.toggleFavorite(currentItem);
+                            },
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+
+                  // Scaling artwork card
+                  Expanded(
+                    child: Center(
+                      child: ScaleTransition(
+                        scale: Tween<double>(begin: 0.88, end: 1.0).animate(
+                          CurvedAnimation(
+                            parent: _discRotationController,
+                            curve: Curves.easeOutBack,
+                          ),
+                        ),
+                        child: Container(
+                          width: artworkSize,
+                          height: artworkSize,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(28),
+                            border: Border.all(
+                              color: colors.glassBorder,
+                              width: 1.5,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Colors.black45,
+                                blurRadius: 28,
+                                offset: Offset(0, 12),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(26),
                             child: MediaThumb(
                               url: widget.item.thumbnail,
                               preferNetworkThumbnail: true,
-                              width: diskSize,
-                              height: diskSize,
+                              width: artworkSize,
+                              height: artworkSize,
                               icon: Icons.music_note,
                             ),
                           ),
                         ),
                       ),
-                      SizedBox(height: spacingSize),
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 40 * scale),
-                        child: Text(
+                    ),
+                  ),
+
+                  // Metadata section
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
                           widget.item.title,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 20 * scale,
-                            fontWeight: FontWeight.w900,
+                            fontSize: 22 * scale,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: -0.5,
                           ),
                         ),
-                      ),
-                      if (widget.item.artist != null &&
-                          widget.item.artist!.isNotEmpty) ...[
-                        SizedBox(height: 8 * scale),
+                        const SizedBox(height: 4),
                         Text(
-                          widget.item.artist!,
-                          maxLines: 2,
+                          widget.item.artist ?? widget.item.platform,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: mediaWarmGold,
-                            fontSize: 15 * scale,
+                            fontSize: 16 * scale,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            ),
-            AnimatedOpacity(
-              opacity: _showControls ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 250),
-              child: IgnorePointer(
-                ignoring: !_showControls,
-                child: Stack(
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        height: 90,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.black54, Colors.transparent],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                        child: SafeArea(
-                          bottom: false,
-                          child: Row(
+
+                  // Seeker Slider Capsule
+                  if (_isTrimmingMode)
+                    _buildCapsuleGlassContainer(
+                      height: null,
+                      defaultRadius: 20,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildTrimmingSlider(duration),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              IconButton(
-                                onPressed: widget.controller.closePlayer,
-                                icon: Icon(
-                                  Icons.keyboard_return,
-                                  color: mediaWarmGold,
-                                  size: 30,
-                                ),
+                              TextButton(
+                                onPressed: () => setState(() => _isTrimmingMode = false),
+                                child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
                               ),
-                              const SizedBox(width: 8),
-                              const Expanded(
-                                child: Text(
-                                  'NOW PLAYING',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 2,
-                                  ),
-                                ),
-                              ),
+                              const SizedBox(width: 12),
+                              _isSavingTrim
+                                  ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(color: mediaGold, strokeWidth: 2),
+                                    )
+                                  : TextButton(
+                                      onPressed: _canSaveTrim ? _performTrim : null,
+                                      child: Text(
+                                        'Save Trim',
+                                        style: TextStyle(
+                                          color: mediaGold,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
                             ],
                           ),
-                        ),
+                        ],
+                      ),
+                    )
+                  else
+                    _buildCapsuleGlassContainer(
+                      height: 54,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: StreamBuilder<Duration>(
+                        stream: audio.positionStream,
+                        builder: (context, positionSnapshot) {
+                          return StreamBuilder<Duration?>(
+                            stream: audio.durationStream,
+                            builder: (context, durationSnapshot) {
+                              final position = positionSnapshot.data ?? audio.position;
+                              final totalDuration = durationSnapshot.data ?? audio.duration ?? Duration.zero;
+                              final totalMs = totalDuration.inMilliseconds;
+                              final currentMs = totalMs <= 0
+                                  ? 0.0
+                                  : position.inMilliseconds.clamp(0, totalMs).toDouble();
+                              final remaining = totalDuration - position;
+
+                              return Row(
+                                children: [
+                                  Text(
+                                    formatMediaDuration(position),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                   Expanded(
+                                     child: MediaSlider(
+                                       position: Duration(milliseconds: currentMs.round()),
+                                       duration: Duration(milliseconds: totalMs.round()),
+                                       showTimeLabels: false,
+                                       activeColor: Colors.white,
+                                       inactiveColor: Colors.white24,
+                                       thumbColor: Colors.white,
+                                       onChanged: (val) {
+                                         _resetHideTimer();
+                                         audio.seek(val);
+                                       },
+                                     ),
+                                   ),
+                                  Text(
+                                    totalMs <= 0 ? '--:--' : '-${formatMediaDuration(remaining)}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        },
                       ),
                     ),
-                    if (!_isTrimmingMode)
-                      _fittedControlRow(
+
+                  const SizedBox(height: 16),
+
+                  // Main Audio Playback Controls
+                  if (!_isTrimmingMode)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: Icon(
+                            widget.controller.hasPreviousTrack
+                                ? Icons.skip_previous
+                                : Icons.skip_previous_outlined,
+                            size: 32,
+                            color: widget.controller.hasPreviousTrack
+                                ? Colors.white
+                                : Colors.white24,
+                          ),
+                          onPressed: widget.controller.hasPreviousTrack
+                              ? widget.controller.playPrevious
+                              : null,
+                        ),
+                        _buildCircularGlassButton(
+                          size: 48,
+                          child: const Icon(Icons.replay_10, color: Colors.white, size: 22),
+                          onPressed: () {
+                            _resetHideTimer();
+                            _seekAudio(const Duration(seconds: -10));
+                          },
+                        ),
+                        _buildCircularGlassButton(
+                          size: 78,
+                          child: Icon(
+                            isCompleted
+                                ? Icons.replay
+                                : playing
+                                ? Icons.pause
+                                : Icons.play_arrow,
+                            color: Colors.white,
+                            size: 38,
+                          ),
+                          onPressed: () {
+                            _resetHideTimer();
+                            if (isCompleted) {
+                              audio.seek(Duration.zero);
+                              audio.play();
+                            } else {
+                              playing ? audio.pause() : audio.play();
+                            }
+                          },
+                        ),
+                        _buildCircularGlassButton(
+                          size: 48,
+                          child: const Icon(Icons.forward_10, color: Colors.white, size: 22),
+                          onPressed: () {
+                            _resetHideTimer();
+                            _seekAudio(const Duration(seconds: 10));
+                          },
+                        ),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: Icon(
+                            widget.controller.hasNextTrack
+                                ? Icons.skip_next
+                                : Icons.skip_next_outlined,
+                            size: 32,
+                            color: widget.controller.hasNextTrack
+                                ? Colors.white
+                                : Colors.white24,
+                          ),
+                          onPressed: widget.controller.hasNextTrack
+                              ? widget.controller.playNext
+                              : null,
+                        ),
+                      ],
+                    ),
+
+                  const SizedBox(height: 16),
+
+                  // Volume Slider Flanked by Speakers
+                  if (!_isTrimmingMode)
+                    StreamBuilder<double>(
+                      stream: audio.volumeStream,
+                      builder: (context, snapshot) {
+                        final vol = snapshot.data ?? audio.volume;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.volume_down_outlined, color: Colors.white30, size: 16),
+                              Expanded(
+                                child: MediaSlider(
+                                  position: Duration(milliseconds: (vol * 1000).round()),
+                                  duration: const Duration(milliseconds: 1000),
+                                  showTimeLabels: false,
+                                  activeColor: Colors.white,
+                                  inactiveColor: Colors.white24,
+                                  thumbColor: Colors.white,
+                                  onChanged: (val) {
+                                    _resetHideTimer();
+                                    audio.setVolume(val.inMilliseconds / 1000.0);
+                                  },
+                                ),
+                              ),
+                              const Icon(Icons.volume_up_outlined, color: Colors.white30, size: 16),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
+                  const SizedBox(height: 12),
+
+                  // Bottom Auxiliary Options Capsule
+                  if (!_isTrimmingMode)
+                    _buildCapsuleGlassContainer(
+                      height: 52,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           IconButton(
-                            visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
+                            constraints: const BoxConstraints(),
                             icon: Icon(
                               widget.controller.shuffleEnabled
                                   ? Icons.shuffle
                                   : Icons.shuffle_outlined,
-                              size: 26,
+                              size: 20,
                               color: widget.controller.shuffleEnabled
                                   ? mediaGold
-                                  : Colors.white70,
+                                  : Colors.white60,
                             ),
                             onPressed: widget.controller.toggleShuffle,
                           ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
-                            icon: Icon(
-                              widget.controller.hasPreviousTrack
-                                  ? Icons.skip_previous
-                                  : Icons.skip_previous_outlined,
-                              size: 36,
-                              color: widget.controller.hasPreviousTrack
-                                  ? Colors.white
-                                  : Colors.white38,
-                            ),
-                            onPressed: widget.controller.hasPreviousTrack
-                                ? widget.controller.playPrevious
-                                : null,
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
-                            icon: const Icon(
-                              Icons.replay_10,
-                              size: 42,
-                              color: Colors.white,
-                            ),
-                            onPressed: () {
+                          PopupMenuButton<double>(
+                            tooltip: 'Speed',
+                            color: const Color(0xFF1E1E1E),
+                            onSelected: (spd) {
                               _resetHideTimer();
-                              _seekAudio(const Duration(seconds: -10));
+                              _setSpeed(spd);
+                            },
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(value: 0.75, child: Text('0.75x')),
+                              PopupMenuItem(value: 1.0, child: Text('1.0x')),
+                              PopupMenuItem(value: 1.25, child: Text('1.25x')),
+                              PopupMenuItem(value: 1.5, child: Text('1.5x')),
+                              PopupMenuItem(value: 2.0, child: Text('2.0x')),
+                            ],
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.speed, size: 16, color: mediaGold),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
+                                  style: TextStyle(
+                                    color: mediaGold,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (!kIsWeb)
+                            IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              icon: const Icon(Icons.content_cut, color: Colors.white70, size: 18),
+                              onPressed: duration <= Duration.zero
+                                  ? null
+                                  : () {
+                                      setState(() {
+                                        _isTrimmingMode = true;
+                                        _trimStart = 0.0;
+                                        _trimEnd = duration.inSeconds.toDouble();
+                                      });
+                                    },
+                            ),
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 18),
+                            onPressed: () {
+                              widget.controller.closePlayer();
+                              widget.controller.deleteDownload(widget.item);
                             },
                           ),
                           IconButton(
-                            visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
-                            style: IconButton.styleFrom(
-                              backgroundColor: Colors.black38,
-                              fixedSize: const Size(64, 64),
-                            ),
-                            icon: Icon(
-                              isCompleted
-                                  ? Icons.replay
-                                  : playing
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              size: 40,
-                              color: Colors.white,
-                            ),
-                            onPressed: () {
-                              _resetHideTimer();
-                              if (isCompleted) {
-                                audio.seek(Duration.zero);
-                                audio.play();
-                              } else {
-                                playing ? audio.pause() : audio.play();
-                              }
-                            },
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
-                            icon: const Icon(
-                              Icons.forward_10,
-                              size: 42,
-                              color: Colors.white,
-                            ),
-                            onPressed: () {
-                              _resetHideTimer();
-                              _seekAudio(const Duration(seconds: 10));
-                            },
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
-                            icon: Icon(
-                              widget.controller.hasNextTrack
-                                  ? Icons.skip_next
-                                  : Icons.skip_next_outlined,
-                              size: 36,
-                              color: widget.controller.hasNextTrack
-                                  ? Colors.white
-                                  : Colors.white38,
-                            ),
-                            onPressed: widget.controller.hasNextTrack
-                                ? widget.controller.playNext
-                                : null,
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: _compactIconConstraints,
+                            constraints: const BoxConstraints(),
                             icon: Icon(
                               switch (widget.controller.loopMode) {
                                 LoopMode.one => Icons.repeat_one,
                                 LoopMode.all => Icons.repeat,
                                 LoopMode.off => Icons.repeat_outlined,
                               },
-                              size: 26,
+                              size: 20,
                               color: widget.controller.loopMode == LoopMode.off
-                                  ? Colors.white70
+                                  ? Colors.white60
                                   : mediaGold,
                             ),
                             onPressed: widget.controller.toggleLoopMode,
                           ),
                         ],
                       ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.8),
-                            ],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                        child: SafeArea(
-                          top: false,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_isTrimmingMode) ...[
-                                _buildTrimmingSlider(duration),
-                              ] else ...[
-                                AudioProgress(
-                                  player: audio,
-                                  onSeek: (pos) {
-                                    _resetHideTimer();
-                                    audio.seek(pos);
-                                  },
-                                ),
-                              ],
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  if (!_isTrimmingMode) ...[
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: _fittedToolbar(
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              PopupMenuButton<double>(
-                                                tooltip: 'Speed',
-                                                color: const Color(0xFF202124),
-                                                onSelected: (spd) {
-                                                  _resetHideTimer();
-                                                  _setSpeed(spd);
-                                                },
-                                                itemBuilder: (context) => const [
-                                                  PopupMenuItem(
-                                                    value: .75,
-                                                    child: Text('0.75x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 1,
-                                                    child: Text('1x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 1.25,
-                                                    child: Text('1.25x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 1.5,
-                                                    child: Text('1.5x'),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 2,
-                                                    child: Text('2x'),
-                                                  ),
-                                                ],
-                                                child: Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 4,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white
-                                                        .withValues(alpha: 0.08),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                      12,
-                                                    ),
-                                                  ),
-                                                  child: Text(
-                                                    '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                                    style: TextStyle(
-                                                      color: mediaGold,
-                                                      fontWeight: FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              if (!kIsWeb)
-                                                IconButton(
-                                                  visualDensity:
-                                                      VisualDensity.compact,
-                                                  padding: EdgeInsets.zero,
-                                                  constraints:
-                                                      _compactIconConstraints,
-                                                  tooltip: 'Trim audio',
-                                                  icon: const Icon(
-                                                    Icons.content_cut,
-                                                    color: Colors.white,
-                                                  ),
-                                                  onPressed:
-                                                      duration <= Duration.zero
-                                                          ? null
-                                                          : () {
-                                                              setState(() {
-                                                                _isTrimmingMode =
-                                                                    true;
-                                                                _trimStart = 0.0;
-                                                                _trimEnd = duration
-                                                                    .inSeconds
-                                                                    .toDouble();
-                                                              });
-                                                            },
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      padding: EdgeInsets.zero,
-                                      constraints: _compactIconConstraints,
-                                      icon: const Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.white,
-                                      ),
-                                      onPressed: () {
-                                        widget.controller.closePlayer();
-                                        widget.controller.deleteDownload(
-                                          widget.item,
-                                        );
-                                      },
-                                    ),
-                                  ] else ...[
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.centerRight,
-                                        child: _fittedToolbar(
-                                          alignment: Alignment.centerRight,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              TextButton(
-                                                onPressed: () => setState(
-                                                  () => _isTrimmingMode = false,
-                                                ),
-                                                child: const Text(
-                                                  'Cancel',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              _isSavingTrim
-                                                  ? SizedBox(
-                                                      width: 20,
-                                                      height: 20,
-                                                      child:
-                                                          CircularProgressIndicator(
-                                                        color: mediaGold,
-                                                        strokeWidth: 2,
-                                                      ),
-                                                    )
-                                                  : TextButton(
-                                                      onPressed: _canSaveTrim
-                                                          ? _performTrim
-                                                          : null,
-                                                      child: Text(
-                                                        'Save Trim',
-                                                        style: TextStyle(
-                                                          color: mediaGold,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                    ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
                     ),
-                  ],
-                ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1655,6 +1598,117 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               setState(() => _error = 'This file could not be played.');
             }
           });
+  }
+
+  Widget _buildCircularGlassButton({
+    required Widget child,
+    required VoidCallback? onPressed,
+    double size = 48,
+  }) {
+    final buttonContent = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.25),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(0.18),
+                  Colors.white.withOpacity(0.04),
+                ],
+              ),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.24),
+                width: 1,
+              ),
+            ),
+            child: Center(
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (onPressed == null) {
+      return buttonContent;
+    }
+
+    return LiquidGlassInteractiveButton(
+      onTap: onPressed,
+      size: size,
+      child: buttonContent,
+    );
+  }
+
+  Widget _buildCapsuleGlassContainer({
+    required Widget child,
+    double? width,
+    double? height = 48,
+    double defaultRadius = 24,
+    EdgeInsetsGeometry? padding,
+  }) {
+    final borderRadius = height != null
+        ? BorderRadius.circular(height / 2)
+        : BorderRadius.circular(defaultRadius);
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.25),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            width: width,
+            height: height,
+            padding: padding,
+            decoration: BoxDecoration(
+              borderRadius: borderRadius,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(0.18),
+                  Colors.white.withOpacity(0.04),
+                ],
+              ),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.24),
+                width: 1,
+              ),
+            ),
+            child: child,
+          ),
+        ),
+      ),
+    );
   }
 }
 

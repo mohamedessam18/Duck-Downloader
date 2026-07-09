@@ -73,7 +73,7 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
     final images = _resolvedImages;
 
     if (_loadError != null) {
-      return Positioned.fill(
+      return SizedBox.expand(
         child: Container(
           color: Colors.black,
           child: SafeArea(
@@ -100,7 +100,7 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
       );
     }
 
-    return Positioned.fill(
+    return SizedBox.expand(
       child: Container(
         color: Colors.black,
         child: Stack(

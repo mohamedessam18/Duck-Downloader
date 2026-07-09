@@ -39,15 +39,18 @@ dev_dependencies:
 
 flutter_launcher_icons:
   android: true
-  ios: false
-  image_path: assets/images/branding/logo_launcher.png
+  ios: true
+  image_path: assets/images/branding/liquid_glass_layers/layer-duck.png
   adaptive_icon_background: "#101112"
-  adaptive_icon_foreground: assets/images/branding/logo_launcher.png
+  adaptive_icon_foreground: assets/images/branding/liquid_glass_layers/layer-duck.png
+  remove_alpha_ios: true
+  background_color_ios: "#101112"
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/branding/
+    - assets/images/branding/liquid_glass_layers/
     - assets/images/ducks/
     - assets/images/ducks/premium/
     - assets/images/ducks/frames/classic/idle/

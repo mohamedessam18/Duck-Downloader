@@ -5,6 +5,7 @@ import 'dart:async';
 
 
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 
 import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
@@ -46,7 +47,7 @@ class DuckAppScreen extends StatelessWidget {
     controller.clearLockedBrowserRequest();
     final candidates = await Navigator.of(context)
         .push<List<BrowserImageCandidate>>(
-          MaterialPageRoute(
+          CupertinoPageRoute(
             builder: (_) => LockedSocialBrowserScreen(
               initialUrl: request.url,
               platform: request.platform,
@@ -119,11 +120,17 @@ class DuckAppScreen extends StatelessWidget {
                 ),
                 if (controller.playingItem != null &&
                     controller.playerItem == null)
-                  Positioned(
-                    bottom: 16 + MediaQuery.paddingOf(context).bottom,
-                    left: 16,
-                    right: 16,
-                    child: MiniPlayer(controller: controller),
+                  Builder(
+                    builder: (context) {
+                      final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+                      final bottomShift = isAndroid ? 98.0 : 68.0;
+                      return Positioned(
+                        bottom: bottomShift + MediaQuery.paddingOf(context).bottom,
+                        left: 16,
+                        right: 16,
+                        child: MiniPlayer(controller: controller),
+                      );
+                    },
                   ),
                 if (controller.detectedClipboardUrl != null)
                   _ClipboardDetectorOverlay(
@@ -133,6 +140,13 @@ class DuckAppScreen extends StatelessWidget {
                   ),
                 if (controller.playerItem != null)
                   MediaOverlayRouter(controller: controller),
+                if (controller.playerItem == null && MediaQuery.viewInsetsOf(context).bottom == 0)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: _BottomNavBar(controller: controller),
+                  ),
               ],
             ),
           ),
@@ -236,60 +250,6 @@ class _HomeView extends StatelessWidget {
             ),
           ),
         ),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: Padding(
-            padding: EdgeInsets.only(
-              bottom: 12 + MediaQuery.paddingOf(context).bottom,
-              left: 20,
-              right: 20,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(28),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: _isLight
-                        ? Colors.white.withValues(alpha: 0.82)
-                        : Colors.white.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(
-                      color: _gold.withValues(alpha: _isLight ? 0.12 : 0.16),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _LibraryButton(
-                          label: 'IMAGES',
-                          onTap: () => controller.setTab(DuckTab.images),
-                        ),
-                        _LibraryButton(
-                          label: 'VIDEOS',
-                          onTap: () => controller.setTab(DuckTab.videos),
-                        ),
-                        _LibraryButton(
-                          label: 'AUDIOS',
-                          onTap: () => controller.setTab(DuckTab.audios),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -375,7 +335,7 @@ class _ClipboardToggle extends StatelessWidget {
   }
 }
 
-class _HeaderToggle extends StatelessWidget {
+class _HeaderToggle extends StatefulWidget {
   const _HeaderToggle({
     required this.icon,
     required this.label,
@@ -389,36 +349,137 @@ class _HeaderToggle extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_HeaderToggle> createState() => _HeaderToggleState();
+}
+
+class _HeaderToggleState extends State<_HeaderToggle> {
+  bool _isPressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(999),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: active
-              ? _green.withValues(alpha: .14)
-              : Colors.white.withValues(alpha: .07),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: active
-                ? _green.withValues(alpha: .34)
-                : Colors.white.withValues(alpha: .08),
+    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    if (isAndroid) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: widget.onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: widget.active
+                ? _green.withOpacity(.14)
+                : Colors.white.withOpacity(.07),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: widget.active
+                  ? _green.withOpacity(.34)
+                  : Colors.white.withOpacity(.08),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(widget.icon, color: widget.active ? _green : _muted, size: 17),
+              const SizedBox(width: 7),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: widget.active
+                      ? const Color(0xFFEAF8EE)
+                      : const Color(0xFFE8E8E8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
           ),
         ),
+      );
+    }
+
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final useLiquidEffects = !reduceMotion;
+
+    final baseColor = widget.active ? _green : Colors.white;
+    final containerColor = widget.active 
+        ? _green.withOpacity(isLight ? 0.24 : 0.16) 
+        : Colors.white.withOpacity(0.06);
+
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _isPressed ? 0.95 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: useLiquidEffects ? [
+              BoxShadow(
+                color: baseColor.withOpacity(widget.active ? 0.24 : 0.08),
+                blurRadius: widget.active ? 10 : 4,
+                offset: const Offset(0, 2),
+              ),
+            ] : null,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: useLiquidEffects
+                ? BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: _buildContent(isLight, baseColor, containerColor),
+                  )
+                : _buildContent(isLight, baseColor, containerColor, noBlur: true),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(bool isLight, Color baseColor, Color containerColor, {bool noBlur = false}) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: containerColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: baseColor.withOpacity(widget.active ? 0.38 : 0.12),
+          width: 1,
+        ),
+        gradient: (widget.active && !noBlur)
+            ? LinearGradient(
+                colors: [
+                  Colors.white.withOpacity(0.12),
+                  Colors.transparent,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: active ? _green : _muted, size: 17),
+            Icon(
+              widget.icon,
+              color: widget.active ? _green : (isLight ? Colors.black54 : Colors.white60),
+              size: 17,
+            ),
             const SizedBox(width: 7),
             Text(
-              label,
+              widget.label,
               style: TextStyle(
-                color: active
-                    ? const Color(0xFFEAF8EE)
-                    : const Color(0xFFE8E8E8),
+                color: widget.active 
+                    ? (isLight ? const Color(0xFF0F3A1B) : const Color(0xFFEAF8EE))
+                    : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
                 fontSize: 12,
                 fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
               ),
             ),
           ],
@@ -428,47 +489,148 @@ class _HeaderToggle extends StatelessWidget {
   }
 }
 
-class _ProBadge extends StatelessWidget {
+class _ProBadge extends StatefulWidget {
   const _ProBadge({required this.controller});
 
   final DuckDownloadsController controller;
 
   @override
+  State<_ProBadge> createState() => _ProBadgeState();
+}
+
+class _ProBadgeState extends State<_ProBadge> {
+  bool _isPressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final active = controller.isPremiumActive;
-    return InkWell(
-      borderRadius: BorderRadius.circular(999),
-      onTap: () => _showPremiumSheet(context, controller),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-        decoration: BoxDecoration(
-          color: active
-              ? _gold.withValues(alpha: .18)
-              : Colors.white.withValues(alpha: .08),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
+    final active = widget.controller.isPremiumActive;
+    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    if (isAndroid) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () => _showPremiumSheet(context, widget.controller),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          decoration: BoxDecoration(
             color: active
-                ? _gold.withValues(alpha: .42)
-                : Colors.white.withValues(alpha: .08),
+                ? _gold.withOpacity(.18)
+                : Colors.white.withOpacity(.08),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: active
+                  ? _gold.withOpacity(.42)
+                  : Colors.white.withOpacity(.08),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                active
+                    ? Icons.workspace_premium
+                    : Icons.workspace_premium_outlined,
+                color: active ? _gold : _muted,
+                size: 18,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                active ? 'PREMIUM' : 'DUCK PREMIUM',
+                style: TextStyle(
+                  color: active ? _gold : const Color(0xFFE8E8E8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
           ),
         ),
+      );
+    }
+
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final useLiquidEffects = !reduceMotion;
+
+    final baseColor = active ? _gold : Colors.white;
+    final containerColor = active 
+        ? _gold.withOpacity(isLight ? 0.24 : 0.16) 
+        : Colors.white.withOpacity(0.06);
+
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onTap: () => _showPremiumSheet(context, widget.controller),
+      child: AnimatedScale(
+        scale: _isPressed ? 0.95 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: useLiquidEffects ? [
+              BoxShadow(
+                color: baseColor.withOpacity(active ? 0.24 : 0.08),
+                blurRadius: active ? 10 : 4,
+                offset: const Offset(0, 2),
+              ),
+            ] : null,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: useLiquidEffects
+                ? BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: _buildContent(isLight, active, baseColor, containerColor),
+                  )
+                : _buildContent(isLight, active, baseColor, containerColor, noBlur: true),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(bool isLight, bool active, Color baseColor, Color containerColor, {bool noBlur = false}) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: containerColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: baseColor.withOpacity(active ? 0.38 : 0.12),
+          width: 1,
+        ),
+        gradient: (active && !noBlur)
+            ? LinearGradient(
+                colors: [
+                  Colors.white.withOpacity(0.12),
+                  Colors.transparent,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              active
-                  ? Icons.workspace_premium
-                  : Icons.workspace_premium_outlined,
-              color: active ? _gold : _muted,
+              active ? Icons.workspace_premium : Icons.workspace_premium_outlined,
+              color: active ? _gold : (isLight ? Colors.black54 : Colors.white60),
               size: 18,
             ),
             const SizedBox(width: 7),
             Text(
               active ? 'PREMIUM' : 'DUCK PREMIUM',
               style: TextStyle(
-                color: active ? _gold : const Color(0xFFE8E8E8),
+                color: active 
+                    ? (isLight ? const Color(0xFF3D2D03) : _gold)
+                    : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
                 fontSize: 12,
                 fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
               ),
             ),
           ],
@@ -926,7 +1088,7 @@ class _StatusBar extends StatelessWidget {
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
         child: KeyedSubtree(
-          key: ValueKey('$flow-$status-$progress'),
+          key: ValueKey(flow),
           child: child,
         ),
       ),
@@ -1666,27 +1828,185 @@ class _LibraryView extends StatefulWidget {
 class _LibraryViewState extends State<_LibraryView> {
   _LibrarySubTab _subTab = _LibrarySubTab.all;
   bool _useGridLayout = true;
+  Offset? _dragPillOffset;
+  bool _isDraggingPill = false;
 
   bool get _isImagesTab => widget.title == 'IMAGES';
 
-  Widget _buildSubTabButton(_LibrarySubTab tab, String label) {
-    final active = _subTab == tab;
-    return InkWell(
-      onTap: () => setState(() => _subTab = tab),
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? _gold : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: active ? _gold : _border),
+  double get _bottomPadding {
+    final hasMiniPlayer = widget.controller.playingItem != null &&
+        widget.controller.playerItem == null;
+    return hasMiniPlayer ? 144.0 : 80.0;
+  }
+
+  Widget _buildUnifiedSubTabBar() {
+    final activeIndex = switch (_subTab) {
+      _LibrarySubTab.all => 0,
+      _LibrarySubTab.favorites => 1,
+      _LibrarySubTab.playlists => 2,
+    };
+
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    final defaultLeft = 4.0 + (activeIndex * 104.0);
+    final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
+    final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 4.0;
+
+    final duration = _isDraggingPill ? Duration.zero : const Duration(milliseconds: 300);
+    final curve = _isDraggingPill ? Curves.linear : Curves.easeOutBack;
+
+    final scale = _isDraggingPill ? 1.08 : 1.0;
+    final width = _isDraggingPill ? 116.0 : 104.0;
+    final leftOffset = _isDraggingPill ? -6.0 : 0.0;
+
+    return Center(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (details) {
+          final targetLeft = details.localPosition.dx - 52.0;
+          final targetTop = details.localPosition.dy - 16.0;
+          final minLeft = 4.0;
+          final maxLeft = 212.0;
+          setState(() {
+            _isDraggingPill = true;
+            _dragPillOffset = Offset(targetLeft.clamp(minLeft, maxLeft), targetTop.clamp(0.0, 8.0));
+          });
+        },
+        onPanUpdate: (details) {
+          final targetLeft = details.localPosition.dx - 52.0;
+          final targetTop = details.localPosition.dy - 16.0;
+          final minLeft = 4.0;
+          final maxLeft = 212.0;
+          
+          double dragLeft = targetLeft;
+          if (targetLeft < minLeft) {
+            final diff = minLeft - targetLeft;
+            dragLeft = minLeft - diff.clamp(0.0, 30.0) * 0.15;
+          } else if (targetLeft > maxLeft) {
+            final diff = targetLeft - maxLeft;
+            dragLeft = maxLeft + diff.clamp(0.0, 30.0) * 0.15;
+          }
+
+          double dragTop = targetTop;
+          if (targetTop < 4.0) {
+            final diff = 4.0 - targetTop;
+            dragTop = 4.0 - diff.clamp(0.0, 15.0) * 0.15;
+          } else {
+            final diff = targetTop - 4.0;
+            dragTop = 4.0 + diff.clamp(0.0, 15.0) * 0.15;
+          }
+
+          setState(() {
+            _dragPillOffset = Offset(dragLeft, dragTop);
+          });
+        },
+        onPanEnd: (details) {
+          if (_dragPillOffset != null) {
+            final center = _dragPillOffset!.dx + 52.0;
+            final targetIndex = ((center - 4.0) / 104.0).round().clamp(0, 2);
+            setState(() {
+              _isDraggingPill = false;
+              _subTab = switch (targetIndex) {
+                0 => _LibrarySubTab.all,
+                1 => _LibrarySubTab.favorites,
+                2 => _LibrarySubTab.playlists,
+                _ => _LibrarySubTab.all,
+              };
+            });
+          }
+        },
+        child: Container(
+          width: 320,
+          height: 42,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(21),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // 1. Frosted Glass Container Background (Clipped)
+              Positioned.fill(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(21),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(isLight ? 0.45 : 0.05),
+                        borderRadius: BorderRadius.circular(21),
+                        border: Border.all(
+                          color: (isLight ? Colors.black : Colors.white).withOpacity(0.12),
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // 2. Sliding Active Pill (NOT Clipped, floats on top!)
+              AnimatedPositioned(
+                duration: duration,
+                curve: curve,
+                left: currentLeft + leftOffset,
+                top: currentTop,
+                width: width,
+                height: 32.0,
+                child: Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: _gold,
+                      boxShadow: [
+                        BoxShadow(
+                          color: _gold.withOpacity(_isDraggingPill ? 0.5 : 0.3),
+                          blurRadius: _isDraggingPill ? 14 : 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // 3. Tab Text Labels Row
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    _buildTabOption(_LibrarySubTab.all, 'ALL', activeIndex == 0),
+                    _buildTabOption(_LibrarySubTab.favorites, 'FAVORITES', activeIndex == 1),
+                    _buildTabOption(_LibrarySubTab.playlists, 'PLAYLISTS', activeIndex == 2),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? const Color(0xFF101112) : _textMuted,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
+      ),
+    );
+  }
+
+  Widget _buildTabOption(_LibrarySubTab tab, String label, bool active) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _subTab = tab),
+        child: Center(
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 200),
+            style: TextStyle(
+              color: active ? const Color(0xFF101112) : _textMuted,
+              fontWeight: FontWeight.bold,
+              fontSize: 11,
+              letterSpacing: 0.5,
+            ),
+            child: Text(label),
           ),
         ),
       ),
@@ -1758,7 +2078,7 @@ class _LibraryViewState extends State<_LibraryView> {
                         onSuccess: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
+                            CupertinoPageRoute(
                               builder: (context) =>
                                   _SecureVaultView(controller: widget.controller),
                             ),
@@ -1774,16 +2094,7 @@ class _LibraryViewState extends State<_LibraryView> {
             ],
           ),
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildSubTabButton(_LibrarySubTab.all, 'ALL'),
-              const SizedBox(width: 12),
-              _buildSubTabButton(_LibrarySubTab.favorites, 'FAVORITES'),
-              const SizedBox(width: 12),
-              _buildSubTabButton(_LibrarySubTab.playlists, 'PLAYLISTS'),
-            ],
-          ),
+          _buildUnifiedSubTabBar(),
           const SizedBox(height: 22),
           Expanded(
             child: _subTab == _LibrarySubTab.playlists
@@ -1803,7 +2114,7 @@ class _LibraryViewState extends State<_LibraryView> {
                   )
                 : _isImagesTab && _useGridLayout
                 ? GridView.builder(
-                    padding: const EdgeInsets.only(bottom: 28),
+                    padding: EdgeInsets.only(bottom: _bottomPadding),
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 3,
                       mainAxisSpacing: 8,
@@ -1847,7 +2158,7 @@ class _LibraryViewState extends State<_LibraryView> {
                     },
                   )
                 : ListView.separated(
-                    padding: const EdgeInsets.only(bottom: 28),
+                    padding: EdgeInsets.only(bottom: _bottomPadding),
                     itemBuilder: (context, index) => _DownloadRow(
                       item: filteredItems[index],
                       controller: widget.controller,
@@ -1903,7 +2214,7 @@ class _LibraryViewState extends State<_LibraryView> {
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 28),
+                  padding: EdgeInsets.only(bottom: _bottomPadding),
                   itemCount: widget.controller.playlists.length,
                   itemBuilder: (context, index) {
                     final playlist = widget.controller.playlists[index];
@@ -1955,7 +2266,7 @@ class _LibraryViewState extends State<_LibraryView> {
                         onTap: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
+                            CupertinoPageRoute(
                               builder: (context) => _PlaylistItemsView(
                                 playlist: playlist,
                                 controller: widget.controller,
@@ -3412,56 +3723,188 @@ void _showRenameDialog(
   );
 }
 
-class _AutoSaveToggleSwitch extends StatelessWidget {
+class _AutoSaveToggleSwitch extends StatefulWidget {
   const _AutoSaveToggleSwitch({required this.controller});
   final DuckDownloadsController controller;
 
   @override
+  State<_AutoSaveToggleSwitch> createState() => _AutoSaveToggleSwitchState();
+}
+
+class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
+  Offset? _dragPillOffset;
+  bool _isDraggingPill = false;
+
+  @override
   Widget build(BuildContext context) {
-    final active = controller.autoSaveVideos;
+    final active = widget.controller.autoSaveVideos;
+    final activeIndex = active ? 0 : 1;
+
+    final defaultLeft = 3.0 + (activeIndex * 50.0);
+    final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
+    final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 3.0;
+
+    final duration = _isDraggingPill ? Duration.zero : const Duration(milliseconds: 240);
+    final curve = _isDraggingPill ? Curves.linear : Curves.easeOutBack;
+
+    final scale = _isDraggingPill ? 1.08 : 1.0;
+    final width = _isDraggingPill ? 56.0 : 50.0;
+    final leftOffset = _isDraggingPill ? -3.0 : 0.0;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         GestureDetector(
-          onTap: () => controller.toggleAutoSaveVideos(!active),
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (details) {
+            final targetLeft = details.localPosition.dx - 25.0;
+            final targetTop = details.localPosition.dy - 13.0;
+            final minLeft = 3.0;
+            final maxLeft = 53.0;
+            setState(() {
+              _isDraggingPill = true;
+              _dragPillOffset = Offset(targetLeft.clamp(minLeft, maxLeft), targetTop.clamp(0.0, 6.0));
+            });
+          },
+          onPanUpdate: (details) {
+            final targetLeft = details.localPosition.dx - 25.0;
+            final targetTop = details.localPosition.dy - 13.0;
+            final minLeft = 3.0;
+            final maxLeft = 53.0;
+            
+            double dragLeft = targetLeft;
+            if (targetLeft < minLeft) {
+              final diff = minLeft - targetLeft;
+              dragLeft = minLeft - diff.clamp(0.0, 15.0) * 0.15;
+            } else if (targetLeft > maxLeft) {
+              final diff = targetLeft - maxLeft;
+              dragLeft = maxLeft + diff.clamp(0.0, 15.0) * 0.15;
+            }
+
+            double dragTop = targetTop;
+            if (targetTop < 3.0) {
+              final diff = 3.0 - targetTop;
+              dragTop = 3.0 - diff.clamp(0.0, 10.0) * 0.15;
+            } else {
+              final diff = targetTop - 3.0;
+              dragTop = 3.0 + diff.clamp(0.0, 10.0) * 0.15;
+            }
+
+            setState(() {
+              _dragPillOffset = Offset(dragLeft, dragTop);
+            });
+          },
+          onPanEnd: (details) {
+            if (_dragPillOffset != null) {
+              final center = _dragPillOffset!.dx + 25.0;
+              final targetIndex = ((center - 3.0) / 50.0).round().clamp(0, 1);
+              setState(() {
+                _isDraggingPill = false;
+              });
+              final newActive = targetIndex == 0;
+              widget.controller.toggleAutoSaveVideos(newActive);
+            }
+          },
           child: Container(
-            padding: const EdgeInsets.all(2),
+            width: 106,
+            height: 32,
             decoration: BoxDecoration(
-              color: const Color(0xFF2C2D30),
-              borderRadius: BorderRadius.circular(15),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.12),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: active ? _gold : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'ON',
-                    style: TextStyle(
-                      color: active ? const Color(0xFF101112) : Colors.white60,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                // 1. Frosted Glass Container Background (Clipped)
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.12),
+                            width: 1,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: !active ? _gold : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'OFF',
-                    style: TextStyle(
-                      color: !active ? const Color(0xFF101112) : Colors.white60,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                // 2. Sliding Active Pill (NOT Clipped, floats on top!)
+                AnimatedPositioned(
+                  duration: duration,
+                  curve: curve,
+                  left: currentLeft + leftOffset,
+                  top: currentTop,
+                  width: width,
+                  height: 26.0,
+                  child: Transform.scale(
+                    scale: scale,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(13),
+                        color: _gold,
+                        boxShadow: [
+                          BoxShadow(
+                            color: _gold.withOpacity(_isDraggingPill ? 0.5 : 0.3),
+                            blurRadius: _isDraggingPill ? 10 : 6,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
                     ),
+                  ),
+                ),
+                // 3. Labels Row
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => widget.controller.toggleAutoSaveVideos(true),
+                          child: Center(
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 180),
+                              style: TextStyle(
+                                color: active ? const Color(0xFF101112) : Colors.white60,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              child: const Text('ON'),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => widget.controller.toggleAutoSaveVideos(false),
+                          child: Center(
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 180),
+                              style: TextStyle(
+                                color: !active ? const Color(0xFF101112) : Colors.white60,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              child: const Text('OFF'),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -3578,6 +4021,306 @@ class _LibraryButtonState extends State<_LibraryButton> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomNavBar extends StatefulWidget {
+  const _BottomNavBar({required this.controller});
+  final DuckDownloadsController controller;
+
+  @override
+  State<_BottomNavBar> createState() => _BottomNavBarState();
+}
+
+class _BottomNavBarState extends State<_BottomNavBar> {
+  Offset? _dragPillOffset;
+  bool _isDraggingPill = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final goldColor = isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
+
+    if (isAndroid) {
+      return Padding(
+        padding: EdgeInsets.only(
+          bottom: 12 + MediaQuery.paddingOf(context).bottom,
+          left: 20,
+          right: 20,
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.24),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(28),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: isLight
+                      ? Colors.white.withOpacity(0.82)
+                      : Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: goldColor.withOpacity(isLight ? 0.12 : 0.16),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _LibraryButton(
+                        label: 'IMAGES',
+                        onTap: () => widget.controller.setTab(DuckTab.images),
+                      ),
+                      _LibraryButton(
+                        label: 'VIDEOS',
+                        onTap: () => widget.controller.setTab(DuckTab.videos),
+                      ),
+                      _LibraryButton(
+                        label: 'AUDIOS',
+                        onTap: () => widget.controller.setTab(DuckTab.audios),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // iOS iPhone layout with 4 tabs and liquid glass support
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final totalWidth = screenWidth - 40.0;
+    final tabWidth = totalWidth / 4.0;
+
+    final activeIndex = switch (widget.controller.tab) {
+      DuckTab.home => 0,
+      DuckTab.images => 1,
+      DuckTab.videos => 2,
+      DuckTab.audios => 3,
+    };
+
+    final defaultLeft = 4.0 + (activeIndex * tabWidth);
+    final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
+    final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 4.0;
+
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final useLiquidEffects = !reduceMotion;
+
+    final duration = _isDraggingPill ? Duration.zero : const Duration(milliseconds: 300);
+    final curve = _isDraggingPill 
+        ? Curves.linear 
+        : (useLiquidEffects ? Curves.easeOutBack : Curves.easeInOut);
+
+    final scale = _isDraggingPill && useLiquidEffects ? 1.05 : 1.0;
+    final pillWidth = _isDraggingPill && useLiquidEffects 
+        ? (tabWidth * 1.08) - 8.0 
+        : tabWidth - 8.0;
+    final leftOffset = _isDraggingPill && useLiquidEffects 
+        ? -((tabWidth * 0.08) / 2.0) 
+        : 0.0;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: 12 + MediaQuery.paddingOf(context).bottom,
+        left: 20,
+        right: 20,
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (details) {
+          final targetLeft = details.localPosition.dx - (tabWidth / 2.0);
+          final targetTop = details.localPosition.dy - 20.0;
+          final minLeft = 4.0;
+          final maxLeft = totalWidth - tabWidth + 4.0;
+          setState(() {
+            _isDraggingPill = true;
+            _dragPillOffset = Offset(targetLeft.clamp(minLeft, maxLeft), targetTop.clamp(0.0, 8.0));
+          });
+        },
+        onPanUpdate: (details) {
+          final targetLeft = details.localPosition.dx - (tabWidth / 2.0);
+          final targetTop = details.localPosition.dy - 20.0;
+          final minLeft = 4.0;
+          final maxLeft = totalWidth - tabWidth + 4.0;
+          
+          double dragLeft = targetLeft;
+          if (targetLeft < minLeft) {
+            final diff = minLeft - targetLeft;
+            dragLeft = minLeft - diff.clamp(0.0, 30.0) * 0.15;
+          } else if (targetLeft > maxLeft) {
+            final diff = targetLeft - maxLeft;
+            dragLeft = maxLeft + diff.clamp(0.0, 30.0) * 0.15;
+          }
+
+          double dragTop = targetTop;
+          if (targetTop < 4.0) {
+            final diff = 4.0 - targetTop;
+            dragTop = 4.0 - diff.clamp(0.0, 15.0) * 0.15;
+          } else {
+            final diff = targetTop - 4.0;
+            dragTop = 4.0 + diff.clamp(0.0, 15.0) * 0.15;
+          }
+
+          setState(() {
+            _dragPillOffset = Offset(dragLeft, dragTop);
+          });
+        },
+        onPanEnd: (details) {
+          if (_dragPillOffset != null) {
+            final center = _dragPillOffset!.dx + (tabWidth / 2.0);
+            final targetIndex = (center / tabWidth).floor().clamp(0, 3);
+            setState(() {
+              _isDraggingPill = false;
+            });
+            final targetTab = switch (targetIndex) {
+              0 => DuckTab.home,
+              1 => DuckTab.images,
+              2 => DuckTab.videos,
+              3 => DuckTab.audios,
+              _ => DuckTab.home,
+            };
+            widget.controller.setTab(targetTab);
+          }
+        },
+        child: Container(
+          width: totalWidth,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.24),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // 1. Frosted Glass Container Background (Clipped)
+              Positioned.fill(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: useLiquidEffects
+                      ? BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                          child: _buildIOSBackgroundDecoration(isLight, goldColor),
+                        )
+                      : _buildIOSBackgroundDecoration(isLight, goldColor, noBlur: true),
+                ),
+              ),
+              // 2. Sliding Active Pill (NOT Clipped, floats on top!)
+              AnimatedPositioned(
+                duration: duration,
+                curve: curve,
+                left: currentLeft + leftOffset,
+                top: currentTop,
+                width: pillWidth,
+                height: 40.0,
+                child: Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(24),
+                      gradient: !useLiquidEffects
+                          ? null
+                          : LinearGradient(
+                              colors: [
+                                Colors.white.withOpacity(0.18),
+                                Colors.transparent,
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                      color: goldColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: goldColor.withOpacity(_isDraggingPill ? 0.5 : 0.25),
+                          blurRadius: _isDraggingPill && useLiquidEffects ? 14 : 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // 3. Row of Labels
+              SizedBox(
+                height: 48,
+                child: Row(
+                  children: [
+                    _buildIOSTabOption(0, 'HOME', activeIndex == 0, isLight),
+                    _buildIOSTabOption(1, 'IMAGES', activeIndex == 1, isLight),
+                    _buildIOSTabOption(2, 'VIDEOS', activeIndex == 2, isLight),
+                    _buildIOSTabOption(3, 'AUDIOS', activeIndex == 3, isLight),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIOSBackgroundDecoration(bool isLight, Color goldColor, {bool noBlur = false}) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: noBlur
+            ? (isLight ? Colors.white : const Color(0xFF1E1F22))
+            : (isLight ? Colors.white.withOpacity(0.82) : Colors.white.withOpacity(0.06)),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: goldColor.withOpacity(isLight ? 0.12 : 0.16),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIOSTabOption(int index, String label, bool active, bool isLight) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          final targetTab = switch (index) {
+            0 => DuckTab.home,
+            1 => DuckTab.images,
+            2 => DuckTab.videos,
+            3 => DuckTab.audios,
+            _ => DuckTab.home,
+          };
+          widget.controller.setTab(targetTab);
+        },
+        child: Center(
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 200),
+            style: TextStyle(
+              color: active 
+                  ? const Color(0xFF101112) 
+                  : (isLight ? Colors.black54 : Colors.white60),
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+            ),
+            child: Text(label),
           ),
         ),
       ),
