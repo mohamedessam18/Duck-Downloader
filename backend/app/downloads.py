@@ -594,6 +594,8 @@ class DownloadManager:
                 h["Referer"] = "https://www.instagram.com/"
             elif "facebook.com" in dl_lower:
                 h["Referer"] = "https://www.facebook.com/"
+            elif "tiktok.com" in dl_lower or "tiktokcdn" in dl_lower or "byteoversea" in dl_lower or "tiktokv" in dl_lower:
+                h["Referer"] = "https://www.tiktok.com/"
             return h
 
         def download_single(img_url: str, img_title: str, index: int, total: int) -> tuple[str, str]:
@@ -718,7 +720,7 @@ class DownloadManager:
                 if not prefer_tiktok_no_watermark:
                     err_msg = str(exc).lower()
                     url_lower = state.url.lower()
-                    if "no video" in err_msg or "there is no video" in err_msg or any(domain in url_lower for domain in ["instagram.com", "twitter.com", "x.com", "pinterest.com"]):
+                    if "no video" in err_msg or "there is no video" in err_msg or any(domain in url_lower for domain in ["instagram.com", "twitter.com", "x.com", "pinterest.com", "tiktok.com", "tiktokv.com"]):
                         try:
                             await self._download_image_directly(state, target_dir)
                             return
