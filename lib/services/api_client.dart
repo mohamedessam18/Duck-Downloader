@@ -5,7 +5,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/download_models.dart';
 
-const _defaultApiBaseUrl = 'https://api.duckdownloader.site';
+const _defaultApiBaseUrl = 'https://duck-downloader-production.up.railway.app';
 
 class DuckApiClient {
   DuckApiClient({Dio? dio, String? apiBaseUrl})
