@@ -42,9 +42,9 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: assets/images/branding/liquid_glass_layers/layer-duck.png
+  image_path: assets/images/branding/logo_launcher_square_composed.png
   adaptive_icon_background: "#101112"
-  adaptive_icon_foreground: assets/images/branding/liquid_glass_layers/layer-duck.png
+  adaptive_icon_foreground: assets/images/branding/logo_launcher_square.png
   remove_alpha_ios: true
   background_color_ios: "#101112"
 

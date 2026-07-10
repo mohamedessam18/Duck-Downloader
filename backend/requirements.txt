@@ -5,4 +5,4 @@ yt-dlp[default,curl-cffi]
 python-multipart==0.0.20
 slowapi==0.1.9
 aiofiles==24.1.0
-# Force cache invalidate to update yt-dlp to latest version - June 30, 2026
+# Force cache invalidate to update yt-dlp to latest version - July 11, 2026

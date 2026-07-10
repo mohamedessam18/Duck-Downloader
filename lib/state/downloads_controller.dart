@@ -325,7 +325,9 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> moveItemToVault(DownloadItem item) async {
     final path = item.filePath;
     if (path == null) throw Exception('File not available locally.');
-    final ext = item.isAudio ? 'mp3' : 'mp4';
+    final ext = path.contains('.')
+        ? path.split('.').last.toLowerCase()
+        : (item.isAudio ? 'mp3' : (item.type == DownloadType.image ? 'jpg' : 'mp4'));
     final filename = item.title.toLowerCase().endsWith('.$ext')
         ? item.title
         : '${item.title}.$ext';
@@ -342,7 +344,9 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> moveItemFromVault(DownloadItem item) async {
     final path = item.filePath;
     if (path == null) throw Exception('File not available locally.');
-    final ext = item.isAudio ? 'mp3' : 'mp4';
+    final ext = path.contains('.')
+        ? path.split('.').last.toLowerCase()
+        : (item.isAudio ? 'mp3' : (item.type == DownloadType.image ? 'jpg' : 'mp4'));
     final filename = item.title.toLowerCase().endsWith('.$ext')
         ? item.title
         : '${item.title}.$ext';
@@ -1687,5 +1691,16 @@ class DuckDownloadsController extends ChangeNotifier
       notifyListeners();
       rethrow;
     }
+  }
+
+  DateTime? _lastBackPressTime;
+
+  bool handleDoubleBackToExit() {
+    final now = DateTime.now();
+    if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+      _lastBackPressTime = now;
+      return false;
+    }
+    return true;
   }
 }

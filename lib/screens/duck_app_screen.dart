@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 
 import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
@@ -79,7 +80,8 @@ class DuckAppScreen extends StatelessWidget {
           });
         }
 
-        final canPop =
+        final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+        final canPop = !isAndroid &&
             controller.playerItem == null &&
             controller.detectedClipboardUrl == null &&
             controller.tab == DuckTab.home &&
@@ -103,12 +105,28 @@ class DuckAppScreen extends StatelessWidget {
             }
 
             // 3. Otherwise pop tab history (on Android, directly jump to Home tab)
-            final isAndroid = Theme.of(context).platform == TargetPlatform.android;
             if (isAndroid && controller.tab != DuckTab.home) {
               controller.tabHistory.clear();
               controller.setTab(DuckTab.home);
               return;
             }
+
+            // 4. Double-back to exit on Android when on Home tab with empty history
+            if (isAndroid && controller.tab == DuckTab.home && controller.tabHistory.isEmpty) {
+              final shouldExit = controller.handleDoubleBackToExit();
+              if (shouldExit) {
+                SystemNavigator.pop();
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Press back again to exit'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+              return;
+            }
+
             controller.popTabHistory();
           },
           child: Scaffold(
@@ -154,13 +172,7 @@ class DuckAppScreen extends StatelessWidget {
                     bottom: 0,
                     left: 0,
                     right: 0,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AdMobBannerWidget(isPremiumActive: controller.isPremiumActive),
-                        _BottomNavBar(controller: controller),
-                      ],
-                    ),
+                    child: _BottomNavBar(controller: controller),
                   ),
               ],
             ),
@@ -2253,7 +2265,7 @@ class _LibraryViewState extends State<_LibraryView> {
                         color: _panel,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: .03),
+                          color: _border,
                         ),
                       ),
                       child: ListTile(
@@ -2264,8 +2276,8 @@ class _LibraryViewState extends State<_LibraryView> {
                         ),
                         title: Text(
                           playlist.name,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: _text,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -2882,61 +2894,65 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.sizeOf(context).height * 0.78,
       decoration: BoxDecoration(
         color: _dark,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
         gradient: RadialGradient(
-          center: Alignment(0, -0.4),
+          center: const Alignment(0, -0.4),
           radius: 1.0,
-          colors: [Color(0x1CFFC52F), _dark],
+          colors: [const Color(0x1CFFC52F), _dark],
         ),
       ),
       padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          Container(
-            width: 48,
-            height: 5,
-            decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-          const SizedBox(height: 28),
-          Icon(Icons.lock_outline, color: _gold, size: 40),
-          const SizedBox(height: 16),
-          const Text(
-            'Secure Vault',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(_message, style: TextStyle(color: _muted, fontSize: 14)),
-          const SizedBox(height: 32),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(4, (index) {
-              final filled = index < _pin.length;
-              return Container(
-                width: 16,
-                height: 16,
-                margin: const EdgeInsets.symmetric(horizontal: 12),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 5,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: filled ? _gold : Colors.transparent,
-                  border: Border.all(color: _gold, width: 2),
+                  color: _border,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              );
-            }),
+              ),
+              const SizedBox(height: 28),
+              Icon(Icons.lock_outline, color: _gold, size: 40),
+              const SizedBox(height: 16),
+              Text(
+                'Secure Vault',
+                style: TextStyle(
+                  color: _text,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(_message, style: TextStyle(color: _muted, fontSize: 14)),
+              const SizedBox(height: 32),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(4, (index) {
+                  final filled = index < _pin.length;
+                  return Container(
+                    width: 16,
+                    height: 16,
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: filled ? _gold : Colors.transparent,
+                      border: Border.all(color: _gold, width: 2),
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 32),
+              _buildKeypad(),
+              const SizedBox(height: 20),
+            ],
           ),
-          const Spacer(),
-          _buildKeypad(),
-          const SizedBox(height: 20),
-        ],
+        ),
       ),
     );
   }
@@ -2975,7 +2991,7 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
                       child: Text(
                         val,
                         style: TextStyle(
-                          color: isAction ? _muted : Colors.white,
+                          color: isAction ? _muted : _text,
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
                         ),
@@ -3014,7 +3030,7 @@ class _SecureVaultView extends StatelessWidget {
         ),
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+          icon: Icon(Icons.arrow_back_ios_new, color: _text),
           onPressed: () {
             controller.lockVault();
             Navigator.pop(context);
@@ -3070,7 +3086,7 @@ class _VaultItemTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: _panel,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: .03)),
+        border: Border.all(color: _border),
       ),
       child: Row(
         children: [
@@ -3090,8 +3106,8 @@ class _VaultItemTile extends StatelessWidget {
                   item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: _text,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
