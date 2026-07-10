@@ -71,13 +71,17 @@ app.mount("/files", StaticFiles(directory=settings.storage_dir), name="files")
 
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
-    return get_swagger_ui_html(
+    response = get_swagger_ui_html(
         openapi_url=app.openapi_url,
         title=app.title + " - Interactive API Docs",
         oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
         swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
-        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-themes@3.0.1/themes/3.x/theme-monokai.css",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
     )
+    html_content = response.body.decode("utf-8")
+    dark_theme_css = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-themes@3.0.1/themes/3.x/theme-monokai.css">'
+    html_content = html_content.replace("</head>", f"{dark_theme_css}</head>")
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/redoc", include_in_schema=False)
