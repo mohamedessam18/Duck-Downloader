@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duck Downloader API Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0b0c10;
+            --card-bg: rgba(255, 255, 255, 0.02);
+            --card-border: rgba(255, 255, 255, 0.07);
+            --gold: #ffc52f;
+            --gold-glow: rgba(255, 197, 47, 0.15);
+            --text-primary: #ffffff;
+            --text-secondary: #9aa0a6;
+            --green: #2ecc71;
+            --green-glow: rgba(46, 204, 113, 0.2);
+            --red: #e74c3c;
+            --red-glow: rgba(231, 76, 60, 0.2);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            overflow-x: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        /* Animated Ambient Background Spheres */
+        .ambient-glow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .sphere {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(140px);
+            opacity: 0.45;
+            animation: float 22s infinite alternate ease-in-out;
+        }
+
+        .sphere-1 {
+            width: 45vw;
+            height: 45vw;
+            background: radial-gradient(circle, var(--gold-glow) 0%, transparent 70%);
+            top: -10vw;
+            right: -10vw;
+        }
+
+        .sphere-2 {
+            width: 40vw;
+            height: 40vw;
+            background: radial-gradient(circle, rgba(142, 68, 173, 0.18) 0%, transparent 70%);
+            bottom: -10vw;
+            left: -10vw;
+            animation-duration: 28s;
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(4vw, 4vh) scale(1.1); }
+        }
+
+        /* Central Glass Card container */
+        .portal-container {
+            width: 100%;
+            max-width: 580px;
+            padding: 24px;
+            z-index: 2;
+        }
+
+        .glass-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 28px;
+            padding: 40px;
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+            text-align: center;
+            transition: border-color 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        .glass-card:hover {
+            border-color: rgba(255, 197, 47, 0.15);
+            box-shadow: 0 24px 80px rgba(255, 197, 47, 0.05);
+        }
+
+        /* Glowing Duck Logo Wrapper */
+        .logo-wrapper {
+            margin-bottom: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 88px;
+            height: 88px;
+            background: rgba(255, 197, 47, 0.05);
+            border: 1.5px solid rgba(255, 197, 47, 0.2);
+            border-radius: 22px;
+            box-shadow: 0 8px 32px rgba(255, 197, 47, 0.1);
+            animation: logo-pulse 4s infinite ease-in-out;
+        }
+
+        @keyframes logo-pulse {
+            0%, 100% { transform: translateY(0); box-shadow: 0 8px 32px rgba(255, 197, 47, 0.08); }
+            50% { transform: translateY(-4px); box-shadow: 0 16px 40px rgba(255, 197, 47, 0.18); border-color: rgba(255, 197, 47, 0.35); }
+        }
+
+        .logo-icon {
+            width: 48px;
+            height: 48px;
+            fill: var(--gold);
+            filter: drop-shadow(0 2px 8px rgba(255, 197, 47, 0.4));
+        }
+
+        h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gold);
+            text-transform: uppercase;
+            letter-spacing: 2.5px;
+            margin-bottom: 24px;
+        }
+
+        /* Live Health Status Status widget */
+        .status-widget {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--card-border);
+            padding: 8px 18px;
+            border-radius: 99px;
+            margin-bottom: 32px;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--text-secondary);
+            transition: background-color 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        .status-dot.active-green {
+            background-color: var(--green);
+            box-shadow: 0 0 12px var(--green), 0 0 4px var(--green);
+            animation: pulse-green 2s infinite;
+        }
+
+        .status-dot.active-red {
+            background-color: var(--red);
+            box-shadow: 0 0 12px var(--red), 0 0 4px var(--red);
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(46, 204, 113, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+        }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(231, 76, 60, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
+        }
+
+        .status-text {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .latency-badge {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--gold);
+            background: rgba(255, 197, 47, 0.08);
+            padding: 2px 8px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 36px;
+            text-align: left;
+        }
+
+        .feature-card {
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid var(--card-border);
+            padding: 18px;
+            border-radius: 18px;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .feature-card:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .feature-icon-wrapper {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+            border: 1px solid var(--card-border);
+            color: var(--gold);
+        }
+
+        .feature-icon {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        .feature-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .feature-desc {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        /* Action Buttons Wrapper */
+        .actions-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn {
+            font-family: 'Outfit', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            padding: 14px 28px;
+            border-radius: 14px;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background-color: var(--gold);
+            color: #000000;
+            border: none;
+            box-shadow: 0 4px 20px rgba(255, 197, 47, 0.15);
+        }
+
+        .btn-primary:hover {
+            background-color: #ffd054;
+            transform: translateY(-1.5px);
+            box-shadow: 0 6px 24px rgba(255, 197, 47, 0.25);
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--card-border);
+        }
+
+        .btn-secondary:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.25);
+            transform: translateY(-1.5px);
+        }
+
+        .btn-icon {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        /* Catch-All 404 Overlay notification */
+        .notification-overlay {
+            position: fixed;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            width: 90%;
+            max-width: 460px;
+            background: rgba(231, 76, 60, 0.08);
+            border: 1px solid rgba(231, 76, 60, 0.25);
+            border-radius: 18px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+            z-index: 999;
+            opacity: 0;
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.15), opacity 0.4s ease;
+        }
+
+        .notification-overlay.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .notif-icon-wrapper {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--red);
+            border-radius: 10px;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .notif-content {
+            flex-grow: 1;
+            text-align: left;
+        }
+
+        .notif-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        .notif-desc {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            margin-bottom: 8px;
+        }
+
+        .notif-btn {
+            font-size: 11px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-primary);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .notif-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        @media (max-width: 480px) {
+            .glass-card {
+                padding: 30px 20px;
+            }
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+            h1 {
+                font-size: 26px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Ambient glows -->
+    <div class="ambient-glow">
+        <div class="sphere sphere-1"></div>
+        <div class="sphere sphere-2"></div>
+    </div>
+
+    <!-- 404 Overlay Dynamic Modal -->
+    <div id="notif-404" class="notification-overlay">
+        <div class="notif-icon-wrapper">
+            <svg class="feature-icon" viewBox="0 0 24 24">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+        </div>
+        <div class="notif-content">
+            <div class="notif-title">404 - Page Not Found</div>
+            <div id="notif-path" class="notif-desc">The requested route does not exist on this gateway.</div>
+            <button class="notif-btn" onclick="dismiss404()">Go to Home Gateway</button>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="portal-container">
+        <div class="glass-card">
+            
+            <!-- Branded Logo -->
+            <div class="logo-wrapper">
+                <svg class="logo-icon" viewBox="0 0 100 100">
+                    <!-- Custom Premium Duck Vector -->
+                    <path d="M50 15c-11.8 0-21.4 9.1-22.3 20.7-.6 8 3 15.3 8.9 20.1C23 60.5 13 72.8 13 85h74c0-12.2-10-24.5-23.6-29.2 5.9-4.8 9.5-12.1 8.9-20.1C71.4 24.1 61.8 15 50 15zm-4.5 15c2.5 0 4.5 2 4.5 4.5s-2 4.5-4.5 4.5-4.5-2-4.5-4.5 2-4.5 4.5-4.5zm11.5 8c1.7 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.3-3 3-3z"/>
+                </svg>
+            </div>
+
+            <!-- Title & Subtitle -->
+            <h1>Duck Downloader</h1>
+            <div class="subtitle">API Gateway</div>
+
+            <!-- Live Status Widget -->
+            <div>
+                <div class="status-widget">
+                    <div id="status-indicator" class="status-dot"></div>
+                    <span id="status-label" class="status-text">Connecting to gateway...</span>
+                    <span id="latency-val" class="latency-badge"></span>
+                </div>
+            </div>
+
+            <!-- API Capabilities Grid -->
+            <div class="features-grid">
+                
+                <!-- Feature 1: Media Extraction -->
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <svg class="feature-icon" viewBox="0 0 24 24">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">Metadata Extraction</div>
+                    <div class="feature-desc">Retrieve media direct URLs, titles, and formats list from any public link.</div>
+                </div>
+
+                <!-- Feature 2: High-Speed Download -->
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <svg class="feature-icon" viewBox="0 0 24 24">
+                            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">Cloud Downloader</div>
+                    <div class="feature-desc">Fast, asynchronous server-side downloading with automatic audio stripping.</div>
+                </div>
+
+                <!-- Feature 3: WebSockets Progress -->
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <svg class="feature-icon" viewBox="0 0 24 24">
+                            <path d="M21 13h-8v8h8v-8zm-10 8v-8H3v8h8zm0-10V3H3v8h8zm10-8h-8v8h8V3z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">WebSocket Sync</div>
+                    <div class="feature-desc">Subscribe to real-time download status, ETA, and progress streams.</div>
+                </div>
+
+                <!-- Feature 4: Cookies Credentials -->
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <svg class="feature-icon" viewBox="0 0 24 24">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">Cookie Management</div>
+                    <div class="feature-desc">Configure authentication credentials to download restricted contents.</div>
+                </div>
+
+            </div>
+
+            <!-- CTAs Actions -->
+            <div class="actions-wrapper">
+                <a href="/docs" class="btn btn-primary">
+                    <svg class="btn-icon" viewBox="0 0 24 24">
+                        <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                    </svg>
+                    Developer API Docs
+                </a>
+                <a href="https://github.com/mohamedessam18/Duck-Downloader" target="_blank" class="btn btn-secondary">
+                    <svg class="btn-icon" viewBox="0 0 24 24">
+                        <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+                    </svg>
+                    Download Client App
+                </a>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Check health check and measure ping latency
+        async function checkHealth() {
+            const indicator = document.getElementById('status-indicator');
+            const label = document.getElementById('status-label');
+            const latencyBadge = document.getElementById('latency-val');
+            
+            const start = performance.now();
+            try {
+                const response = await fetch('/health');
+                const end = performance.now();
+                const latency = Math.round(end - start);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'ok') {
+                        indicator.className = 'status-dot active-green';
+                        label.textContent = 'All Systems Operational';
+                        latencyBadge.textContent = `${latency} ms`;
+                        latencyBadge.style.display = 'inline-block';
+                        return;
+                    }
+                }
+                throw new Error('Invalid status response');
+            } catch (err) {
+                indicator.className = 'status-dot active-red';
+                label.textContent = 'Service Under Maintenance';
+                latencyBadge.style.display = 'none';
+            }
+        }
+
+        // Catch-all 404 handler
+        function check404() {
+            const path = window.location.pathname;
+            if (path !== '/' && path !== '/docs' && path !== '/redoc' && !path.startsWith('/api') && !path.startsWith('/files')) {
+                const notif = document.getElementById('notif-404');
+                const pathDesc = document.getElementById('notif-path');
+                pathDesc.textContent = `The path '${path}' does not exist on this gateway. Redirected to root.`;
+                notif.classList.add('show');
+            }
+        }
+
+        // Dismiss 404 overlay and clean URL
+        function dismiss404() {
+            const notif = document.getElementById('notif-404');
+            notif.classList.remove('show');
+            window.history.replaceState({}, document.title, '/');
+        }
+
+        // Initialize
+        checkHealth();
+        check404();
+        
+        // Refresh health check every 15 seconds
+        setInterval(checkHealth, 15000);
+    </script>
+</body>
+</html>

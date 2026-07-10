@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from slowapi import Limiter
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
@@ -24,7 +26,37 @@ from .models import (
 
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="Duck Downloader API", version="1.0.0")
+tags_metadata = [
+    {
+        "name": "System Health",
+        "description": "API service operational status and health checks.",
+    },
+    {
+        "name": "Cookies Configuration",
+        "description": "Authentication settings for downloading from private or age-restricted links.",
+    },
+    {
+        "name": "Metadata Extraction",
+        "description": "Analyze URL links to extract titles, thumbnails, and list of available qualities.",
+    },
+    {
+        "name": "Downloads Control",
+        "description": "Initiate, pause, resume, cancel, and track media download progress.",
+    },
+    {
+        "name": "Media Editing",
+        "description": "Perform operations on downloaded media files like trimming duration.",
+    },
+]
+
+app = FastAPI(
+    title="Duck Downloader API",
+    version="1.0.0",
+    description="Backend API Gateway for Duck Downloader client applications. Supports video, audio, playlist, and image downloads.",
+    openapi_tags=tags_metadata,
+    docs_url=None,
+    redoc_url=None,
+)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
@@ -35,6 +67,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.mount("/files", StaticFiles(directory=settings.storage_dir), name="files")
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - Interactive API Docs",
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-themes@3.0.1/themes/3.x/theme-monokai.css",
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc_ui_html():
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - Redoc API Docs",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+    )
 
 
 def public_error(exc: Exception) -> str:
@@ -79,13 +131,21 @@ def public_error(exc: Exception) -> str:
     return message
 
 
-@app.get("/health")
+@app.get("/health", tags=["System Health"])
 async def health() -> dict[str, str]:
+    """
+    Check API gateway status.
+    Returns 'status: ok' if the service is operational.
+    """
     return {"status": "ok"}
 
 
-@app.get("/api/cookies", response_model=CookiesResponse)
+@app.get("/api/cookies", response_model=CookiesResponse, tags=["Cookies Configuration"])
 async def get_cookies() -> CookiesResponse:
+    """
+    Get active cookies file status.
+    Returns if cookies.txt exists, its size, and the filename.
+    """
     from pathlib import Path
     cookies_path = settings.storage_dir / "cookies.txt"
     active = settings.resolved_cookies_file is not None
@@ -96,8 +156,12 @@ async def get_cookies() -> CookiesResponse:
     return CookiesResponse(active=active, size=size, filename=filename)
 
 
-@app.post("/api/cookies", response_model=CookiesResponse)
+@app.post("/api/cookies", response_model=CookiesResponse, tags=["Cookies Configuration"])
 async def set_cookies(body: CookiesRequest) -> CookiesResponse:
+    """
+    Upload cookies.txt configuration text.
+    Allows authenticating requests to restricted platforms (e.g. YouTube private/age-gated videos).
+    """
     cookies_path = settings.storage_dir / "cookies.txt"
     try:
         cookies_path.write_text(body.cookies, encoding="utf-8")
@@ -112,8 +176,12 @@ async def set_cookies(body: CookiesRequest) -> CookiesResponse:
         raise HTTPException(status_code=422, detail=f"Failed to save cookies: {exc}") from exc
 
 
-@app.delete("/api/cookies", response_model=CookiesResponse)
+@app.delete("/api/cookies", response_model=CookiesResponse, tags=["Cookies Configuration"])
 async def delete_cookies() -> CookiesResponse:
+    """
+    Delete the active cookies.txt configuration.
+    Clears authentication cache for yt-dlp.
+    """
     cookies_path = settings.storage_dir / "cookies.txt"
     if cookies_path.exists():
         cookies_path.unlink()
@@ -130,9 +198,13 @@ def normalize_url(url: str) -> str:
     return val
 
 
-@app.post("/api/extract", response_model=ExtractResponse)
+@app.post("/api/extract", response_model=ExtractResponse, tags=["Metadata Extraction"])
 @limiter.limit("30/minute")
 async def extract(request: Request, body: ExtractRequest) -> dict:
+    """
+    Extract media metadata from URL.
+    Retrieves titles, platform name, thumbnail, and the list of available qualities.
+    """
     try:
         url = normalize_url(body.url)
         info = await download_manager.extract(url)
@@ -141,11 +213,15 @@ async def extract(request: Request, body: ExtractRequest) -> dict:
         raise HTTPException(status_code=422, detail=public_error(exc)) from exc
 
 
-@app.post("/api/playlist/extract", response_model=PlaylistExtractResponse)
+@app.post("/api/playlist/extract", response_model=PlaylistExtractResponse, tags=["Metadata Extraction"])
 @limiter.limit("20/minute")
 async def extract_playlist(
     request: Request, body: PlaylistExtractRequest
 ) -> PlaylistExtractResponse:
+    """
+    Extract playlist items and information.
+    Parses a playlist URL (e.g. YouTube playlist, Instagram multi-post carousel) and returns item entries.
+    """
     try:
         url = normalize_url(body.url)
         info = await download_manager.extract_playlist(url)
@@ -161,9 +237,13 @@ async def extract_playlist(
         raise HTTPException(status_code=422, detail=public_error(exc)) from exc
 
 
-@app.post("/api/download", response_model=DownloadResponse)
+@app.post("/api/download", response_model=DownloadResponse, tags=["Downloads Control"])
 @limiter.limit("20/minute")
 async def download(request: Request, body: DownloadRequest) -> DownloadResponse:
+    """
+    Initiate a download process for a given URL.
+    Configures download type, requested quality, watermark removal, and audio strip settings.
+    """
     try:
         url = normalize_url(body.url)
         download_id = await download_manager.start(
@@ -178,40 +258,57 @@ async def download(request: Request, body: DownloadRequest) -> DownloadResponse:
         raise HTTPException(status_code=422, detail=public_error(exc)) from exc
 
 
-@app.get("/api/status/{download_id}", response_model=StatusResponse)
+@app.get("/api/status/{download_id}", response_model=StatusResponse, tags=["Downloads Control"])
 async def status(download_id: str) -> StatusResponse:
+    """
+    Retrieve live download status.
+    Returns progress percentage, current download speed, ETA, and the resulting file URL on completion.
+    """
     state = download_manager.status(download_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Download not found")
     return StatusResponse(**state.snapshot())
 
 
-@app.post("/api/download/{download_id}/pause", response_model=StatusResponse)
+@app.post("/api/download/{download_id}/pause", response_model=StatusResponse, tags=["Downloads Control"])
 async def pause_download(download_id: str) -> StatusResponse:
+    """
+    Pause an active download process.
+    """
     state = await download_manager.pause(download_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Download not found")
     return StatusResponse(**state.snapshot())
 
 
-@app.post("/api/download/{download_id}/resume", response_model=StatusResponse)
+@app.post("/api/download/{download_id}/resume", response_model=StatusResponse, tags=["Downloads Control"])
 async def resume_download(download_id: str) -> StatusResponse:
+    """
+    Resume a paused download process.
+    """
     state = await download_manager.resume(download_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Download not found")
     return StatusResponse(**state.snapshot())
 
 
-@app.post("/api/download/{download_id}/cancel", response_model=StatusResponse)
+@app.post("/api/download/{download_id}/cancel", response_model=StatusResponse, tags=["Downloads Control"])
 async def cancel_download(download_id: str) -> StatusResponse:
+    """
+    Cancel and delete an active download process.
+    """
     state = await download_manager.cancel(download_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Download not found")
     return StatusResponse(**state.snapshot())
 
 
-@app.post("/api/trim", response_model=TrimResponse)
+@app.post("/api/trim", response_model=TrimResponse, tags=["Media Editing"])
 async def trim_file(body: TrimRequest) -> TrimResponse:
+    """
+    Trim a completed downloaded media file.
+    Clips duration between a custom start and end timestamp in seconds.
+    """
     try:
         res = await download_manager.trim(
             download_id=body.download_id,
@@ -246,3 +343,30 @@ async def download_ws(websocket: WebSocket, download_id: str) -> None:
         return
     finally:
         state.subscribers.discard(queue)
+
+
+# Serve static landing page and catch-all routes
+from pathlib import Path
+
+static_dir = Path(__file__).resolve().parent.parent / "static"
+index_html_path = static_dir / "index.html"
+index_html_content = ""
+if index_html_path.exists():
+    index_html_content = index_html_path.read_text(encoding="utf-8")
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def serve_home():
+    return HTMLResponse(content=index_html_content)
+
+
+@app.get("/{catchall:path}", response_class=HTMLResponse, include_in_schema=False)
+async def catch_all(request: Request, catchall: str):
+    lower_path = catchall.lower()
+    if (
+        lower_path.startswith("api/")
+        or lower_path.startswith("files/")
+        or lower_path == "openapi.json"
+    ):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return HTMLResponse(content=index_html_content)

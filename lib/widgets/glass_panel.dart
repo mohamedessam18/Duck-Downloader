@@ -1,8 +1,7 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../theme/duck_theme.dart';
+import 'duck_liquid_glass.dart';
 
 class GlassPanel extends StatelessWidget {
   const GlassPanel({
@@ -39,32 +38,25 @@ class GlassPanel extends StatelessWidget {
           borderRadius: BorderRadius.circular(borderRadius),
           boxShadow: isLight ? colors.lightCardShadow : colors.cardShadow,
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(borderRadius),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: tint != null
-                    ? null
-                    : LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white.withOpacity(isLight ? 0.45 : 0.18),
-                          Colors.white.withOpacity(isLight ? 0.15 : 0.04),
-                        ],
-                      ),
-                color: tint,
-                borderRadius: BorderRadius.circular(borderRadius),
-                border: Border.all(
-                  color: colors.glassBorder.withOpacity(isLight ? 0.12 : 0.28),
-                  width: 1,
-                ),
-              ),
-              child: Padding(padding: padding, child: child),
-            ),
-          ),
+        child: DuckLiquidGlassSurface(
+          borderRadius: borderRadius,
+          isLight: isLight,
+          variant: DuckLiquidGlassVariant.panel,
+          blurSigma: blurSigma,
+          fallbackColor: fill,
+          fallbackBorderColor:
+              colors.glassBorder.withValues(alpha: isLight ? 0.12 : 0.28),
+          fallbackGradient: tint == null
+              ? LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: isLight ? 0.45 : 0.18),
+                    Colors.white.withValues(alpha: isLight ? 0.15 : 0.04),
+                  ],
+                )
+              : null,
+          child: Padding(padding: padding, child: child),
         ),
       ),
     );

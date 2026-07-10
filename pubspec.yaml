@@ -28,6 +28,7 @@ dependencies:
   photo_view: ^0.15.0
   just_audio_background: ^0.0.1-beta.17
   ffmpeg_kit_flutter_new_min: ^3.3.2
+  liquid_glass_plus: ^0.3.2
 
 dev_dependencies:
   flutter_test:

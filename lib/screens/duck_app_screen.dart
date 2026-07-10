@@ -13,6 +13,7 @@ import '../services/premium_entitlement.dart';
 import '../state/downloads_controller.dart';
 import '../widgets/ambient_background.dart';
 import '../widgets/animated_duck.dart';
+import '../widgets/duck_liquid_glass.dart';
 import '../widgets/glass_panel.dart';
 import '../widgets/media/media_overlay_router.dart';
 import '../widgets/media/media_thumb.dart';
@@ -1933,24 +1934,19 @@ class _LibraryViewState extends State<_LibraryView> {
             children: [
               // 1. Frosted Glass Container Background (Clipped)
               Positioned.fill(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(21),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(isLight ? 0.45 : 0.05),
-                        borderRadius: BorderRadius.circular(21),
-                        border: Border.all(
-                          color: (isLight ? Colors.black : Colors.white).withOpacity(0.12),
-                          width: 1,
-                        ),
-                      ),
-                    ),
+                child: DuckLiquidGlassTrack(
+                  borderRadius: 21,
+                  isLight: isLight,
+                  isDragging: _isDraggingPill,
+                  blurSigma: 16,
+                  fallbackColor: Colors.white.withValues(
+                    alpha: isLight ? 0.45 : 0.05,
                   ),
+                  fallbackBorderColor: (isLight ? Colors.black : Colors.white)
+                      .withValues(alpha: 0.12),
+                  child: const SizedBox.expand(),
                 ),
               ),
-              // 2. Sliding Active Pill (NOT Clipped, floats on top!)
               AnimatedPositioned(
                 duration: duration,
                 curve: curve,
@@ -1960,18 +1956,12 @@ class _LibraryViewState extends State<_LibraryView> {
                 height: 32.0,
                 child: Transform.scale(
                   scale: scale,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: _gold,
-                      boxShadow: [
-                        BoxShadow(
-                          color: _gold.withOpacity(_isDraggingPill ? 0.5 : 0.3),
-                          blurRadius: _isDraggingPill ? 14 : 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
+                  child: DuckLiquidGlassPill(
+                    width: width,
+                    height: 32,
+                    borderRadius: 16,
+                    goldColor: _gold,
+                    isDragging: _isDraggingPill,
                   ),
                 ),
               ),
@@ -4121,20 +4111,19 @@ class _BottomNavBarState extends State<_BottomNavBar> {
     final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
     final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 4.0;
 
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final useLiquidEffects = !reduceMotion;
+    final useLiquidGlass = DuckLiquidGlass.shouldUseLiquidGlass(context);
 
     final duration = _isDraggingPill ? Duration.zero : const Duration(milliseconds: 300);
-    final curve = _isDraggingPill 
-        ? Curves.linear 
-        : (useLiquidEffects ? Curves.easeOutBack : Curves.easeInOut);
+    final curve = _isDraggingPill
+        ? Curves.linear
+        : (useLiquidGlass ? Curves.easeOutBack : Curves.easeInOut);
 
-    final scale = _isDraggingPill && useLiquidEffects ? 1.05 : 1.0;
-    final pillWidth = _isDraggingPill && useLiquidEffects 
-        ? (tabWidth * 1.08) - 8.0 
+    final scale = _isDraggingPill && useLiquidGlass ? 1.05 : 1.0;
+    final pillWidth = _isDraggingPill && useLiquidGlass
+        ? (tabWidth * 1.08) - 8.0
         : tabWidth - 8.0;
-    final leftOffset = _isDraggingPill && useLiquidEffects 
-        ? -((tabWidth * 0.08) / 2.0) 
+    final leftOffset = _isDraggingPill && useLiquidGlass
+        ? -((tabWidth * 0.08) / 2.0)
         : 0.0;
 
     return Padding(
@@ -4215,19 +4204,20 @@ class _BottomNavBarState extends State<_BottomNavBar> {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // 1. Frosted Glass Container Background (Clipped)
               Positioned.fill(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(28),
-                  child: useLiquidEffects
-                      ? BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                          child: _buildIOSBackgroundDecoration(isLight, goldColor),
-                        )
-                      : _buildIOSBackgroundDecoration(isLight, goldColor, noBlur: true),
+                child: DuckLiquidGlassTrack(
+                  borderRadius: 28,
+                  isLight: isLight,
+                  isDragging: _isDraggingPill,
+                  blurSigma: 18,
+                  fallbackColor: isLight
+                      ? Colors.white.withValues(alpha: 0.82)
+                      : Colors.white.withValues(alpha: 0.06),
+                  fallbackBorderColor:
+                      goldColor.withValues(alpha: isLight ? 0.12 : 0.16),
+                  child: const SizedBox.expand(),
                 ),
               ),
-              // 2. Sliding Active Pill (NOT Clipped, floats on top!)
               AnimatedPositioned(
                 duration: duration,
                 curve: curve,
@@ -4237,28 +4227,12 @@ class _BottomNavBarState extends State<_BottomNavBar> {
                 height: 40.0,
                 child: Transform.scale(
                   scale: scale,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
-                      gradient: !useLiquidEffects
-                          ? null
-                          : LinearGradient(
-                              colors: [
-                                Colors.white.withOpacity(0.18),
-                                Colors.transparent,
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                      color: goldColor,
-                      boxShadow: [
-                        BoxShadow(
-                          color: goldColor.withOpacity(_isDraggingPill ? 0.5 : 0.25),
-                          blurRadius: _isDraggingPill && useLiquidEffects ? 14 : 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
+                  child: DuckLiquidGlassPill(
+                    width: pillWidth,
+                    height: 40,
+                    borderRadius: 24,
+                    goldColor: goldColor,
+                    isDragging: _isDraggingPill,
                   ),
                 ),
               ),
@@ -4276,20 +4250,6 @@ class _BottomNavBarState extends State<_BottomNavBar> {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildIOSBackgroundDecoration(bool isLight, Color goldColor, {bool noBlur = false}) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: noBlur
-            ? (isLight ? Colors.white : const Color(0xFF1E1F22))
-            : (isLight ? Colors.white.withOpacity(0.82) : Colors.white.withOpacity(0.06)),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: goldColor.withOpacity(isLight ? 0.12 : 0.16),
         ),
       ),
     );

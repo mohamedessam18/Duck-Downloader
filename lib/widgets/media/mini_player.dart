@@ -1,9 +1,8 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../state/downloads_controller.dart';
+import '../duck_liquid_glass.dart';
 import 'audio_progress.dart';
 import 'media_colors.dart';
 import 'media_thumb.dart';
@@ -40,133 +39,124 @@ class MiniPlayer extends StatelessWidget {
                 ),
               ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.white.withOpacity(0.14),
-                        Colors.white.withOpacity(0.03),
+            child: DuckLiquidGlassSurface(
+              borderRadius: 16,
+              variant: DuckLiquidGlassVariant.capsule,
+              blurSigma: 20,
+              fallbackGradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withValues(alpha: 0.14),
+                  Colors.white.withValues(alpha: 0.03),
+                ],
+              ),
+              fallbackBorderColor: Colors.white.withValues(alpha: 0.20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: MediaThumb(
+                            url: item.thumbnail,
+                            preferNetworkThumbnail: true,
+                            width: 48,
+                            height: 48,
+                            icon: Icons.music_note,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                item.artist ?? 'Audio file',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style:
+                                    TextStyle(color: mediaWarmGold, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        _buildMiniPlayerButton(
+                          context: context,
+                          icon: controller.hasPreviousTrack
+                              ? Icons.skip_previous
+                              : Icons.skip_previous_outlined,
+                          color: controller.hasPreviousTrack
+                              ? Colors.white
+                              : Colors.white38,
+                          size: 26,
+                          onPressed: controller.hasPreviousTrack
+                              ? controller.playPrevious
+                              : null,
+                        ),
+                        _buildMiniPlayerButton(
+                          context: context,
+                          icon: isCompleted
+                              ? Icons.replay
+                              : playing
+                              ? Icons.pause
+                              : Icons.play_arrow,
+                          color: Colors.white,
+                          size: 28,
+                          onPressed: () {
+                            if (isCompleted) {
+                              audio.seek(Duration.zero);
+                              audio.play();
+                            } else {
+                              playing ? audio.pause() : audio.play();
+                            }
+                          },
+                        ),
+                        _buildMiniPlayerButton(
+                          context: context,
+                          icon: controller.hasNextTrack
+                              ? Icons.skip_next
+                              : Icons.skip_next_outlined,
+                          color: controller.hasNextTrack
+                              ? Colors.white
+                              : Colors.white38,
+                          size: 26,
+                          onPressed:
+                              controller.hasNextTrack ? controller.playNext : null,
+                        ),
+                        _buildMiniPlayerButton(
+                          context: context,
+                          icon: Icons.close,
+                          color: Colors.white70,
+                          size: 22,
+                          onPressed: controller.stopAudio,
+                        ),
                       ],
                     ),
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.20),
-                      width: 1,
+                  ),
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(16),
                     ),
+                    child: AudioMiniProgress(player: audio),
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: Row(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: MediaThumb(
-                                url: item.thumbnail,
-                                preferNetworkThumbnail: true,
-                                width: 48,
-                                height: 48,
-                                icon: Icons.music_note,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    item.artist ?? 'Audio file',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style:
-                                        TextStyle(color: mediaWarmGold, fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            _buildMiniPlayerButton(
-                              context: context,
-                              icon: controller.hasPreviousTrack
-                                  ? Icons.skip_previous
-                                  : Icons.skip_previous_outlined,
-                              color: controller.hasPreviousTrack
-                                  ? Colors.white
-                                  : Colors.white38,
-                              size: 26,
-                              onPressed: controller.hasPreviousTrack
-                                  ? controller.playPrevious
-                                  : null,
-                            ),
-                            _buildMiniPlayerButton(
-                              context: context,
-                              icon: isCompleted
-                                  ? Icons.replay
-                                  : playing
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              color: Colors.white,
-                              size: 28,
-                              onPressed: () {
-                                if (isCompleted) {
-                                  audio.seek(Duration.zero);
-                                  audio.play();
-                                } else {
-                                  playing ? audio.pause() : audio.play();
-                                }
-                              },
-                            ),
-                            _buildMiniPlayerButton(
-                              context: context,
-                              icon: controller.hasNextTrack
-                                  ? Icons.skip_next
-                                  : Icons.skip_next_outlined,
-                              color: controller.hasNextTrack
-                                  ? Colors.white
-                                  : Colors.white38,
-                              size: 26,
-                              onPressed:
-                                  controller.hasNextTrack ? controller.playNext : null,
-                            ),
-                            _buildMiniPlayerButton(
-                              context: context,
-                              icon: Icons.close,
-                              color: Colors.white70,
-                              size: 22,
-                              onPressed: controller.stopAudio,
-                            ),
-                          ],
-                        ),
-                      ),
-                      ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(16),
-                        ),
-                        child: AudioMiniProgress(player: audio),
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               ),
             ),
           ),
@@ -208,6 +198,7 @@ class MiniPlayer extends StatelessWidget {
     return LiquidGlassInteractiveButton(
       onTap: onPressed,
       size: size + 16.0,
+      useOwnLayer: false,
       child: buttonContent,
     );
   }

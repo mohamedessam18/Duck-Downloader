@@ -18,6 +18,7 @@ import 'media_utils.dart';
 import 'media_slider.dart';
 import 'liquid_interactive_button.dart';
 import '../../theme/duck_theme.dart';
+import '../duck_liquid_glass.dart';
 import '../glass_panel.dart';
 import 'player_error.dart';
 class DuckPlayerOverlay extends StatefulWidget {
@@ -559,57 +560,63 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                       right: 16,
                       child: SafeArea(
                         bottom: false,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _buildCircularGlassButton(
-                                  child: const Icon(Icons.close, color: Colors.white, size: 22),
-                                  onPressed: widget.controller.closePlayer,
-                                ),
-                                const SizedBox(width: 8),
-                                _buildCapsuleGlassContainer(
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                        icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 20),
-                                        onPressed: _enterPiP,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      IconButton(
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                        icon: Icon(
-                                          _videoFit == BoxFit.contain ? Icons.fullscreen : Icons.fullscreen_exit,
-                                          color: Colors.white,
-                                          size: 20,
-                                        ),
-                                        onPressed: _toggleFit,
-                                      ),
-                                    ],
+                        child: DuckLiquidGlassLayer(
+                          settings: DuckLiquidGlass.button(),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildCircularGlassButton(
+                                    child: const Icon(Icons.close, color: Colors.white, size: 22),
+                                    onPressed: widget.controller.closePlayer,
+                                    useOwnLayer: false,
                                   ),
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                  height: 48,
-                                ),
-                              ],
-                            ),
-                            _buildCircularGlassButton(
-                              child: Icon(
-                                _muted ? Icons.volume_off : Icons.volume_up,
-                                color: Colors.white,
-                                size: 22,
+                                  const SizedBox(width: 8),
+                                  _buildCapsuleGlassContainer(
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(),
+                                          icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 20),
+                                          onPressed: _enterPiP,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        IconButton(
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(),
+                                          icon: Icon(
+                                            _videoFit == BoxFit.contain ? Icons.fullscreen : Icons.fullscreen_exit,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                          onPressed: _toggleFit,
+                                        ),
+                                      ],
+                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    height: 48,
+                                    useOwnLayer: false,
+                                  ),
+                                ],
                               ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                _toggleMute();
-                              },
-                            ),
-                          ],
+                              _buildCircularGlassButton(
+                                child: Icon(
+                                  _muted ? Icons.volume_off : Icons.volume_up,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
+                                onPressed: () {
+                                  _resetHideTimer();
+                                  _toggleMute();
+                                },
+                                useOwnLayer: false,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -617,56 +624,62 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     // Center Playback Control Row
                     if (!_isTrimmingMode)
                       Center(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _buildCircularGlassButton(
-                              size: 64,
-                              child: const Icon(Icons.replay_10, color: Colors.white, size: 28),
-                              onPressed: () {
-                                _resetHideTimer();
-                                _seekVideo(const Duration(seconds: -10));
-                              },
-                            ),
-                            const SizedBox(width: 32),
-                            _buildCircularGlassButton(
-                              size: 90,
-                              child: Icon(
-                                isCompleted
-                                    ? Icons.replay
-                                    : value.isPlaying
-                                    ? Icons.pause
-                                    : Icons.play_arrow,
-                                color: Colors.white,
-                                size: 44,
+                        child: DuckLiquidGlassLayer(
+                          settings: DuckLiquidGlass.button(),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _buildCircularGlassButton(
+                                size: 64,
+                                child: const Icon(Icons.replay_10, color: Colors.white, size: 28),
+                                onPressed: () {
+                                  _resetHideTimer();
+                                  _seekVideo(const Duration(seconds: -10));
+                                },
+                                useOwnLayer: false,
                               ),
-                              onPressed: () {
-                                _resetHideTimer();
-                                if (isCompleted) {
-                                  video.seekTo(Duration.zero);
-                                  video.play();
-                                  _triggerPlayPauseOverlay(true);
-                                } else {
-                                  if (value.isPlaying) {
-                                    video.pause();
-                                    _triggerPlayPauseOverlay(false);
-                                  } else {
+                              const SizedBox(width: 32),
+                              _buildCircularGlassButton(
+                                size: 90,
+                                child: Icon(
+                                  isCompleted
+                                      ? Icons.replay
+                                      : value.isPlaying
+                                      ? Icons.pause
+                                      : Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 44,
+                                ),
+                                onPressed: () {
+                                  _resetHideTimer();
+                                  if (isCompleted) {
+                                    video.seekTo(Duration.zero);
                                     video.play();
                                     _triggerPlayPauseOverlay(true);
+                                  } else {
+                                    if (value.isPlaying) {
+                                      video.pause();
+                                      _triggerPlayPauseOverlay(false);
+                                    } else {
+                                      video.play();
+                                      _triggerPlayPauseOverlay(true);
+                                    }
                                   }
-                                }
-                              },
-                            ),
-                            const SizedBox(width: 32),
-                            _buildCircularGlassButton(
-                              size: 64,
-                              child: const Icon(Icons.forward_10, color: Colors.white, size: 28),
-                              onPressed: () {
-                                _resetHideTimer();
-                                _seekVideo(const Duration(seconds: 10));
-                              },
-                            ),
-                          ],
+                                },
+                                useOwnLayer: false,
+                              ),
+                              const SizedBox(width: 32),
+                              _buildCircularGlassButton(
+                                size: 64,
+                                child: const Icon(Icons.forward_10, color: Colors.white, size: 28),
+                                onPressed: () {
+                                  _resetHideTimer();
+                                  _seekVideo(const Duration(seconds: 10));
+                                },
+                                useOwnLayer: false,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
 
@@ -684,65 +697,70 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                             if (!_isTrimmingMode)
                               Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    _buildCapsuleGlassContainer(
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (!kIsWeb) ...[
+                                child: DuckLiquidGlassLayer(
+                                  settings: DuckLiquidGlass.button(),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      _buildCapsuleGlassContainer(
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (!kIsWeb) ...[
+                                              IconButton(
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints(),
+                                                icon: const Icon(Icons.content_cut, color: Colors.white, size: 20),
+                                                onPressed: value.duration <= Duration.zero
+                                                    ? null
+                                                    : () {
+                                                        setState(() {
+                                                          _isTrimmingMode = true;
+                                                          _trimStart = 0.0;
+                                                          _trimEnd = value.duration.inSeconds.toDouble();
+                                                        });
+                                                      },
+                                              ),
+                                              const SizedBox(width: 16),
+                                            ],
                                             IconButton(
                                               padding: EdgeInsets.zero,
                                               constraints: const BoxConstraints(),
-                                              icon: const Icon(Icons.content_cut, color: Colors.white, size: 20),
-                                              onPressed: value.duration <= Duration.zero
-                                                  ? null
-                                                  : () {
-                                                      setState(() {
-                                                        _isTrimmingMode = true;
-                                                        _trimStart = 0.0;
-                                                        _trimEnd = value.duration.inSeconds.toDouble();
-                                                      });
-                                                    },
+                                              icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 20),
+                                              onPressed: () {
+                                                widget.controller.closePlayer();
+                                                widget.controller.deleteDownload(widget.item);
+                                              },
                                             ),
-                                            const SizedBox(width: 16),
                                           ],
-                                          IconButton(
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 20),
-                                            onPressed: () {
-                                              widget.controller.closePlayer();
-                                              widget.controller.deleteDownload(widget.item);
-                                            },
-                                          ),
+                                        ),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                        height: 48,
+                                        useOwnLayer: false,
+                                      ),
+                                      PopupMenuButton<double>(
+                                        tooltip: 'Speed',
+                                        color: const Color(0xFF1E1E1E),
+                                        onSelected: (spd) {
+                                          _resetHideTimer();
+                                          _setSpeed(spd);
+                                        },
+                                        itemBuilder: (context) => const [
+                                          PopupMenuItem(value: 0.75, child: Text('0.75x')),
+                                          PopupMenuItem(value: 1.0, child: Text('1.0x')),
+                                          PopupMenuItem(value: 1.25, child: Text('1.25x')),
+                                          PopupMenuItem(value: 1.5, child: Text('1.5x')),
+                                          PopupMenuItem(value: 2.0, child: Text('2.0x')),
                                         ],
+                                        child: _buildCircularGlassButton(
+                                          size: 48,
+                                          child: const Icon(Icons.speed, color: Colors.white, size: 22),
+                                          onPressed: null,
+                                          useOwnLayer: false,
+                                        ),
                                       ),
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                      height: 48,
-                                    ),
-                                    PopupMenuButton<double>(
-                                      tooltip: 'Speed',
-                                      color: const Color(0xFF1E1E1E),
-                                      onSelected: (spd) {
-                                        _resetHideTimer();
-                                        _setSpeed(spd);
-                                      },
-                                      itemBuilder: (context) => const [
-                                        PopupMenuItem(value: 0.75, child: Text('0.75x')),
-                                        PopupMenuItem(value: 1.0, child: Text('1.0x')),
-                                        PopupMenuItem(value: 1.25, child: Text('1.25x')),
-                                        PopupMenuItem(value: 1.5, child: Text('1.5x')),
-                                        PopupMenuItem(value: 2.0, child: Text('2.0x')),
-                                      ],
-                                      child: _buildCircularGlassButton(
-                                        size: 48,
-                                        child: const Icon(Icons.speed, color: Colors.white, size: 22),
-                                        onPressed: null,
-                                      ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
 
@@ -902,39 +920,44 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Top Header Row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _buildCircularGlassButton(
-                        child: const Icon(Icons.close, color: Colors.white, size: 22),
-                        onPressed: widget.controller.closePlayer,
-                      ),
-                      const Text(
-                        'Now Playing',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
+                  DuckLiquidGlassLayer(
+                    settings: DuckLiquidGlass.button(),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildCircularGlassButton(
+                          child: const Icon(Icons.close, color: Colors.white, size: 22),
+                          onPressed: widget.controller.closePlayer,
+                          useOwnLayer: false,
                         ),
-                      ),
-                      Builder(
-                        builder: (context) {
-                          final currentItem = widget.controller.playerItem ?? widget.item;
-                          final isFav = currentItem.favorite;
-                          return _buildCircularGlassButton(
-                            child: Icon(
-                              isFav ? Icons.favorite : Icons.favorite_border,
-                              color: isFav ? mediaDanger : Colors.white70,
-                              size: 20,
-                            ),
-                            onPressed: () {
-                              widget.controller.toggleFavorite(currentItem);
-                            },
-                          );
-                        },
-                      ),
-                    ],
+                        const Text(
+                          'Now Playing',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        Builder(
+                          builder: (context) {
+                            final currentItem = widget.controller.playerItem ?? widget.item;
+                            final isFav = currentItem.favorite;
+                            return _buildCircularGlassButton(
+                              child: Icon(
+                                isFav ? Icons.favorite : Icons.favorite_border,
+                                color: isFav ? mediaDanger : Colors.white70,
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                widget.controller.toggleFavorite(currentItem);
+                              },
+                              useOwnLayer: false,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
 
                   // Scaling artwork card
@@ -1113,79 +1136,85 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
                   // Main Audio Playback Controls
                   if (!_isTrimmingMode)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            widget.controller.hasPreviousTrack
-                                ? Icons.skip_previous
-                                : Icons.skip_previous_outlined,
-                            size: 32,
-                            color: widget.controller.hasPreviousTrack
-                                ? Colors.white
-                                : Colors.white24,
+                    DuckLiquidGlassLayer(
+                      settings: DuckLiquidGlass.button(),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              widget.controller.hasPreviousTrack
+                                  ? Icons.skip_previous
+                                  : Icons.skip_previous_outlined,
+                              size: 32,
+                              color: widget.controller.hasPreviousTrack
+                                  ? Colors.white
+                                  : Colors.white24,
+                            ),
+                            onPressed: widget.controller.hasPreviousTrack
+                                ? widget.controller.playPrevious
+                                : null,
                           ),
-                          onPressed: widget.controller.hasPreviousTrack
-                              ? widget.controller.playPrevious
-                              : null,
-                        ),
-                        _buildCircularGlassButton(
-                          size: 48,
-                          child: const Icon(Icons.replay_10, color: Colors.white, size: 22),
-                          onPressed: () {
-                            _resetHideTimer();
-                            _seekAudio(const Duration(seconds: -10));
-                          },
-                        ),
-                        _buildCircularGlassButton(
-                          size: 78,
-                          child: Icon(
-                            isCompleted
-                                ? Icons.replay
-                                : playing
-                                ? Icons.pause
-                                : Icons.play_arrow,
-                            color: Colors.white,
-                            size: 38,
+                          _buildCircularGlassButton(
+                            size: 48,
+                            child: const Icon(Icons.replay_10, color: Colors.white, size: 22),
+                            onPressed: () {
+                              _resetHideTimer();
+                              _seekAudio(const Duration(seconds: -10));
+                            },
+                            useOwnLayer: false,
                           ),
-                          onPressed: () {
-                            _resetHideTimer();
-                            if (isCompleted) {
-                              audio.seek(Duration.zero);
-                              audio.play();
-                            } else {
-                              playing ? audio.pause() : audio.play();
-                            }
-                          },
-                        ),
-                        _buildCircularGlassButton(
-                          size: 48,
-                          child: const Icon(Icons.forward_10, color: Colors.white, size: 22),
-                          onPressed: () {
-                            _resetHideTimer();
-                            _seekAudio(const Duration(seconds: 10));
-                          },
-                        ),
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            widget.controller.hasNextTrack
-                                ? Icons.skip_next
-                                : Icons.skip_next_outlined,
-                            size: 32,
-                            color: widget.controller.hasNextTrack
-                                ? Colors.white
-                                : Colors.white24,
+                          _buildCircularGlassButton(
+                            size: 78,
+                            child: Icon(
+                              isCompleted
+                                  ? Icons.replay
+                                  : playing
+                                  ? Icons.pause
+                                  : Icons.play_arrow,
+                              color: Colors.white,
+                              size: 38,
+                            ),
+                            onPressed: () {
+                              _resetHideTimer();
+                              if (isCompleted) {
+                                audio.seek(Duration.zero);
+                                audio.play();
+                              } else {
+                                playing ? audio.pause() : audio.play();
+                              }
+                            },
+                            useOwnLayer: false,
                           ),
-                          onPressed: widget.controller.hasNextTrack
-                              ? widget.controller.playNext
-                              : null,
-                        ),
-                      ],
+                          _buildCircularGlassButton(
+                            size: 48,
+                            child: const Icon(Icons.forward_10, color: Colors.white, size: 22),
+                            onPressed: () {
+                              _resetHideTimer();
+                              _seekAudio(const Duration(seconds: 10));
+                            },
+                            useOwnLayer: false,
+                          ),
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              widget.controller.hasNextTrack
+                                  ? Icons.skip_next
+                                  : Icons.skip_next_outlined,
+                              size: 32,
+                              color: widget.controller.hasNextTrack
+                                  ? Colors.white
+                                  : Colors.white24,
+                            ),
+                            onPressed: widget.controller.hasNextTrack
+                                ? widget.controller.playNext
+                                : null,
+                          ),
+                        ],
+                      ),
                     ),
 
                   const SizedBox(height: 16),
@@ -1604,56 +1633,45 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     required Widget child,
     required VoidCallback? onPressed,
     double size = 48,
+    bool useOwnLayer = true,
   }) {
-    final buttonContent = Container(
+    final buttonContent = SizedBox(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
+      child: Center(child: child),
+    );
+
+    if (onPressed == null) {
+      return DuckLiquidGlassSurface(
+        borderRadius: size / 2,
+        clipOval: true,
+        variant: DuckLiquidGlassVariant.button,
+        useOwnLayer: useOwnLayer,
+        blurSigma: 20,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.25),
+            color: Colors.black.withValues(alpha: 0.25),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
         ],
-      ),
-      child: ClipOval(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(0.18),
-                  Colors.white.withOpacity(0.04),
-                ],
-              ),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.24),
-                width: 1,
-              ),
-            ),
-            child: Center(
-              child: child,
-            ),
-          ),
+        fallbackGradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.18),
+            Colors.white.withValues(alpha: 0.04),
+          ],
         ),
-      ),
-    );
-
-    if (onPressed == null) {
-      return buttonContent;
+        fallbackBorderColor: Colors.white.withValues(alpha: 0.24),
+        child: buttonContent,
+      );
     }
 
     return LiquidGlassInteractiveButton(
       onTap: onPressed,
       size: size,
+      useOwnLayer: useOwnLayer,
       child: buttonContent,
     );
   }
@@ -1664,48 +1682,36 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     double? height = 48,
     double defaultRadius = 24,
     EdgeInsetsGeometry? padding,
+    bool useOwnLayer = true,
   }) {
-    final borderRadius = height != null
-        ? BorderRadius.circular(height / 2)
-        : BorderRadius.circular(defaultRadius);
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: borderRadius,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
+    final radius = height != null ? height / 2 : defaultRadius;
+    return DuckLiquidGlassSurface(
+      borderRadius: radius,
+      variant: DuckLiquidGlassVariant.capsule,
+      useOwnLayer: useOwnLayer,
+      blurSigma: 20,
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.25),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
+      fallbackGradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(alpha: 0.18),
+          Colors.white.withValues(alpha: 0.04),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: borderRadius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            width: width,
-            height: height,
-            padding: padding,
-            decoration: BoxDecoration(
-              borderRadius: borderRadius,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(0.18),
-                  Colors.white.withOpacity(0.04),
-                ],
-              ),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.24),
-                width: 1,
-              ),
-            ),
-            child: child,
-          ),
+      fallbackBorderColor: Colors.white.withValues(alpha: 0.24),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Padding(
+          padding: padding ?? EdgeInsets.zero,
+          child: child,
         ),
       ),
     );
