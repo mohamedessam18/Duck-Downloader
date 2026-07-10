@@ -3,23 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Duck Downloader API Portal</title>
+    <title>Duck Downloader Developer Console</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #0b0c10;
+            --bg-color: #08090d;
             --card-bg: rgba(255, 255, 255, 0.02);
-            --card-border: rgba(255, 255, 255, 0.07);
+            --card-border: rgba(255, 255, 255, 0.06);
             --gold: #ffc52f;
-            --gold-glow: rgba(255, 197, 47, 0.15);
+            --gold-glow: rgba(255, 197, 47, 0.12);
             --text-primary: #ffffff;
-            --text-secondary: #9aa0a6;
+            --text-secondary: #8e95a5;
             --green: #2ecc71;
-            --green-glow: rgba(46, 204, 113, 0.2);
+            --green-glow: rgba(46, 204, 113, 0.15);
             --red: #e74c3c;
-            --red-glow: rgba(231, 76, 60, 0.2);
+            --red-glow: rgba(231, 76, 60, 0.15);
+            --blue: #3498db;
+            --blue-glow: rgba(52, 152, 219, 0.15);
         }
 
         * {
@@ -33,20 +35,19 @@
             background-color: var(--bg-color);
             color: var(--text-primary);
             overflow-x: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
             min-height: 100vh;
             position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
         /* Animated Ambient Background Spheres */
         .ambient-glow {
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            height: 100vh;
             overflow: hidden;
             z-index: 1;
             pointer-events: none;
@@ -56,7 +57,7 @@
             position: absolute;
             border-radius: 50%;
             filter: blur(140px);
-            opacity: 0.45;
+            opacity: 0.35;
             animation: float 22s infinite alternate ease-in-out;
         }
 
@@ -71,7 +72,7 @@
         .sphere-2 {
             width: 40vw;
             height: 40vw;
-            background: radial-gradient(circle, rgba(142, 68, 173, 0.18) 0%, transparent 70%);
+            background: radial-gradient(circle, rgba(142, 68, 173, 0.15) 0%, transparent 70%);
             bottom: -10vw;
             left: -10vw;
             animation-duration: 28s;
@@ -83,33 +84,559 @@
             100% { transform: translate(4vw, 4vh) scale(1.1); }
         }
 
-        /* Central Glass Card container */
-        .portal-container {
-            width: 100%;
-            max-width: 580px;
-            padding: 24px;
-            z-index: 2;
+        /* Header Navigation */
+        header {
+            position: sticky;
+            top: 0;
+            background: rgba(8, 9, 13, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--card-border);
+            z-index: 100;
+            padding: 16px 24px;
         }
 
-        .glass-card {
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .brand-logo {
+            width: 36px;
+            height: 36px;
+            fill: var(--gold);
+            filter: drop-shadow(0 2px 6px rgba(255, 197, 47, 0.3));
+        }
+
+        .brand-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        nav {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .nav-link {
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 99px;
+            border: 1px solid transparent;
+            transition: all 0.25s ease;
+            white-space: nowrap;
+        }
+
+        .nav-link:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .nav-link.active {
+            color: var(--gold);
+            background: rgba(255, 197, 47, 0.05);
+            border-color: rgba(255, 197, 47, 0.15);
+        }
+
+        /* Main Workspace Container */
+        main {
+            max-width: 1000px;
+            width: 100%;
+            margin: 40px auto;
+            padding: 0 24px 80px 24px;
+            z-index: 2;
+            flex-grow: 1;
+        }
+
+        .view-section {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .view-section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Card Panels */
+        .panel-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
-            border-radius: 28px;
-            padding: 40px;
+            border-radius: 24px;
+            padding: 32px;
             backdrop-filter: blur(30px);
             -webkit-backdrop-filter: blur(30px);
-            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
-            text-align: center;
-            transition: border-color 0.4s ease, box-shadow 0.4s ease;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            margin-bottom: 24px;
         }
 
-        .glass-card:hover {
-            border-color: rgba(255, 197, 47, 0.15);
-            box-shadow: 0 24px 80px rgba(255, 197, 47, 0.05);
+        .panel-header {
+            margin-bottom: 28px;
+            text-align: left;
         }
 
-        /* Glowing Duck Logo Wrapper */
-        .logo-wrapper {
+        .panel-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .panel-subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .form-label {
+            display: block;
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 14px 18px;
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .form-input:focus {
+            border-color: rgba(255, 197, 47, 0.3);
+            box-shadow: 0 0 16px rgba(255, 197, 47, 0.05);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .form-textarea {
+            width: 100%;
+            min-height: 200px;
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 16px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            outline: none;
+            resize: vertical;
+            transition: all 0.3s ease;
+        }
+
+        .form-textarea:focus {
+            border-color: rgba(255, 197, 47, 0.3);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .checkbox-group input {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            accent-color: var(--gold);
+        }
+
+        .checkbox-group label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        .btn {
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+            text-decoration: none;
+        }
+
+        .btn-gold {
+            background: var(--gold);
+            color: #000000;
+            box-shadow: 0 4px 16px rgba(255, 197, 47, 0.15);
+        }
+
+        .btn-gold:hover {
+            background: #ffd054;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(255, 197, 47, 0.25);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--card-border);
+            color: var(--text-primary);
+        }
+
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: rgba(231, 76, 60, 0.1);
+            border: 1px solid rgba(231, 76, 60, 0.2);
+            color: var(--red);
+        }
+
+        .btn-danger:hover {
+            background: rgba(231, 76, 60, 0.18);
+            border-color: rgba(231, 76, 60, 0.35);
+            transform: translateY(-1px);
+        }
+
+        /* Status Badge */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--card-border);
+            padding: 6px 14px;
+            border-radius: 99px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .status-dot.green {
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+            animation: pulse-dot 2s infinite;
+        }
+
+        .status-dot.red {
+            background: var(--red);
+            box-shadow: 0 0 10px var(--red);
+            animation: pulse-dot-red 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.4); }
+            70% { box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+        }
+
+        @keyframes pulse-dot-red {
+            0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); }
+            70% { box-shadow: 0 0 0 6px rgba(231, 76, 60, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
+        }
+
+        /* Results Display */
+        .results-box {
+            margin-top: 28px;
+            border-top: 1px solid var(--card-border);
+            padding-top: 24px;
+            text-align: left;
+            display: none;
+        }
+
+        .results-box.active {
+            display: block;
+        }
+
+        /* Response Code display */
+        .code-block {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 18px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            color: #d1d5db;
+            margin-top: 12px;
+            line-height: 1.5;
+        }
+
+        /* Health grid */
+        .health-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .health-card {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--card-border);
+            padding: 20px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .health-info {
+            text-align: left;
+        }
+
+        .health-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        .health-desc {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* Extracted Metadata Card */
+        .meta-card {
+            display: flex;
+            gap: 20px;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--card-border);
+            padding: 20px;
+            border-radius: 18px;
+            margin-bottom: 20px;
+        }
+
+        .meta-thumb {
+            width: 140px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .meta-details {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            text-align: left;
+        }
+
+        .meta-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            line-height: 1.4;
+        }
+
+        .meta-info-row {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .meta-badge {
+            background: rgba(255, 197, 47, 0.08);
+            color: var(--gold);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        /* Qualities list */
+        .format-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .format-item {
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid var(--card-border);
+            padding: 10px 16px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .format-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .format-id {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--gold);
+            font-weight: 500;
+        }
+
+        .format-info-text {
+            color: var(--text-secondary);
+        }
+
+        /* Playlist list */
+        .playlist-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 350px;
+            overflow-y: auto;
+            margin-top: 16px;
+            padding-right: 6px;
+        }
+
+        .playlist-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid var(--card-border);
+            padding: 8px 12px;
+            border-radius: 10px;
+        }
+
+        .playlist-item-thumb {
+            width: 60px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .playlist-item-title {
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 80%;
+        }
+
+        /* Progress stream tracker */
+        .progress-tracker {
+            margin-top: 20px;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--card-border);
+            padding: 24px;
+            border-radius: 18px;
+            text-align: left;
+            display: none;
+        }
+
+        .progress-tracker.active {
+            display: block;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 99px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar-fill {
+            width: 0%;
+            height: 100%;
+            background: var(--gold);
+            border-radius: 99px;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(255, 197, 47, 0.3);
+        }
+
+        .progress-metrics {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+
+        .tracker-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        /* Landing view main branding */
+        .home-logo-wrapper {
             margin-bottom: 24px;
             display: inline-flex;
             align-items: center;
@@ -119,7 +646,7 @@
             background: rgba(255, 197, 47, 0.05);
             border: 1.5px solid rgba(255, 197, 47, 0.2);
             border-radius: 22px;
-            box-shadow: 0 8px 32px rgba(255, 197, 47, 0.1);
+            box-shadow: 0 8px 32px rgba(255, 197, 47, 0.08);
             animation: logo-pulse 4s infinite ease-in-out;
         }
 
@@ -128,460 +655,920 @@
             50% { transform: translateY(-4px); box-shadow: 0 16px 40px rgba(255, 197, 47, 0.18); border-color: rgba(255, 197, 47, 0.35); }
         }
 
-        .logo-icon {
+        .home-logo-icon {
             width: 48px;
             height: 48px;
             fill: var(--gold);
             filter: drop-shadow(0 2px 8px rgba(255, 197, 47, 0.4));
         }
 
-        h1 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 32px;
-            font-weight: 700;
-            color: var(--text-primary);
-            letter-spacing: -0.5px;
-            margin-bottom: 4px;
-        }
-
-        .subtitle {
-            font-family: 'Outfit', sans-serif;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--gold);
-            text-transform: uppercase;
-            letter-spacing: 2.5px;
-            margin-bottom: 24px;
-        }
-
-        /* Live Health Status Status widget */
-        .status-widget {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid var(--card-border);
-            padding: 8px 18px;
-            border-radius: 99px;
-            margin-bottom: 32px;
-            transition: all 0.3s ease;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background-color: var(--text-secondary);
-            transition: background-color 0.4s ease, box-shadow 0.4s ease;
-        }
-
-        .status-dot.active-green {
-            background-color: var(--green);
-            box-shadow: 0 0 12px var(--green), 0 0 4px var(--green);
-            animation: pulse-green 2s infinite;
-        }
-
-        .status-dot.active-red {
-            background-color: var(--red);
-            box-shadow: 0 0 12px var(--red), 0 0 4px var(--red);
-            animation: pulse-red 2s infinite;
-        }
-
-        @keyframes pulse-green {
-            0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.4); }
-            70% { box-shadow: 0 0 0 8px rgba(46, 204, 113, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
-        }
-
-        @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); }
-            70% { box-shadow: 0 0 0 8px rgba(231, 76, 60, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
-        }
-
-        .status-text {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-secondary);
-        }
-
-        .latency-badge {
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--gold);
-            background: rgba(255, 197, 47, 0.08);
-            padding: 2px 8px;
-            border-radius: 6px;
-            display: none;
-        }
-
-        /* Features Grid */
-        .features-grid {
+        .home-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 16px;
-            margin-bottom: 36px;
+            margin: 32px 0;
             text-align: left;
         }
 
-        .feature-card {
+        .home-card {
             background: rgba(255, 255, 255, 0.015);
             border: 1px solid var(--card-border);
-            padding: 18px;
+            padding: 20px;
             border-radius: 18px;
+            cursor: pointer;
             transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
         }
 
-        .feature-card:hover {
+        .home-card:hover {
             background: rgba(255, 255, 255, 0.03);
-            border-color: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 197, 47, 0.15);
             transform: translateY(-2px);
         }
 
-        .feature-icon-wrapper {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.03);
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .home-card-icon {
+            width: 32px;
+            height: 32px;
+            fill: var(--gold);
             margin-bottom: 12px;
-            border: 1px solid var(--card-border);
-            color: var(--gold);
         }
 
-        .feature-icon {
-            width: 18px;
-            height: 18px;
-            fill: currentColor;
-        }
-
-        .feature-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-        }
-
-        .feature-desc {
-            font-size: 11px;
-            color: var(--text-secondary);
-            line-height: 1.4;
-        }
-
-        /* Action Buttons Wrapper */
-        .actions-wrapper {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .btn {
+        .home-card-title {
             font-family: 'Outfit', sans-serif;
             font-size: 15px;
             font-weight: 600;
-            padding: 14px 28px;
-            border-radius: 14px;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            cursor: pointer;
+            margin-bottom: 4px;
         }
 
-        .btn-primary {
-            background-color: var(--gold);
-            color: #000000;
-            border: none;
-            box-shadow: 0 4px 20px rgba(255, 197, 47, 0.15);
-        }
-
-        .btn-primary:hover {
-            background-color: #ffd054;
-            transform: translateY(-1.5px);
-            box-shadow: 0 6px 24px rgba(255, 197, 47, 0.25);
-        }
-
-        .btn-secondary {
-            background-color: transparent;
-            color: var(--text-primary);
-            border: 1px solid var(--card-border);
-        }
-
-        .btn-secondary:hover {
-            background-color: rgba(255, 255, 255, 0.03);
-            border-color: rgba(255, 255, 255, 0.25);
-            transform: translateY(-1.5px);
-        }
-
-        .btn-icon {
-            width: 18px;
-            height: 18px;
-            fill: currentColor;
-        }
-
-        /* Catch-All 404 Overlay notification */
-        .notification-overlay {
-            position: fixed;
-            top: 24px;
-            left: 50%;
-            transform: translateX(-50%) translateY(-100px);
-            width: 90%;
-            max-width: 460px;
-            background: rgba(231, 76, 60, 0.08);
-            border: 1px solid rgba(231, 76, 60, 0.25);
-            border-radius: 18px;
-            padding: 16px 20px;
-            display: flex;
-            align-items: flex-start;
-            gap: 14px;
-            backdrop-filter: blur(25px);
-            -webkit-backdrop-filter: blur(25px);
-            box-shadow: 0 16px 40px rgba(0,0,0,0.5);
-            z-index: 999;
-            opacity: 0;
-            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.15), opacity 0.4s ease;
-        }
-
-        .notification-overlay.show {
-            transform: translateX(-50%) translateY(0);
-            opacity: 1;
-        }
-
-        .notif-icon-wrapper {
-            background: rgba(231, 76, 60, 0.15);
-            color: var(--red);
-            border-radius: 10px;
-            padding: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .notif-content {
-            flex-grow: 1;
-            text-align: left;
-        }
-
-        .notif-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 14px;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 2px;
-        }
-
-        .notif-desc {
+        .home-card-desc {
             font-size: 11px;
             color: var(--text-secondary);
             line-height: 1.4;
-            margin-bottom: 8px;
         }
 
-        .notif-btn {
-            font-size: 11px;
-            font-weight: 600;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--card-border);
-            color: var(--text-primary);
-            padding: 4px 10px;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .notif-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.2);
-        }
-
-        @media (max-width: 480px) {
-            .glass-card {
-                padding: 30px 20px;
-            }
-            .features-grid {
+        @media (max-width: 768px) {
+            .form-row, .health-grid, .home-grid {
                 grid-template-columns: 1fr;
             }
-            h1 {
-                font-size: 26px;
+            .meta-card {
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+            }
+            .meta-details {
+                align-items: center;
+                text-align: center;
+            }
+            header {
+                padding: 12px 16px;
+            }
+            .brand-title {
+                display: none;
             }
         }
     </style>
 </head>
 <body>
 
-    <!-- Ambient glows -->
+    <!-- Ambient background glows -->
     <div class="ambient-glow">
         <div class="sphere sphere-1"></div>
         <div class="sphere sphere-2"></div>
     </div>
 
-    <!-- 404 Overlay Dynamic Modal -->
-    <div id="notif-404" class="notification-overlay">
-        <div class="notif-icon-wrapper">
-            <svg class="feature-icon" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-            </svg>
-        </div>
-        <div class="notif-content">
-            <div class="notif-title">404 - Page Not Found</div>
-            <div id="notif-path" class="notif-desc">The requested route does not exist on this gateway.</div>
-            <button class="notif-btn" onclick="dismiss404()">Go to Home Gateway</button>
-        </div>
-    </div>
-
-    <!-- Main Container -->
-    <div class="portal-container">
-        <div class="glass-card">
-            
-            <!-- Branded Logo -->
-            <div class="logo-wrapper">
-                <svg class="logo-icon" viewBox="0 0 100 100">
-                    <!-- Custom Premium Duck Vector -->
+    <!-- Header Navigation -->
+    <header>
+        <div class="nav-container">
+            <a href="/" class="brand" onclick="navigateTo(event, '/')">
+                <svg class="brand-logo" viewBox="0 0 100 100">
                     <path d="M50 15c-11.8 0-21.4 9.1-22.3 20.7-.6 8 3 15.3 8.9 20.1C23 60.5 13 72.8 13 85h74c0-12.2-10-24.5-23.6-29.2 5.9-4.8 9.5-12.1 8.9-20.1C71.4 24.1 61.8 15 50 15zm-4.5 15c2.5 0 4.5 2 4.5 4.5s-2 4.5-4.5 4.5-4.5-2-4.5-4.5 2-4.5 4.5-4.5zm11.5 8c1.7 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.3-3 3-3z"/>
                 </svg>
-            </div>
+                <span class="brand-title">Duck API Console</span>
+            </a>
+            <nav>
+                <a href="/" class="nav-link" id="link-home" onclick="navigateTo(event, '/')">Gateway</a>
+                <a href="/health" class="nav-link" id="link-health" onclick="navigateTo(event, '/health')">Health</a>
+                <a href="/api/cookies" class="nav-link" id="link-cookies" onclick="navigateTo(event, '/api/cookies')">Cookies</a>
+                <a href="/api/extract" class="nav-link" id="link-extract" onclick="navigateTo(event, '/api/extract')">Extract</a>
+                <a href="/api/playlist/extract" class="nav-link" id="link-playlist" onclick="navigateTo(event, '/api/playlist/extract')">Playlist</a>
+                <a href="/api/download" class="nav-link" id="link-download" onclick="navigateTo(event, '/api/download')">Download</a>
+                <a href="/api/trim" class="nav-link" id="link-trim" onclick="navigateTo(event, '/api/trim')">Trim</a>
+                <a href="/docs" class="nav-link">Swagger</a>
+            </nav>
+        </div>
+    </header>
 
-            <!-- Title & Subtitle -->
-            <h1>Duck Downloader</h1>
-            <div class="subtitle">API Gateway</div>
+    <!-- Main Content Frame -->
+    <main>
 
-            <!-- Live Status Widget -->
-            <div>
-                <div class="status-widget">
-                    <div id="status-indicator" class="status-dot"></div>
-                    <span id="status-label" class="status-text">Connecting to gateway...</span>
-                    <span id="latency-val" class="latency-badge"></span>
+        <!-- VIEW 1: GATEWAY ROOT (/) -->
+        <section id="view-home" class="view-section">
+            <div class="panel-card" style="text-align: center;">
+                <div class="home-logo-wrapper">
+                    <svg class="home-logo-icon" viewBox="0 0 100 100">
+                        <path d="M50 15c-11.8 0-21.4 9.1-22.3 20.7-.6 8 3 15.3 8.9 20.1C23 60.5 13 72.8 13 85h74c0-12.2-10-24.5-23.6-29.2 5.9-4.8 9.5-12.1 8.9-20.1C71.4 24.1 61.8 15 50 15zm-4.5 15c2.5 0 4.5 2 4.5 4.5s-2 4.5-4.5 4.5-4.5-2-4.5-4.5 2-4.5 4.5-4.5zm11.5 8c1.7 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.3-3 3-3z"/>
+                    </svg>
                 </div>
-            </div>
+                <h1 style="font-family: 'Outfit', sans-serif; font-size: 32px; margin-bottom: 6px;">Duck Downloader</h1>
+                <p style="color: var(--text-secondary); font-size: 14px; max-width: 500px; margin: 0 auto 30px auto;">
+                    Welcome to the Duck API Developer Console. Query endpoints, upload cookies, trigger media extractions, test active downloads, and monitor websocket streams.
+                </p>
 
-            <!-- API Capabilities Grid -->
-            <div class="features-grid">
-                
-                <!-- Feature 1: Media Extraction -->
-                <div class="feature-card">
-                    <div class="feature-icon-wrapper">
-                        <svg class="feature-icon" viewBox="0 0 24 24">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/>
-                        </svg>
+                <div class="home-grid">
+                    <div class="home-card" onclick="navigateTo(null, '/health')">
+                        <svg class="home-card-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+                        <div class="home-card-title">Health Dashboard</div>
+                        <div class="home-card-desc">Monitor live system operations, check latency ping history, and server uptime.</div>
                     </div>
-                    <div class="feature-title">Metadata Extraction</div>
-                    <div class="feature-desc">Retrieve media direct URLs, titles, and formats list from any public link.</div>
-                </div>
-
-                <!-- Feature 2: High-Speed Download -->
-                <div class="feature-card">
-                    <div class="feature-icon-wrapper">
-                        <svg class="feature-icon" viewBox="0 0 24 24">
-                            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
-                        </svg>
+                    <div class="home-card" onclick="navigateTo(null, '/api/cookies')">
+                        <svg class="home-card-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                        <div class="home-card-title">Cookies Uploader</div>
+                        <div class="home-card-desc">Configure authentication details using a cookies.txt file to download restricted contents.</div>
                     </div>
-                    <div class="feature-title">Cloud Downloader</div>
-                    <div class="feature-desc">Fast, asynchronous server-side downloading with automatic audio stripping.</div>
-                </div>
-
-                <!-- Feature 3: WebSockets Progress -->
-                <div class="feature-card">
-                    <div class="feature-icon-wrapper">
-                        <svg class="feature-icon" viewBox="0 0 24 24">
-                            <path d="M21 13h-8v8h8v-8zm-10 8v-8H3v8h8zm0-10V3H3v8h8zm10-8h-8v8h8V3z"/>
-                        </svg>
+                    <div class="home-card" onclick="navigateTo(null, '/api/extract')">
+                        <svg class="home-card-icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        <div class="home-card-title">Extract Metadata</div>
+                        <div class="home-card-desc">Verify link parsing, check platform extraction, and retrieve media format IDs.</div>
                     </div>
-                    <div class="feature-title">WebSocket Sync</div>
-                    <div class="feature-desc">Subscribe to real-time download status, ETA, and progress streams.</div>
-                </div>
-
-                <!-- Feature 4: Cookies Credentials -->
-                <div class="feature-card">
-                    <div class="feature-icon-wrapper">
-                        <svg class="feature-icon" viewBox="0 0 24 24">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                        </svg>
+                    <div class="home-card" onclick="navigateTo(null, '/api/download')">
+                        <svg class="home-card-icon" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+                        <div class="home-card-title">Download & Sync</div>
+                        <div class="home-card-desc">Trigger cloud download processes, monitor progress streams via WebSocket, and manage state.</div>
                     </div>
-                    <div class="feature-title">Cookie Management</div>
-                    <div class="feature-desc">Configure authentication credentials to download restricted contents.</div>
                 </div>
 
-            </div>
-
-            <!-- CTAs Actions -->
-            <div class="actions-wrapper">
-                <a href="/docs" class="btn btn-primary">
-                    <svg class="btn-icon" viewBox="0 0 24 24">
+                <a href="/docs" class="btn btn-gold">
+                    <svg style="width: 18px; height: 18px; fill: currentColor;" viewBox="0 0 24 24">
                         <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
                     </svg>
-                    Developer API Docs
-                </a>
-                <a href="https://github.com/mohamedessam18/Duck-Downloader" target="_blank" class="btn btn-secondary">
-                    <svg class="btn-icon" viewBox="0 0 24 24">
-                        <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
-                    </svg>
-                    Download Client App
+                    Open Interactive Swagger UI
                 </a>
             </div>
+        </section>
 
-        </div>
-    </div>
+        <!-- VIEW 2: HEALTH (/health) -->
+        <section id="view-health" class="view-section">
+            <div class="panel-card">
+                <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+                    <div>
+                        <h2 class="panel-title">System Health status</h2>
+                        <p class="panel-subtitle">Monitor live latency ping and system modules availability.</p>
+                    </div>
+                    <div class="status-badge">
+                        <div id="health-dot" class="status-dot green"></div>
+                        <span id="health-label">Checking systems...</span>
+                    </div>
+                </div>
+
+                <div class="health-grid">
+                    <div class="health-card">
+                        <div class="health-info">
+                            <div class="health-title">API Gateway Core</div>
+                            <div class="health-desc">FastAPI router operational.</div>
+                        </div>
+                        <div class="status-dot green"></div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-info">
+                            <div class="health-title">YT-DLP Engine</div>
+                            <div class="health-desc">Metadata extractor operational.</div>
+                        </div>
+                        <div class="status-dot green"></div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-info">
+                            <div class="health-title">FFMPEG Engine</div>
+                            <div class="health-desc">Media post-processor operational.</div>
+                        </div>
+                        <div class="status-dot green"></div>
+                    </div>
+                    <div class="health-card">
+                        <div class="health-info">
+                            <div class="health-title">Storage System</div>
+                            <div class="health-desc">Write directory accessible.</div>
+                        </div>
+                        <div class="status-dot green"></div>
+                    </div>
+                </div>
+
+                <div class="results-box active" style="margin-top: 24px;">
+                    <div class="form-label">Live Ping Latency history</div>
+                    <div id="latency-val-card" style="font-family: 'Outfit', sans-serif; font-size: 32px; font-weight: 700; color: var(--gold); margin-bottom: 8px;">-- ms</div>
+                    <div class="code-block" id="health-raw-response">{"status": "ok"}</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 3: COOKIES (/api/cookies) -->
+        <section id="view-cookies" class="view-section">
+            <div class="panel-card">
+                <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+                    <div>
+                        <h2 class="panel-title">Cookie Management</h2>
+                        <p class="panel-subtitle">Configure cookies.txt credentials to download private or restricted media links.</p>
+                    </div>
+                    <div class="status-badge">
+                        <div id="cookies-status-dot" class="status-dot"></div>
+                        <span id="cookies-status-label">Fetching status...</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">cookies.txt content</label>
+                    <textarea class="form-textarea" id="cookies-textarea" placeholder="# Netscape HTTP Cookie File&#10;# This file was generated by a browser extension..."></textarea>
+                </div>
+
+                <div class="tracker-actions" style="justify-content: flex-start; gap: 10px;">
+                    <button class="btn btn-gold" onclick="uploadCookies()">Upload Cookies</button>
+                    <button class="btn btn-danger" onclick="deleteCookies()">Delete Cookies</button>
+                    <button class="btn btn-outline" onclick="fetchCookiesStatus()">Refresh Status</button>
+                </div>
+
+                <div class="results-box" id="cookies-results">
+                    <div class="form-label">API Server Response</div>
+                    <pre class="code-block" id="cookies-response-json"></pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 4: EXTRACT (/api/extract) -->
+        <section id="view-extract" class="view-section">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <h2 class="panel-title">Metadata Extractor Playground</h2>
+                    <p class="panel-subtitle">Enter a media URL to extract available qualities, titles, and format details.</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Media URL</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" class="form-input" id="extract-url" placeholder="https://www.youtube.com/watch?v=..." style="flex-grow: 1;">
+                        <button class="btn btn-gold" onclick="runExtract()">Extract</button>
+                    </div>
+                </div>
+
+                <div class="results-box" id="extract-results">
+                    <div class="form-label">Extracted Media Details</div>
+                    <div class="meta-card">
+                        <img id="extract-meta-thumb" class="meta-thumb" src="" alt="Thumbnail">
+                        <div class="meta-details">
+                            <div id="extract-meta-title" class="meta-title">Media Title</div>
+                            <div class="meta-info-row">
+                                <span>Platform: <span id="extract-meta-platform" class="meta-badge">--</span></span>
+                                <span>Duration: <span id="extract-meta-duration" style="color: var(--text-primary); font-weight: 500;">--</span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-label">Available Qualities</div>
+                    <div class="format-list" id="extract-formats-list"></div>
+
+                    <div class="form-label" style="margin-top: 20px;">Raw JSON Response</div>
+                    <pre class="code-block" id="extract-response-json"></pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 5: PLAYLIST EXTRACT (/api/playlist/extract) -->
+        <section id="view-playlist" class="view-section">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <h2 class="panel-title">Playlist Extractor Playground</h2>
+                    <p class="panel-subtitle">Parse playlist or multi-post carousel URLs to retrieve nested media items.</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Playlist / Carousel URL</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" class="form-input" id="playlist-url" placeholder="https://www.youtube.com/playlist?list=..." style="flex-grow: 1;">
+                        <button class="btn btn-gold" onclick="runPlaylistExtract()">Extract Items</button>
+                    </div>
+                </div>
+
+                <div class="results-box" id="playlist-results">
+                    <div class="form-label">Playlist Metadata</div>
+                    <div class="meta-info-row" style="margin-bottom: 16px;">
+                        <span>Title: <span id="playlist-meta-title" style="color: var(--text-primary); font-weight: 600;">--</span></span>
+                        <span>Platform: <span id="playlist-meta-platform" class="meta-badge">--</span></span>
+                        <span>Total Items: <span id="playlist-meta-count" style="color: var(--text-primary); font-weight: 600;">0</span></span>
+                    </div>
+
+                    <div class="form-label">Items List</div>
+                    <div class="playlist-list" id="playlist-items-list"></div>
+
+                    <div class="form-label" style="margin-top: 20px;">Raw JSON Response</div>
+                    <pre class="code-block" id="playlist-response-json"></pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 6: DOWNLOAD (/api/download) -->
+        <section id="view-download" class="view-section">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <h2 class="panel-title">Cloud Downloader & WebSocket Sync</h2>
+                    <p class="panel-subtitle">Trigger download processes and monitor live speed, progress, and cancel states in real-time.</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Media URL</label>
+                    <input type="text" class="form-input" id="download-url" placeholder="https://www.youtube.com/watch?v=...">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Type</label>
+                        <select class="form-input" id="download-type">
+                            <option value="video">Video</option>
+                            <option value="audio">Audio (Only)</option>
+                            <option value="image">Image</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Format / Quality ID (Optional)</label>
+                        <input type="text" class="form-input" id="download-quality" placeholder="e.g. best, 137, mp3">
+                    </div>
+                </div>
+
+                <div class="form-row" style="margin-bottom: 20px;">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="download-nowatermark">
+                        <label for="download-nowatermark">Premium No Watermark (TikTok/Instagram)</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="download-removemusic">
+                        <label for="download-removemusic">Remove Music track</label>
+                    </div>
+                </div>
+
+                <button class="btn btn-gold" onclick="triggerDownload()">Start Cloud Download</button>
+
+                <!-- WebSocket progress monitor -->
+                <div class="progress-tracker" id="download-progress-card">
+                    <div class="progress-header">
+                        <span style="font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 700;" id="progress-state-label">Downloading...</span>
+                        <span id="progress-percent" style="font-family: 'Outfit', sans-serif; font-weight: 700; color: var(--gold);">0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" id="progress-bar"></div>
+                    </div>
+                    <div class="progress-metrics">
+                        <span id="progress-speed">Speed: -- MB/s</span>
+                        <span id="progress-eta">ETA: --</span>
+                    </div>
+
+                    <div id="download-link-box" style="margin-top: 14px; display: none;">
+                        <a href="" id="download-file-anchor" class="btn btn-gold" download style="width: 100%;">
+                            Download File to Disk
+                        </a>
+                    </div>
+
+                    <div class="tracker-actions" id="progress-actions-box">
+                        <button class="btn btn-outline" id="btn-pause" onclick="pauseActiveDownload()">Pause</button>
+                        <button class="btn btn-outline" id="btn-resume" onclick="resumeActiveDownload()">Resume</button>
+                        <button class="btn btn-danger" id="btn-cancel" onclick="cancelActiveDownload()">Cancel</button>
+                    </div>
+                </div>
+
+                <div class="results-box" id="download-results">
+                    <div class="form-label">Latest Snapshot Response</div>
+                    <pre class="code-block" id="download-response-json"></pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 7: TRIM (/api/trim) -->
+        <section id="view-trim" class="view-section">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <h2 class="panel-title">Media Trimming Playground</h2>
+                    <p class="panel-subtitle">Clip a finished download by specifying start and end timestamp boundaries in seconds.</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Download ID</label>
+                    <input type="text" class="form-input" id="trim-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Start Time (seconds)</label>
+                        <input type="number" class="form-input" id="trim-start" value="0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">End Time (seconds)</label>
+                        <input type="number" class="form-input" id="trim-end" value="10" step="0.1">
+                    </div>
+                </div>
+
+                <button class="btn btn-gold" onclick="runTrim()">Clip Media</button>
+
+                <div class="results-box" id="trim-results">
+                    <div class="form-label">API Response</div>
+                    <pre class="code-block" id="trim-response-json"></pre>
+                    <div id="trim-link-box" style="margin-top: 14px; display: none;">
+                        <a href="" id="trim-file-anchor" class="btn btn-gold" download style="width: 100%;">
+                            Download Clipped File
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
 
     <script>
-        // Check health check and measure ping latency
-        async function checkHealth() {
-            const indicator = document.getElementById('status-indicator');
-            const label = document.getElementById('status-label');
-            const latencyBadge = document.getElementById('latency-val');
+        // Global State variables
+        let activeDownloadId = "";
+        let activeWebsocket = null;
+
+        // Routing Navigation
+        function navigateTo(event, path) {
+            if (event) {
+                event.preventDefault();
+            }
+            window.history.pushState({}, "", path);
+            routeView(path);
+        }
+
+        function routeView(path) {
+            // Deactivate all links and sections
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+            document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('active'));
+
+            // Clean path
+            let view = 'home';
+            if (path === '/health') {
+                view = 'health';
+                document.getElementById('link-health').classList.add('active');
+                checkHealthPage();
+            } else if (path === '/api/cookies') {
+                view = 'cookies';
+                document.getElementById('link-cookies').classList.add('active');
+                fetchCookiesStatus();
+            } else if (path === '/api/extract') {
+                view = 'extract';
+                document.getElementById('link-extract').classList.add('active');
+            } else if (path === '/api/playlist/extract') {
+                view = 'playlist';
+                document.getElementById('link-playlist').classList.add('active');
+            } else if (path === '/api/download' || path.startsWith('/api/status/')) {
+                view = 'download';
+                document.getElementById('link-download').classList.add('active');
+                
+                // Parse download id from path if URL is /api/status/download/{id} or /api/status/{id}
+                if (path.includes('/status/')) {
+                    const parts = path.split('/');
+                    const id = parts[parts.length - 1];
+                    if (id && id !== 'download') {
+                        document.getElementById('download-url').value = "";
+                        connectWebSocket(id);
+                    }
+                }
+            } else if (path === '/api/trim') {
+                view = 'trim';
+                document.getElementById('link-trim').classList.add('active');
+            } else {
+                document.getElementById('link-home').classList.add('active');
+            }
+
+            document.getElementById(`view-${view}`).classList.add('active');
+        }
+
+        // Window History Listeners
+        window.onpopstate = () => {
+            routeView(window.location.pathname);
+        };
+
+        // Initialize Router on Load
+        window.onload = () => {
+            routeView(window.location.pathname);
             
+            // Loop health ping every 10s if health tab is active
+            setInterval(() => {
+                if (window.location.pathname === '/health') {
+                    checkHealthPage();
+                }
+            }, 10000);
+        };
+
+        // --- HEALTH PAGE LOGIC ---
+        async function checkHealthPage() {
+            const dot = document.getElementById('health-dot');
+            const label = document.getElementById('health-label');
+            const pingCard = document.getElementById('latency-val-card');
+            const rawBox = document.getElementById('health-raw-response');
+
             const start = performance.now();
             try {
-                const response = await fetch('/health');
+                const res = await fetch('/health');
                 const end = performance.now();
                 const latency = Math.round(end - start);
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.status === 'ok') {
-                        indicator.className = 'status-dot active-green';
-                        label.textContent = 'All Systems Operational';
-                        latencyBadge.textContent = `${latency} ms`;
-                        latencyBadge.style.display = 'inline-block';
-                        return;
-                    }
+                if (res.ok) {
+                    const data = await res.json();
+                    dot.className = 'status-dot green';
+                    label.textContent = 'All Systems Operational';
+                    pingCard.textContent = `${latency} ms`;
+                    rawBox.textContent = JSON.stringify(data, null, 2);
+                } else {
+                    throw new Error('Response error');
                 }
-                throw new Error('Invalid status response');
             } catch (err) {
-                indicator.className = 'status-dot active-red';
-                label.textContent = 'Service Under Maintenance';
-                latencyBadge.style.display = 'none';
+                dot.className = 'status-dot red';
+                label.textContent = 'Maintenance Mode';
+                pingCard.textContent = '-- ms';
+                rawBox.textContent = JSON.stringify({ error: err.message }, null, 2);
             }
         }
 
-        // Catch-all 404 handler
-        function check404() {
-            const path = window.location.pathname;
-            if (path !== '/' && path !== '/docs' && path !== '/redoc' && !path.startsWith('/api') && !path.startsWith('/files')) {
-                const notif = document.getElementById('notif-404');
-                const pathDesc = document.getElementById('notif-path');
-                pathDesc.textContent = `The path '${path}' does not exist on this gateway. Redirected to root.`;
-                notif.classList.add('show');
+        // --- COOKIES PAGE LOGIC ---
+        async function fetchCookiesStatus() {
+            const dot = document.getElementById('cookies-status-dot');
+            const label = document.getElementById('cookies-status-label');
+            const rawBox = document.getElementById('cookies-response-json');
+            const results = document.getElementById('cookies-results');
+
+            try {
+                const res = await fetch('/api/cookies');
+                const data = await res.json();
+                results.classList.add('active');
+                rawBox.textContent = JSON.stringify(data, null, 2);
+
+                if (data.active) {
+                    dot.className = 'status-dot green';
+                    label.textContent = `Active (${data.filename || 'cookies.txt'}, ${data.size} bytes)`;
+                } else {
+                    dot.className = 'status-dot red';
+                    label.textContent = 'Inactive (No file config)';
+                }
+            } catch (err) {
+                dot.className = 'status-dot red';
+                label.textContent = 'Connection Error';
             }
         }
 
-        // Dismiss 404 overlay and clean URL
-        function dismiss404() {
-            const notif = document.getElementById('notif-404');
-            notif.classList.remove('show');
-            window.history.replaceState({}, document.title, '/');
+        async function uploadCookies() {
+            const text = document.getElementById('cookies-textarea').value.trim();
+            const rawBox = document.getElementById('cookies-response-json');
+            const results = document.getElementById('cookies-results');
+
+            if (!text) {
+                alert("Please paste the cookies.txt content first!");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/cookies', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cookies: text })
+                });
+                const data = await res.json();
+                results.classList.add('active');
+                rawBox.textContent = JSON.stringify(data, null, 2);
+                fetchCookiesStatus();
+            } catch (err) {
+                rawBox.textContent = JSON.stringify({ error: err.message }, null, 2);
+            }
         }
 
-        // Initialize
-        checkHealth();
-        check404();
-        
-        // Refresh health check every 15 seconds
-        setInterval(checkHealth, 15000);
+        async function deleteCookies() {
+            const rawBox = document.getElementById('cookies-response-json');
+            const results = document.getElementById('cookies-results');
+
+            try {
+                const res = await fetch('/api/cookies', { method: 'DELETE' });
+                const data = await res.json();
+                results.classList.add('active');
+                rawBox.textContent = JSON.stringify(data, null, 2);
+                document.getElementById('cookies-textarea').value = "";
+                fetchCookiesStatus();
+            } catch (err) {
+                rawBox.textContent = JSON.stringify({ error: err.message }, null, 2);
+            }
+        }
+
+        // --- EXTRACT PAGE LOGIC ---
+        async function runExtract() {
+            const url = document.getElementById('extract-url').value.trim();
+            const results = document.getElementById('extract-results');
+            const rawBox = document.getElementById('extract-response-json');
+            const titleEl = document.getElementById('extract-meta-title');
+            const platformEl = document.getElementById('extract-meta-platform');
+            const durationEl = document.getElementById('extract-meta-duration');
+            const thumbEl = document.getElementById('extract-meta-thumb');
+            const formatsList = document.getElementById('extract-formats-list');
+
+            if (!url) {
+                alert("Please enter a media URL!");
+                return;
+            }
+
+            try {
+                rawBox.textContent = "Loading extraction metadata... please wait...";
+                results.classList.add('active');
+                
+                const res = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                const data = await res.json();
+                rawBox.textContent = JSON.stringify(data, null, 2);
+
+                if (res.ok) {
+                    titleEl.textContent = data.title || "Media File";
+                    platformEl.textContent = data.platform || "Source";
+                    durationEl.textContent = data.duration || "--";
+                    thumbEl.src = data.thumbnail || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200";
+
+                    formatsList.innerHTML = "";
+                    const allFormats = [...(data.qualities || []), ...(data.audio_formats || [])];
+                    
+                    if (allFormats.length === 0) {
+                        formatsList.innerHTML = `<div class="format-item" style="color: var(--text-secondary);">No qualities/formats extracted.</div>`;
+                    }
+
+                    allFormats.forEach(fmt => {
+                        const item = document.createElement('div');
+                        item.className = 'format-item';
+                        
+                        const sizeStr = fmt.filesize ? `(${(fmt.filesize / (1024 * 1024)).toFixed(1)} MB)` : '';
+                        const resolution = fmt.width && fmt.height ? `${fmt.width}x${fmt.height}` : '';
+                        const label = fmt.label || fmt.id;
+
+                        item.innerHTML = `
+                            <div>
+                                <span class="format-id">${fmt.id}</span>
+                                <span style="margin-left: 8px; font-weight: 500;">${label}</span>
+                            </div>
+                            <div class="format-info-text">
+                                <span>${fmt.ext || ''}</span>
+                                <span style="margin-left: 8px;">${resolution}</span>
+                                <span style="margin-left: 8px; color: var(--gold); font-weight: 500;">${sizeStr}</span>
+                            </div>
+                        `;
+                        formatsList.appendChild(item);
+                    });
+                } else {
+                    titleEl.textContent = "Extraction Failed";
+                    platformEl.textContent = "Error";
+                    durationEl.textContent = "--";
+                    thumbEl.src = "";
+                    formatsList.innerHTML = `<div class="format-item" style="color: var(--red);">${data.detail || 'Failed to extract'}</div>`;
+                }
+            } catch (err) {
+                rawBox.textContent = JSON.stringify({ error: err.message }, null, 2);
+            }
+        }
+
+        // --- PLAYLIST PAGE LOGIC ---
+        async function runPlaylistExtract() {
+            const url = document.getElementById('playlist-url').value.trim();
+            const results = document.getElementById('playlist-results');
+            const rawBox = document.getElementById('playlist-response-json');
+            const titleEl = document.getElementById('playlist-meta-title');
+            const platformEl = document.getElementById('playlist-meta-platform');
+            const countEl = document.getElementById('playlist-meta-count');
+            const itemsList = document.getElementById('playlist-items-list');
+
+            if (!url) {
+                alert("Please enter a playlist/carousel URL!");
+                return;
+            }
+
+            try {
+                rawBox.textContent = "Parsing playlist entries... please wait...";
+                results.classList.add('active');
+
+                const res = await fetch('/api/playlist/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                const data = await res.json();
+                rawBox.textContent = JSON.stringify(data, null, 2);
+
+                if (res.ok) {
+                    titleEl.textContent = data.title || "Playlist File";
+                    platformEl.textContent = data.platform || "Source";
+                    
+                    const items = data.items || [];
+                    countEl.textContent = items.length;
+
+                    itemsList.innerHTML = "";
+                    if (items.length === 0) {
+                        itemsList.innerHTML = `<div class="format-item" style="color: var(--text-secondary);">No items found.</div>`;
+                    }
+
+                    items.forEach(item => {
+                        const row = document.createElement('div');
+                        row.className = 'playlist-item';
+                        row.innerHTML = `
+                            <img class="playlist-item-thumb" src="${item.thumbnail || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100'}" alt="Thumb">
+                            <div style="text-align: left; overflow: hidden; flex-grow: 1;">
+                                <div class="playlist-item-title">${item.title}</div>
+                                <div style="font-size: 10px; color: var(--text-secondary); margin-top: 2px;">
+                                    Type: ${item.isVideo ? 'Video' : 'Image'} | Link: <a href="${item.url}" target="_blank" style="color: var(--gold); text-decoration: none;">Link</a>
+                                </div>
+                            </div>
+                        `;
+                        itemsList.appendChild(row);
+                    });
+                } else {
+                    titleEl.textContent = "Extraction Failed";
+                    platformEl.textContent = "Error";
+                    countEl.textContent = "0";
+                    itemsList.innerHTML = `<div class="format-item" style="color: var(--red);">${data.detail || 'Failed to extract playlist'}</div>`;
+                }
+            } catch (err) {
+                rawBox.textContent = JSON.stringify({ error: err.message }, null, 2);
+            }
+        }
+
+        // --- DOWNLOAD PAGE LOGIC ---
+        async function triggerDownload() {
+            const url = document.getElementById('download-url').value.trim();
+            const type = document.getElementById('download-type').value;
+            const quality = document.getElementById('download-quality').value.trim();
+            const noWatermark = document.getElementById('download-nowatermark').checked;
+            const removeMusic = document.getElementById('download-removemusic').checked;
+            const rawBox = document.getElementById('download-response-json');
+            const results = document.getElementById('download-results');
+
+            if (!url) {
+                alert("Please enter a media URL to download!");
+                return;
+            }
+
+            try {
+                rawBox.textContent = "Starting cloud download request...";
+                results.classList.add('active');
+
+                const payload = {
+                    url: url,
+                    type: type,
+                    premiumNoWatermark: noWatermark,
+                    removeMusic: removeMusic
+                };
+                if (quality) {
+                    payload.quality = quality;
+                }
+
+                const res = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                rawBox.textContent = JSON.stringify(data, null, 2);
+
+                if (res.ok && data.downloadId) {
+                    activeDownloadId = data.downloadId;
+                    
+                    // Show progress card
+                    document.getElementById('download-progress-card').classList.add('active');
+                    document.getElementById('download-link-box').style.display = "none";
+                    document.getElementById('progress-bar').style.width = "0%";
+                    document.getElementById('progress-percent').textContent = "0%";
+                    
+                    // Connect WebSocket to track live stream progress
+                    connectWebSocket(data.downloadId);
+                } else {
+                    alert(`Failed to start download: ${data.detail || 'Unknown error'}`);
+                }
+            } catch (err) {
+                rawBox.textContent = JSON.stringify({ error: err.message }, null, 2);
+            }
+        }
+
+        function connectWebSocket(downloadId) {
+            activeDownloadId = downloadId;
+            if (activeWebsocket) {
+                activeWebsocket.close();
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            const wsUrl = `${protocol}//${host}/ws/download/${downloadId}`;
+
+            // Show card
+            document.getElementById('download-progress-card').classList.add('active');
+            document.getElementById('progress-state-label').textContent = "Connecting to progress stream...";
+
+            activeWebsocket = new WebSocket(wsUrl);
+
+            activeWebsocket.onmessage = (event) => {
+                const payload = JSON.parse(event.data);
+                document.getElementById('download-response-json').textContent = JSON.stringify(payload, null, 2);
+                
+                const progress = payload.progress || 0;
+                const status = payload.status || 'downloading';
+                const speed = payload.speed || '0 KB/s';
+                const eta = payload.eta || 'calculating...';
+
+                // Update UI progress filled width
+                document.getElementById('progress-bar').style.width = `${progress}%`;
+                document.getElementById('progress-percent').textContent = `${progress}%`;
+                document.getElementById('progress-speed').textContent = `Speed: ${speed}`;
+                document.getElementById('progress-eta').textContent = `ETA: ${eta}`;
+                document.getElementById('progress-state-label').textContent = `Status: ${status.toUpperCase()}`;
+
+                if (status === 'completed' || status === 'finished') {
+                    document.getElementById('progress-state-label').textContent = "COMPLETED!";
+                    document.getElementById('progress-state-label').style.color = "var(--green)";
+                    
+                    if (payload.fileUrl) {
+                        const anchor = document.getElementById('download-file-anchor');
+                        anchor.href = payload.fileUrl;
+                        document.getElementById('download-link-box').style.display = "block";
+                    }
+                } else if (status === 'failed') {
+                    document.getElementById('progress-state-label').textContent = `FAILED: ${payload.error || 'Unknown error'}`;
+                    document.getElementById('progress-state-label').style.color = "var(--red)";
+                } else {
+                    document.getElementById('progress-state-label').style.color = "var(--text-primary)";
+                }
+            };
+
+            activeWebsocket.onclose = () => {
+                console.log("WebSocket connection closed.");
+            };
+        }
+
+        async function pauseActiveDownload() {
+            if (!activeDownloadId) return;
+            try {
+                const res = await fetch(`/api/download/${activeDownloadId}/pause`, { method: 'POST' });
+                const data = await res.json();
+                document.getElementById('download-response-json').textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                console.error("Failed to pause:", err);
+            }
+        }
+
+        async function resumeActiveDownload() {
+            if (!activeDownloadId) return;
+            try {
+                const res = await fetch(`/api/download/${activeDownloadId}/resume`, { method: 'POST' });
+                const data = await res.json();
+                document.getElementById('download-response-json').textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                console.error("Failed to resume:", err);
+            }
+        }
+
+        async function cancelActiveDownload() {
+            if (!activeDownloadId) return;
+            try {
+                const res = await fetch(`/api/download/${activeDownloadId}/cancel`, { method: 'POST' });
+                const data = await res.json();
+                document.getElementById('download-response-json').textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                console.error("Failed to cancel:", err);
+            }
+        }
+
+        // --- TRIM PAGE LOGIC ---
+        async function runTrim() {
+            const downloadId = document.getElementById('trim-id').value.trim();
+            const start = parseFloat(document.getElementById('trim-start').value);
+            const end = parseFloat(document.getElementById('trim-end').value);
+            const results = document.getElementById('trim-results');
+            const rawBox = document.getElementById('trim-response-json');
+            const linkBox = document.getElementById('trim-link-box');
+            const anchor = document.getElementById('trim-file-anchor');
+
+            if (!downloadId) {
+                alert("Please enter a finished Download ID!");
+                return;
+            }
+
+            try {
+                rawBox.textContent = "Clipping media file... please wait...";
+                results.classList.add('active');
+                linkBox.style.display = "none";
+
+                const res = await fetch('/api/trim', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        downloadId: downloadId,
+                        startTime: start,
+                        endTime: end
+                    })
+                });
+                const data = await res.json();
+                rawBox.textContent = JSON.stringify(data, null, 2);
+
+                if (res.ok && data.fileUrl) {
+                    anchor.href = data.fileUrl;
+                    linkBox.style.display = "block";
+                }
+            } catch (err) {
+                rawBox.textContent = JSON.stringify({ error: err.message }, null, 2);
+            }
+        }
     </script>
 </body>
 </html>

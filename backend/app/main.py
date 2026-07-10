@@ -7,6 +7,7 @@ from slowapi import Limiter
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 import asyncio
+from pathlib import Path
 
 from .config import settings
 from .downloads import download_manager, map_extract_response
@@ -25,6 +26,13 @@ from .models import (
 )
 
 limiter = Limiter(key_func=get_remote_address)
+
+# Load index.html content once at startup
+static_dir = Path(__file__).resolve().parent.parent / "static"
+index_html_path = static_dir / "index.html"
+index_html_content = ""
+if index_html_path.exists():
+    index_html_content = index_html_path.read_text(encoding="utf-8")
 
 tags_metadata = [
     {
@@ -59,6 +67,18 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
+
+
+# Content Negotiation Middleware to serve HTML dashboard for browser requests on all paths
+@app.middleware("http")
+async def content_negotiation_middleware(request: Request, call_next):
+    accept = request.headers.get("accept", "")
+    path = request.url.path
+    if "text/html" in accept and not path.startswith("/files") and path != "/openapi.json":
+        return HTMLResponse(content=index_html_content)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -350,13 +370,6 @@ async def download_ws(websocket: WebSocket, download_id: str) -> None:
 
 
 # Serve static landing page and catch-all routes
-from pathlib import Path
-
-static_dir = Path(__file__).resolve().parent.parent / "static"
-index_html_path = static_dir / "index.html"
-index_html_content = ""
-if index_html_path.exists():
-    index_html_content = index_html_path.read_text(encoding="utf-8")
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
