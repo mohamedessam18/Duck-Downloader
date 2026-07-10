@@ -18,6 +18,8 @@ import '../widgets/glass_panel.dart';
 import '../widgets/media/media_overlay_router.dart';
 import '../widgets/media/media_thumb.dart';
 import '../widgets/media/mini_player.dart';
+import '../widgets/admob_banner_widget.dart';
+import '../services/ad_service.dart';
 import 'locked_social_browser_screen.dart';
 
 bool get _isLight => PlatformDispatcher.instance.platformBrightness == Brightness.light;
@@ -146,7 +148,13 @@ class DuckAppScreen extends StatelessWidget {
                     bottom: 0,
                     left: 0,
                     right: 0,
-                    child: _BottomNavBar(controller: controller),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AdMobBannerWidget(isPremiumActive: controller.isPremiumActive),
+                        _BottomNavBar(controller: controller),
+                      ],
+                    ),
                   ),
               ],
             ),
@@ -1319,7 +1327,16 @@ class _OptionsCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(15),
                 ),
               ),
-              onPressed: controller.busy ? null : controller.startDownload,
+              onPressed: controller.busy
+                  ? null
+                  : () {
+                      AdService.instance.showInterstitialAd(
+                        isPremiumActive: controller.isPremiumActive,
+                        onAdClosed: () {
+                          controller.startDownload();
+                        },
+                      );
+                    },
               child: Text(
                 controller.busy ? 'Please wait...' : 'Download',
                 style: const TextStyle(fontWeight: FontWeight.w900),
@@ -1596,23 +1613,28 @@ class _BatchOptionsCardState extends State<_BatchOptionsCard> {
               ),
               onPressed: _selectedUrls.isEmpty || widget.controller.busy
                   ? null
-                  : () async {
-                      final urls = _selectedUrls.toList();
-                      DownloadType dlType;
-                      if (_selectedMode == _BatchDownloadMode.image) {
-                        dlType = DownloadType.image;
-                      } else if (_selectedMode == _BatchDownloadMode.audio) {
-                        dlType = DownloadType.audio;
-                      } else {
-                        dlType = DownloadType.video;
-                      }
-                      await widget.controller.startBatchDownload(
-                        urls: urls,
-                        type: dlType,
-                        quality: _selectedQuality,
-                        forceHybrid: _selectedMode == _BatchDownloadMode.hybrid,
+                  : () {
+                      AdService.instance.showInterstitialAd(
+                        isPremiumActive: widget.controller.isPremiumActive,
+                        onAdClosed: () async {
+                          final urls = _selectedUrls.toList();
+                          DownloadType dlType;
+                          if (_selectedMode == _BatchDownloadMode.image) {
+                            dlType = DownloadType.image;
+                          } else if (_selectedMode == _BatchDownloadMode.audio) {
+                            dlType = DownloadType.audio;
+                          } else {
+                            dlType = DownloadType.video;
+                          }
+                          await widget.controller.startBatchDownload(
+                            urls: urls,
+                            type: dlType,
+                            quality: _selectedQuality,
+                            forceHybrid: _selectedMode == _BatchDownloadMode.hybrid,
+                          );
+                          widget.controller.clearBatch();
+                        },
                       );
-                      widget.controller.clearBatch();
                     },
               child: Text(
                 widget.controller.busy
