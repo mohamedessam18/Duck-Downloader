@@ -200,12 +200,16 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
       }
 
       // 2. Try backend scraper first (now has access to the user's synced cookies)
-      final isThreads = widget.platform.toLowerCase().contains('threads');
+      final platformLower = widget.platform.toLowerCase();
+      final isThreads = platformLower.contains('threads');
+      final isTwitter = platformLower.contains('x') || platformLower.contains('twitter');
+      final isVideoOnly = isThreads || isTwitter;
+
       if (!isThreads) {
         try {
           final playlist = await widget.controller.extractPlaylist(widget.initialUrl);
           if (playlist.items.isNotEmpty) {
-            final candidates = playlist.items.map((item) {
+            var candidates = playlist.items.map((item) {
               return BrowserImageCandidate(
                 url: item.url,
                 title: item.title,
@@ -215,7 +219,20 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
                 isVideo: item.isVideo,
               );
             }).toList();
+
+            if (isVideoOnly) {
+              candidates = candidates.where((c) => c.isVideo).toList();
+            }
+
             if (mounted) {
+              if (candidates.isEmpty && isVideoOnly) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('This ${widget.platform} post does not contain any videos.'),
+                  ),
+                );
+                return;
+              }
               Navigator.of(context).pop(candidates);
               return;
             }
@@ -236,7 +253,7 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
         decoded is List ? decoded : const [],
       );
 
-      if (isThreads) {
+      if (isVideoOnly) {
         // Keep only videos, ignore images
         candidates = candidates.where((c) => c.isVideo).toList();
       }
@@ -245,8 +262,8 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
       if (candidates.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isThreads
-                ? 'This Threads post does not contain any videos.'
+            content: Text(isVideoOnly
+                ? 'This ${widget.platform} post does not contain any videos.'
                 : 'Could not find full-size images on this page.'),
           ),
         );
@@ -494,8 +511,11 @@ const _extractScript = r'''
     });
   };
 
-  const isThreads = window.location.hostname.includes('threads.net') || window.location.hostname.includes('threads.com');
-  if (!isThreads) {
+  const isVideoOnlyPlatform = window.location.hostname.includes('threads.net') || 
+                              window.location.hostname.includes('threads.com') ||
+                              window.location.hostname.includes('twitter.com') ||
+                              window.location.hostname.includes('x.com');
+  if (!isVideoOnlyPlatform) {
     scanPageData();
   }
   scanDom(0);
