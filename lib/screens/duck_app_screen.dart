@@ -102,7 +102,13 @@ class DuckAppScreen extends StatelessWidget {
               return;
             }
 
-            // 3. Otherwise pop tab history
+            // 3. Otherwise pop tab history (on Android, directly jump to Home tab)
+            final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+            if (isAndroid && controller.tab != DuckTab.home) {
+              controller.tabHistory.clear();
+              controller.setTab(DuckTab.home);
+              return;
+            }
             controller.popTabHistory();
           },
           child: Scaffold(
