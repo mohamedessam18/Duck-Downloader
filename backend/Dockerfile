@@ -14,6 +14,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
+COPY static ./static
 
 RUN mkdir -p /tmp/duck-downloads && chmod 777 /tmp/duck-downloads
 EXPOSE 8000
