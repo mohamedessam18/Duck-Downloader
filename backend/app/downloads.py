@@ -839,7 +839,7 @@ class DownloadManager:
             args.extend(["-x", "--audio-format", "mp3", "--audio-quality", "192K"])
         args.extend([
             "--extractor-args",
-            "youtube:player_client=web_embedded,web,tv",
+            "youtube:player_client=android,web",
         ])
         args.append(state.url)
         return args

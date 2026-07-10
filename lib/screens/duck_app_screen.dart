@@ -395,26 +395,30 @@ class _HeaderToggleState extends State<_HeaderToggle> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: widget.active
-                ? _green.withOpacity(.14)
-                : Colors.white.withOpacity(.07),
+                ? _green.withOpacity(isLight ? 0.24 : 0.14)
+                : (isLight ? Colors.black.withOpacity(0.04) : Colors.white.withOpacity(0.06)),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
               color: widget.active
-                  ? _green.withOpacity(.34)
-                  : Colors.white.withOpacity(.08),
+                  ? _green.withOpacity(isLight ? 0.45 : 0.34)
+                  : (isLight ? Colors.black.withOpacity(0.08) : Colors.white.withOpacity(0.08)),
             ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(widget.icon, color: widget.active ? _green : _muted, size: 17),
+              Icon(
+                widget.icon,
+                color: widget.active ? _green : (isLight ? Colors.black54 : _muted),
+                size: 17,
+              ),
               const SizedBox(width: 7),
               Text(
                 widget.label,
                 style: TextStyle(
                   color: widget.active
-                      ? const Color(0xFFEAF8EE)
-                      : const Color(0xFFE8E8E8),
+                      ? (isLight ? const Color(0xFF0F3A1B) : const Color(0xFFEAF8EE))
+                      : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
                 ),
@@ -542,13 +546,13 @@ class _ProBadgeState extends State<_ProBadge> {
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
           decoration: BoxDecoration(
             color: active
-                ? _gold.withOpacity(.18)
-                : Colors.white.withOpacity(.08),
+                ? _gold.withOpacity(isLight ? 0.24 : 0.18)
+                : (isLight ? Colors.black.withOpacity(0.04) : Colors.white.withOpacity(0.06)),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
               color: active
-                  ? _gold.withOpacity(.42)
-                  : Colors.white.withOpacity(.08),
+                  ? _gold.withOpacity(isLight ? 0.45 : 0.42)
+                  : (isLight ? Colors.black.withOpacity(0.08) : Colors.white.withOpacity(0.08)),
             ),
           ),
           child: Row(
@@ -558,14 +562,14 @@ class _ProBadgeState extends State<_ProBadge> {
                 active
                     ? Icons.workspace_premium
                     : Icons.workspace_premium_outlined,
-                color: active ? _gold : _muted,
+                color: active ? _gold : (isLight ? Colors.black54 : _muted),
                 size: 18,
               ),
               const SizedBox(width: 7),
               Text(
                 active ? 'PREMIUM' : 'DUCK PREMIUM',
                 style: TextStyle(
-                  color: active ? _gold : const Color(0xFFE8E8E8),
+                  color: active ? _gold : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
                 ),
@@ -1023,10 +1027,10 @@ class _StatusBar extends StatelessWidget {
       child = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
+          Text(
             'LOADING..',
             style: TextStyle(
-              color: Colors.white,
+              color: _text,
               fontSize: 14,
               fontWeight: FontWeight.w300,
               letterSpacing: 2,
@@ -1040,7 +1044,7 @@ class _StatusBar extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: null,
                 minHeight: 2,
-                backgroundColor: Colors.white10,
+                backgroundColor: _isLight ? Colors.black12 : Colors.white10,
                 valueColor: AlwaysStoppedAnimation(_gold),
               ),
             ),
@@ -1055,8 +1059,8 @@ class _StatusBar extends StatelessWidget {
         children: [
           Text(
             '%$progress CACHED',
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: _text,
               fontSize: 14,
               fontWeight: FontWeight.w300,
               letterSpacing: 2,
@@ -1070,7 +1074,7 @@ class _StatusBar extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: (progress / 100).clamp(0.0, 1.0),
                 minHeight: 2,
-                backgroundColor: Colors.white10,
+                backgroundColor: _isLight ? Colors.black12 : Colors.white10,
                 valueColor: AlwaysStoppedAnimation(_gold),
               ),
             ),
@@ -1157,8 +1161,8 @@ class _OptionsCard extends StatelessWidget {
                       metadata.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: _text,
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
                       ),
@@ -1214,15 +1218,16 @@ class _OptionsCard extends StatelessWidget {
                   height: 38,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2A2A2C),
+                    color: _dark,
                     borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _border),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: selected,
                       isExpanded: true,
-                      dropdownColor: const Color(0xFF2A2A2C),
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      dropdownColor: _dark,
+                      style: TextStyle(color: _text, fontSize: 13),
                       items: [
                         for (final label in labels)
                           DropdownMenuItem(value: label, child: Text(label)),
@@ -1269,8 +1274,8 @@ class _OptionsCard extends StatelessWidget {
                                   'Remove Background Music',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: _text,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -3358,21 +3363,24 @@ class _Chip extends StatelessWidget {
         height: 38,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: active ? _gold : const Color(0xFF2A2A2C),
+          color: active ? _gold : _dark,
           borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: active ? _gold : _border,
+          ),
         ),
         child: Row(
           children: [
             Icon(
               icon,
               size: 17,
-              color: active ? const Color(0xFF151515) : Colors.white,
+              color: active ? const Color(0xFF151515) : _text,
             ),
             const SizedBox(width: 5),
             Text(
               label,
               style: TextStyle(
-                color: active ? const Color(0xFF151515) : Colors.white,
+                color: active ? const Color(0xFF151515) : _text,
                 fontWeight: FontWeight.w900,
               ),
             ),
