@@ -232,14 +232,22 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
       final text = result?.toString() ?? '[]';
       debugPrint('RAW JS EXTRACTED: $text');
       final decoded = jsonDecode(text);
-      final candidates = BrowserImageCandidate.normalizeAll(
+      var candidates = BrowserImageCandidate.normalizeAll(
         decoded is List ? decoded : const [],
       );
+
+      if (isThreads) {
+        // Keep only videos, ignore images
+        candidates = candidates.where((c) => c.isVideo).toList();
+      }
+
       if (!mounted) return;
       if (candidates.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not find full-size images on this page.'),
+          SnackBar(
+            content: Text(isThreads
+                ? 'This Threads post does not contain any videos.'
+                : 'Could not find full-size images on this page.'),
           ),
         );
         return;
@@ -486,7 +494,10 @@ const _extractScript = r'''
     });
   };
 
-  scanPageData();
+  const isThreads = window.location.hostname.includes('threads.net') || window.location.hostname.includes('threads.com');
+  if (!isThreads) {
+    scanPageData();
+  }
   scanDom(0);
 
   return JSON.stringify(Array.from(candidatesMap.values()));
