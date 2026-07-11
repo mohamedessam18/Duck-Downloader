@@ -313,7 +313,11 @@ class DownloadManager:
             },
         }
         if has_impersonate:
-            opts["impersonate"] = "chrome"
+            try:
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+                opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+            except Exception:
+                pass
 
         if settings.resolved_cookies_file:
             if settings.resolved_cookies_file.startswith("browser:"):
