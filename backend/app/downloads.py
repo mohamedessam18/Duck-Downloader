@@ -288,6 +288,13 @@ class DownloadManager:
         }
 
     def _base_ydl_options(self, *, skip_download: bool = False) -> dict[str, Any]:
+        has_impersonate = False
+        try:
+            import curl_cffi
+            has_impersonate = True
+        except ImportError:
+            pass
+
         opts: dict[str, Any] = {
             "quiet": True,
             "skip_download": skip_download,
@@ -305,6 +312,9 @@ class DownloadManager:
                 "Accept-Language": "en-US,en;q=0.9",
             },
         }
+        if has_impersonate:
+            opts["impersonate"] = "chrome"
+
         if settings.resolved_cookies_file:
             if settings.resolved_cookies_file.startswith("browser:"):
                 browser_name = settings.resolved_cookies_file.split("browser:", 1)[1].strip()
