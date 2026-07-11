@@ -797,6 +797,14 @@ class DownloadManager:
         prefer_tiktok_no_watermark: bool,
     ) -> list[str]:
         format_selector = self._format_selector(download_type, quality)
+        
+        has_impersonate = False
+        try:
+            import curl_cffi
+            has_impersonate = True
+        except ImportError:
+            pass
+
         args = [
             sys.executable,
             "-m",
@@ -810,8 +818,11 @@ class DownloadManager:
             "3",
             "--socket-timeout",
             "30",
-            "--impersonate",
-            "chrome",
+        ]
+        if has_impersonate:
+            args.extend(["--impersonate", "chrome"])
+            
+        args.extend([
             "--continue",
             "--restrict-filenames",
             "--windows-filenames",
@@ -821,7 +832,7 @@ class DownloadManager:
             format_selector,
             "-o",
             str(target_dir / "%(title).140s.%(ext)s"),
-        ]
+        ])
         if settings.resolved_cookies_file:
             if settings.resolved_cookies_file.startswith("browser:"):
                 browser_name = settings.resolved_cookies_file.split("browser:", 1)[1].strip()
