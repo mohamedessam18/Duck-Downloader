@@ -1,6 +1,6 @@
 # Build the local PO-token provider recommended by yt-dlp for YouTube.
 # It runs beside the API and is never exposed outside this container.
-FROM node:22-bookworm-slim AS pot-provider
+FROM node:20-bullseye-slim AS pot-provider
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
@@ -13,7 +13,9 @@ WORKDIR /opt/bgutil-provider/server
 RUN npm ci && npx tsc && npm cache clean --force
 
 
-FROM python:3.12-slim-bookworm
+# Keep the production base image unchanged. Railway already builds this image
+# successfully; Node 20 in the stage above is compatible with Debian Bullseye.
+FROM python:3.12-slim-bullseye
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
