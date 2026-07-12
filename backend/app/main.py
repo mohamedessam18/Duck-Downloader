@@ -369,54 +369,7 @@ async def download_ws(websocket: WebSocket, download_id: str) -> None:
         state.subscribers.discard(queue)
 
 
-@app.get("/api/debug-node")
-async def debug_node():
-    import subprocess
-    import shutil
-    try:
-        res = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
-        node_version = res.stdout.strip() if res.returncode == 0 else f"Err: {res.stderr}"
-    except Exception as e:
-        node_version = f"Exception: {e}"
-        
-    try:
-        node_path = shutil.which("node")
-    except Exception as e:
-        node_path = f"Exception: {e}"
-
-    try:
-        deno_path = shutil.which("deno")
-    except Exception as e:
-        deno_path = f"Exception: {e}"
-
-    return {
-        "node_path": node_path,
-        "node_version": node_version,
-        "deno_path": deno_path,
-    }
-
-
-@app.get("/api/debug-extract")
-async def debug_extract(url: str):
-    from yt_dlp import YoutubeDL
-    from .downloads import download_manager
-    import traceback
-    opts = download_manager._base_ydl_options(skip_download=True)
-    try:
-        with YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return {
-                "status": "success",
-                "title": info.get("title"),
-                "formats_count": len(info.get("formats", [])),
-                "extractor": info.get("extractor"),
-            }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error_message": str(e),
-            "traceback": traceback.format_exc(),
-        }
+# Serve static landing page and catch-all routes
 
 
 
