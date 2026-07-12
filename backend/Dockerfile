@@ -3,7 +3,7 @@
 FROM node:20-bullseye-slim AS pot-provider
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch 1.3.1 \
