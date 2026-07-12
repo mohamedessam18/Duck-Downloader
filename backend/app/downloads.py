@@ -236,22 +236,23 @@ class DownloadManager:
                     "audio_formats": []
                 }
 
-            # Fallback 2: Extract images from the webpage
-            try:
-                images_info = await self.extract_images(url)
-                if images_info and images_info.get("items"):
-                    first_img = images_info["items"][0]
-                    title = images_info.get("title") or "Scraped Image"
-                    return {
-                        "title": title,
-                        "thumbnail": first_img["url"],
-                        "duration": None,
-                        "platform": images_info.get("platform") or parsed.netloc or "Webpage",
-                        "qualities": [{"id": "best", "label": "Original Image", "ext": "jpg"}],
-                        "audio_formats": []
-                    }
-            except Exception:
-                pass
+            # Fallback 2: Extract images from the webpage (skip for major video/private platforms)
+            if not any(domain in host for domain in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch"]):
+                try:
+                    images_info = await self.extract_images(url)
+                    if images_info and images_info.get("items"):
+                        first_img = images_info["items"][0]
+                        title = images_info.get("title") or "Scraped Image"
+                        return {
+                            "title": title,
+                            "thumbnail": first_img["url"],
+                            "duration": None,
+                            "platform": images_info.get("platform") or parsed.netloc or "Webpage",
+                            "qualities": [{"id": "best", "label": "Original Image", "ext": "jpg"}],
+                            "audio_formats": []
+                        }
+                except Exception:
+                    pass
 
             raise exc
 
