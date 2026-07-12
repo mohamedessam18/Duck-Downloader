@@ -317,6 +317,11 @@ class DownloadManager:
             # video, while the local bgutil provider supplies PO tokens when a
             # selected client needs one. Forcing mweb worked for many Shorts
             # but made regular watch pages more likely to hit bot checks.
+            "extractor_args": {
+                "youtubepot-bgutilhttp": {
+                    "base_url": "http://localhost:4416"
+                }
+            }
         }
         if has_impersonate:
             try:
