@@ -411,6 +411,29 @@ async def debug_extract(url: str):
         }
 
 
+@app.get("/api/debug-print-cookies")
+async def debug_print_cookies():
+    cookies_path = settings.storage_dir / "cookies.txt"
+    if not cookies_path.exists():
+        return {"status": "error", "error": "cookies.txt not found"}
+    try:
+        content = cookies_path.read_text(encoding="utf-8")
+        lines = []
+        for line in content.splitlines():
+            if not line.strip() or line.startswith("#"):
+                lines.append(line)
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                parts[6] = "***MASKED***"
+                lines.append("\t".join(parts))
+            else:
+                lines.append(line)
+        return {"status": "success", "content": "\n".join(lines)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 # Serve static landing page and catch-all routes
 
 
