@@ -326,34 +326,53 @@ class _Brand extends StatelessWidget {
 
 void _showSettingToast(BuildContext context, String message, bool enabled) {
   ScaffoldMessenger.of(context).clearSnackBars();
+  
+  final isLight = Theme.of(context).brightness == Brightness.light;
+  
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            enabled ? Icons.check_circle : Icons.cancel,
-            color: enabled ? const Color(0xFF2ECC71) : const Color(0xFFE74C3C),
-            size: 20,
-          ),
-          const SizedBox(width: 10),
-          Text(
-            message,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-            ),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      behavior: SnackBarBehavior.floating,
+      padding: EdgeInsets.zero,
+      duration: const Duration(seconds: 2),
+      content: DuckLiquidGlassSurface(
+        borderRadius: 16,
+        isLight: isLight,
+        variant: DuckLiquidGlassVariant.panel,
+        fallbackColor: const Color(0xFF1B1C1D).withOpacity(0.85),
+        fallbackBorderColor: Colors.white.withOpacity(0.08),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.24),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
           ),
         ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                enabled ? Icons.check_circle : Icons.cancel,
+                color: enabled ? const Color(0xFF2ECC71) : const Color(0xFFE74C3C),
+                size: 22,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      backgroundColor: const Color(0xFF1B1C1D),
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.white.withOpacity(0.08)),
-      ),
-      duration: const Duration(seconds: 2),
     ),
   );
 }
