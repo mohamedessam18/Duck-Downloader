@@ -396,6 +396,29 @@ async def debug_node():
     }
 
 
+@app.get("/api/debug-extract")
+async def debug_extract(url: str):
+    from yt_dlp import YoutubeDL
+    from .downloads import download_manager
+    import traceback
+    opts = download_manager._base_ydl_options(skip_download=True)
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return {
+                "status": "success",
+                "title": info.get("title"),
+                "formats_count": len(info.get("formats", [])),
+                "extractor": info.get("extractor"),
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
+
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def serve_home():
