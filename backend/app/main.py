@@ -374,12 +374,29 @@ async def debug_extract(url: str):
     from yt_dlp import YoutubeDL
     from .downloads import download_manager
     import traceback
+    import urllib.request
+    import json
+
+    # 1. Test local Node provider
+    provider_status = "unknown"
+    try:
+        req = urllib.request.urlopen("http://localhost:4416", timeout=5)
+        provider_status = f"active, body: {req.read().decode()[:100]}"
+    except Exception as e:
+        provider_status = f"failed: {e}"
+
+    # 2. Check yt-dlp version and plugins
+    import yt_dlp.plugins
+    loaded_plugins = list(yt_dlp.plugins.directories())
+
     opts = download_manager._base_ydl_options(skip_download=True)
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return {
                 "status": "success",
+                "provider_status": provider_status,
+                "loaded_plugins": [str(p) for p in loaded_plugins],
                 "title": info.get("title"),
                 "formats_count": len(info.get("formats", [])),
                 "extractor": info.get("extractor"),
@@ -387,6 +404,8 @@ async def debug_extract(url: str):
     except Exception as e:
         return {
             "status": "error",
+            "provider_status": provider_status,
+            "loaded_plugins": [str(p) for p in loaded_plugins],
             "error_message": str(e),
             "traceback": traceback.format_exc(),
         }
