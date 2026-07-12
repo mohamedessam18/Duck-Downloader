@@ -1286,7 +1286,9 @@ class DuckDownloadsController extends ChangeNotifier
         lowerUrl.contains('threads.net') ||
         lowerUrl.contains('threads.com') ||
         lowerUrl.contains('x.com') ||
-        lowerUrl.contains('twitter.com');
+        lowerUrl.contains('twitter.com') ||
+        lowerUrl.contains('youtube.com') ||
+        lowerUrl.contains('youtu.be');
   }
 
   String _browserPlatformFor(String url) {
@@ -1294,6 +1296,7 @@ class DuckDownloadsController extends ChangeNotifier
     if (lower.contains('instagram.com')) return 'Instagram';
     if (lower.contains('threads.net') || lower.contains('threads.com')) return 'Threads';
     if (lower.contains('x.com') || lower.contains('twitter.com')) return 'X';
+    if (lower.contains('youtube.com') || lower.contains('youtu.be')) return 'YouTube';
     return 'Social';
   }
 

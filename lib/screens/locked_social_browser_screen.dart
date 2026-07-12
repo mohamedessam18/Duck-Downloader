@@ -37,6 +37,8 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
   bool get _isInstagram => widget.platform.toLowerCase().contains('instagram') ||
       widget.platform.toLowerCase().contains('threads');
 
+  bool get _isYouTube => widget.platform.toLowerCase().contains('youtube');
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -151,6 +153,14 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
           host.endsWith('.threads.net') ||
           host == 'threads.com' ||
           host.endsWith('.threads.com');
+    }
+    if (_isYouTube) {
+      return host == 'youtube.com' ||
+          host.endsWith('.youtube.com') ||
+          host == 'youtu.be' ||
+          host.endsWith('.youtu.be') ||
+          host == 'google.com' ||
+          host.endsWith('.google.com');
     }
     return host == 'x.com' ||
         host.endsWith('.x.com') ||
