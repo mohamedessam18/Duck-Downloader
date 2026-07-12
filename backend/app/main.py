@@ -253,9 +253,13 @@ async def extract_playlist(
     except Exception as exc:
         try:
             url = normalize_url(body.url)
-            info = await download_manager.extract_images(url)
-            if info["items"]:
-                return PlaylistExtractResponse(**info)
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            host = parsed.netloc.lower()
+            if not any(domain in host for domain in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch"]):
+                info = await download_manager.extract_images(url)
+                if info["items"]:
+                    return PlaylistExtractResponse(**info)
         except Exception:
             pass
         raise HTTPException(status_code=422, detail=public_error(exc)) from exc
