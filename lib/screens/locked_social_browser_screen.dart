@@ -39,6 +39,8 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
 
   bool get _isYouTube => widget.platform.toLowerCase().contains('youtube');
 
+  bool get _isFacebook => widget.platform.toLowerCase().contains('facebook');
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -162,6 +164,14 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
           host == 'google.com' ||
           host.endsWith('.google.com');
     }
+    if (_isFacebook) {
+      return host == 'facebook.com' ||
+          host.endsWith('.facebook.com') ||
+          host == 'fb.watch' ||
+          host.endsWith('.fb.watch') ||
+          host == 'fb.com' ||
+          host.endsWith('.fb.com');
+    }
     return host == 'x.com' ||
         host.endsWith('.x.com') ||
         host == 'twitter.com' ||
@@ -264,7 +274,7 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
         // Ignore cookie sync errors and proceed
       }
 
-      if (_isYouTube) {
+      if (_isYouTube || _isFacebook) {
         if (mounted) {
           Navigator.of(context).pop(currentUrl);
           return;
