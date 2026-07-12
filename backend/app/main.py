@@ -369,7 +369,32 @@ async def download_ws(websocket: WebSocket, download_id: str) -> None:
         state.subscribers.discard(queue)
 
 
-# Serve static landing page and catch-all routes
+@app.get("/api/debug-node")
+async def debug_node():
+    import subprocess
+    import shutil
+    try:
+        res = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
+        node_version = res.stdout.strip() if res.returncode == 0 else f"Err: {res.stderr}"
+    except Exception as e:
+        node_version = f"Exception: {e}"
+        
+    try:
+        node_path = shutil.which("node")
+    except Exception as e:
+        node_path = f"Exception: {e}"
+
+    try:
+        deno_path = shutil.which("deno")
+    except Exception as e:
+        deno_path = f"Exception: {e}"
+
+    return {
+        "node_path": node_path,
+        "node_version": node_version,
+        "deno_path": deno_path,
+    }
+
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
