@@ -38,4 +38,4 @@ RUN mkdir -p /tmp/duck-downloads && chmod 777 /tmp/duck-downloads
 
 # The provider listens only on localhost:4416. Its yt-dlp plugin discovers it
 # automatically and generates short-lived PO tokens per YouTube request.
-CMD ["sh", "-c", "node /opt/bgutil-provider/server/build/main.js & exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "node /opt/bgutil-provider/server/build/main.js & (pip install --no-cache-dir --upgrade yt-dlp || true) && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

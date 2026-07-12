@@ -311,9 +311,11 @@ class DownloadManager:
                 ),
                 "Accept-Language": "en-US,en;q=0.9",
             },
-            # The local bgutil provider supplies the PO token required by this
-            # client on many YouTube requests from cloud-hosted IP addresses.
-            "extractor_args": {"youtube": {"player_client": ["mweb"]}},
+            # Do not force a particular YouTube player client here. yt-dlp's
+            # current defaults choose the most compatible clients for each
+            # video, while the local bgutil provider supplies PO tokens when a
+            # selected client needs one. Forcing mweb worked for many Shorts
+            # but made regular watch pages more likely to hit bot checks.
         }
         if has_impersonate:
             try:
@@ -839,10 +841,6 @@ class DownloadManager:
         if has_impersonate:
             args.extend(["--impersonate", "chrome"])
 
-        # Keep subprocess downloads aligned with metadata extraction. The
-        # bgutil yt-dlp plugin will obtain a PO token from localhost:4416.
-        args.extend(["--extractor-args", "youtube:player_client=mweb"])
-            
         args.extend([
             "--continue",
             "--restrict-filenames",
@@ -869,10 +867,6 @@ class DownloadManager:
             ])
         if download_type == DownloadType.audio:
             args.extend(["-x", "--audio-format", "mp3", "--audio-quality", "192K"])
-        args.extend([
-            "--extractor-args",
-            "youtube:player_client=android,web",
-        ])
         args.append(state.url)
         return args
 

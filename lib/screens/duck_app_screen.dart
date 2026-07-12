@@ -324,6 +324,40 @@ class _Brand extends StatelessWidget {
   }
 }
 
+void _showSettingToast(BuildContext context, String message, bool enabled) {
+  ScaffoldMessenger.of(context).clearSnackBars();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            enabled ? Icons.check_circle : Icons.cancel,
+            color: enabled ? const Color(0xFF2ECC71) : const Color(0xFFE74C3C),
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Text(
+            message,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: const Color(0xFF1B1C1D),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.white.withOpacity(0.08)),
+      ),
+      duration: const Duration(seconds: 2),
+    ),
+  );
+}
+
 class _AutoSaveToggle extends StatelessWidget {
   const _AutoSaveToggle({required this.controller});
 
@@ -337,7 +371,15 @@ class _AutoSaveToggle extends StatelessWidget {
           : Icons.save_alt_outlined,
       label: 'AUTO SAVE',
       active: controller.autoSaveVideos,
-      onTap: () => controller.toggleAutoSaveVideos(!controller.autoSaveVideos),
+      onTap: () {
+        final newStatus = !controller.autoSaveVideos;
+        controller.toggleAutoSaveVideos(newStatus);
+        _showSettingToast(
+          context,
+          newStatus ? 'Auto Save Enabled' : 'Auto Save Disabled',
+          newStatus,
+        );
+      },
     );
   }
 }
@@ -355,9 +397,15 @@ class _ClipboardToggle extends StatelessWidget {
           : Icons.content_paste_off,
       label: 'CLIPBOARD',
       active: controller.enableClipboardDetection,
-      onTap: () => controller.toggleEnableClipboardDetection(
-        !controller.enableClipboardDetection,
-      ),
+      onTap: () {
+        final newStatus = !controller.enableClipboardDetection;
+        controller.toggleEnableClipboardDetection(newStatus);
+        _showSettingToast(
+          context,
+          newStatus ? 'Clipboard Detection Enabled' : 'Clipboard Detection Disabled',
+          newStatus,
+        );
+      },
     );
   }
 }
@@ -3845,7 +3893,14 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
                 _isDraggingPill = false;
               });
               final newActive = targetIndex == 0;
-              widget.controller.toggleAutoSaveVideos(newActive);
+              if (widget.controller.autoSaveVideos != newActive) {
+                widget.controller.toggleAutoSaveVideos(newActive);
+                _showSettingToast(
+                  context,
+                  newActive ? 'Auto Save Enabled' : 'Auto Save Disabled',
+                  newActive,
+                );
+              }
             }
           },
           child: Container(
@@ -3915,7 +3970,12 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
                       Expanded(
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
-                          onTap: () => widget.controller.toggleAutoSaveVideos(true),
+                          onTap: () {
+                            if (!widget.controller.autoSaveVideos) {
+                              widget.controller.toggleAutoSaveVideos(true);
+                              _showSettingToast(context, 'Auto Save Enabled', true);
+                            }
+                          },
                           child: Center(
                             child: AnimatedDefaultTextStyle(
                               duration: const Duration(milliseconds: 180),
@@ -3932,7 +3992,12 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
                       Expanded(
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
-                          onTap: () => widget.controller.toggleAutoSaveVideos(false),
+                          onTap: () {
+                            if (widget.controller.autoSaveVideos) {
+                              widget.controller.toggleAutoSaveVideos(false);
+                              _showSettingToast(context, 'Auto Save Disabled', false);
+                            }
+                          },
                           child: Center(
                             child: AnimatedDefaultTextStyle(
                               duration: const Duration(milliseconds: 180),

@@ -1,11 +1,12 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
-yt-dlp[default]
+yt-dlp[default]==2026.7.4
 # Generates the Proof-of-Origin tokens required by YouTube for many cloud IPs.
 bgutil-ytdlp-pot-provider==1.3.1
 curl-cffi==0.13.0
 python-multipart==0.0.20
 slowapi==0.1.9
 aiofiles==24.1.0
-# Force cache invalidate to update yt-dlp to latest version - July 11, 2026
+# Keep this pinned so a Docker rebuild cannot silently reuse an old cached
+# yt-dlp layer after YouTube changes its extraction flow. Bump deliberately.
