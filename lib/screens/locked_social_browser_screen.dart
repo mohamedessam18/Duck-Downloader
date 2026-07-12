@@ -199,14 +199,24 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
     if (controller == null) return;
     setState(() => _extracting = true);
     try {
+      final currentUri = await controller.getUrl();
+      final currentUrl = currentUri?.toString() ?? widget.initialUrl;
+
       // 1. Sync cookies from WebView to Backend
       try {
-        final cookiesText = await _getNetscapeCookies(widget.initialUrl);
+        final cookiesText = await _getNetscapeCookies(currentUrl);
         if (cookiesText.trim().isNotEmpty) {
           await widget.controller.updateCookies(cookiesText);
         }
       } catch (_) {
         // Ignore cookie sync errors and proceed
+      }
+
+      if (_isYouTube) {
+        if (mounted) {
+          Navigator.of(context).pop(currentUrl);
+          return;
+        }
       }
 
       // 2. Try backend scraper first (now has access to the user's synced cookies)

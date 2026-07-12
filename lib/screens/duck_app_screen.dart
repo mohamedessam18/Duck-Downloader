@@ -49,8 +49,8 @@ class DuckAppScreen extends StatelessWidget {
   ) async {
     if (controller.lockedBrowserRequest != request) return;
     controller.clearLockedBrowserRequest();
-    final candidates = await Navigator.of(context)
-        .push<List<BrowserImageCandidate>>(
+    final result = await Navigator.of(context)
+        .push<dynamic>(
           CupertinoPageRoute(
             builder: (_) => LockedSocialBrowserScreen(
               initialUrl: request.url,
@@ -59,11 +59,16 @@ class DuckAppScreen extends StatelessWidget {
             ),
           ),
         );
-    if (!context.mounted || candidates == null || candidates.isEmpty) return;
-    await controller.startBrowserImageDownloads(
-      candidates: candidates,
-      platform: request.platform,
-    );
+    if (!context.mounted || result == null) return;
+    if (result is String) {
+      await controller.extractUrl(result);
+    } else if (result is List<BrowserImageCandidate>) {
+      if (result.isEmpty) return;
+      await controller.startBrowserImageDownloads(
+        candidates: result,
+        platform: request.platform,
+      );
+    }
   }
 
   @override

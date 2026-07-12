@@ -605,6 +605,29 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
+  Future<void> extractUrl(String url) async {
+    if (busy) return;
+    busy = true;
+    flow = DuckFlow.extracting;
+    status = 'Checking link...';
+    metadata = null;
+    batchItems = null;
+    batchTitle = null;
+    batchPlatform = null;
+    lockedBrowserRequest = null;
+    notifyListeners();
+
+    try {
+      await _extractUrlOrBatch(url);
+    } catch (error) {
+      flow = DuckFlow.error;
+      status = _cleanError(error);
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> startDownload() async {
     final media = metadata;
     if (media == null || busy) return;
