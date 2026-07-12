@@ -169,15 +169,67 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
         host == 't.co';
   }
 
-  Future<String> _getNetscapeCookies(String urlString) async {
+  Future<String> _getNetscapeCookiesForPlatform() async {
     try {
-      final uri = WebUri(urlString);
       final cookieManager = CookieManager.instance();
-      final cookies = await cookieManager.getCookies(url: uri);
+      final urlsToQuery = <String>[];
+
+      final platformLower = widget.platform.toLowerCase();
+      if (platformLower.contains('youtube')) {
+        urlsToQuery.addAll([
+          'https://youtube.com',
+          'https://www.youtube.com',
+          'https://m.youtube.com',
+          'https://google.com',
+          'https://accounts.google.com',
+        ]);
+      } else if (platformLower.contains('instagram') || platformLower.contains('threads')) {
+        urlsToQuery.addAll([
+          'https://instagram.com',
+          'https://www.instagram.com',
+          'https://threads.net',
+          'https://www.threads.net',
+        ]);
+      } else if (platformLower.contains('facebook')) {
+        urlsToQuery.addAll([
+          'https://facebook.com',
+          'https://www.facebook.com',
+          'https://m.facebook.com',
+        ]);
+      } else if (platformLower.contains('x') || platformLower.contains('twitter')) {
+        urlsToQuery.addAll([
+          'https://twitter.com',
+          'https://www.twitter.com',
+          'https://x.com',
+          'https://www.x.com',
+        ]);
+      } else {
+        final currentUri = await _controller?.getUrl();
+        if (currentUri != null) {
+          urlsToQuery.add(currentUri.toString());
+        }
+        urlsToQuery.add(widget.initialUrl);
+      }
+
+      final allCookiesMap = <String, Cookie>{};
+      for (final url in urlsToQuery) {
+        try {
+          final uri = WebUri(url);
+          final cookies = await cookieManager.getCookies(url: uri);
+          for (final cookie in cookies) {
+            final domain = cookie.domain ?? uri.host;
+            final key = '$domain:${cookie.name}';
+            allCookiesMap[key] = cookie;
+          }
+        } catch (_) {}
+      }
+
+      if (allCookiesMap.isEmpty) return '';
+
       final sb = StringBuffer();
       sb.writeln('# Netscape HTTP Cookie File');
-      for (final cookie in cookies) {
-        final domain = cookie.domain ?? uri.host;
+      for (final cookie in allCookiesMap.values) {
+        final domain = cookie.domain ?? 'youtube.com';
         final flag = domain.startsWith('.') ? 'TRUE' : 'FALSE';
         final path = cookie.path ?? '/';
         final secure = cookie.isSecure == true ? 'TRUE' : 'FALSE';
@@ -204,7 +256,7 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
 
       // 1. Sync cookies from WebView to Backend
       try {
-        final cookiesText = await _getNetscapeCookies(currentUrl);
+        final cookiesText = await _getNetscapeCookiesForPlatform();
         if (cookiesText.trim().isNotEmpty) {
           await widget.controller.updateCookies(cookiesText);
         }
