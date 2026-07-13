@@ -1530,6 +1530,13 @@ class DuckDownloadsController extends ChangeNotifier
     return exts.any(cleaned.endsWith);
   }
 
+  bool _looksLikeVideoUrl(String url) {
+    final lower = url.toLowerCase();
+    const exts = ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.3gp'];
+    final cleaned = lower.split('?').first.split('#').first;
+    return exts.any(cleaned.endsWith);
+  }
+
   bool _isPublicMediaCandidate(String value) {
     return RegExp(
       r'^https?:\/\/[^\s/$.?#].[^\s]*$',
@@ -1557,6 +1564,7 @@ class DuckDownloadsController extends ChangeNotifier
     if (lower.contains('threads.net') || lower.contains('threads.com')) return 'Threads';
     if (lower.contains('x.com') || lower.contains('twitter.com')) return 'X';
     if (lower.contains('youtube.com') || lower.contains('youtu.be')) return 'YouTube';
+    if (lower.contains('facebook.com') || lower.contains('fb.watch')) return 'Facebook';
     return 'Social';
   }
 
@@ -1780,10 +1788,30 @@ class DuckDownloadsController extends ChangeNotifier
     for (final url in urls) {
       try {
         final batchItem = itemsByUrl[url];
+        bool isVideo = false;
+        if (batchItem != null) {
+          isVideo = batchItem.isVideo;
+        } else {
+          if (_looksLikeVideoUrl(url)) {
+            isVideo = true;
+          } else if (_looksLikeImageUrl(url)) {
+            isVideo = false;
+          } else {
+            isVideo = type == DownloadType.video;
+          }
+        }
+
+        // Additional safeguard to enforce video/image types by url extension
+        if (_looksLikeVideoUrl(url)) {
+          isVideo = true;
+        } else if (_looksLikeImageUrl(url)) {
+          isVideo = false;
+        }
+
         final itemType = forceHybrid
-            ? (batchItem?.isVideo == true ? DownloadType.video : DownloadType.image)
+            ? (isVideo ? DownloadType.video : DownloadType.image)
             : type;
-        debugPrint('DEBUG BATCH: url=$url title=${batchItem?.title} isVideo=${batchItem?.isVideo} forceHybrid=$forceHybrid itemType=$itemType');
+        debugPrint('DEBUG BATCH: url=$url title=${batchItem?.title} isVideo=$isVideo forceHybrid=$forceHybrid itemType=$itemType');
         if (itemType == DownloadType.image && batchItem?.isPreview == true) {
           throw Exception('Could not access the full-size Instagram image.');
         }
@@ -1817,7 +1845,7 @@ class DuckDownloadsController extends ChangeNotifier
         String? thumbnail;
         String platform;
 
-        if (_looksLikeImageUrl(url) || itemType == DownloadType.image || (itemType == DownloadType.video && batchItem?.isVideo == true)) {
+        if (_looksLikeImageUrl(url) || itemType == DownloadType.image || (itemType == DownloadType.video && isVideo)) {
           mediaUrl = url;
           thumbnail = batchItem?.thumbnail ?? url;
           platform = batchPlatform ?? 'Public source';

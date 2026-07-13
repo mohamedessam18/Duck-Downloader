@@ -39,6 +39,11 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
 
   bool get _isYouTube => widget.platform.toLowerCase().contains('youtube');
 
+  bool get _isFacebook => widget.platform.toLowerCase().contains('facebook');
+
+  bool get _isX => widget.platform.toLowerCase().contains('x') ||
+      widget.platform.toLowerCase().contains('twitter');
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -162,11 +167,29 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
           host == 'google.com' ||
           host.endsWith('.google.com');
     }
-    return host == 'x.com' ||
-        host.endsWith('.x.com') ||
-        host == 'twitter.com' ||
-        host.endsWith('.twitter.com') ||
-        host == 't.co';
+    if (_isFacebook) {
+      return host == 'facebook.com' ||
+          host.endsWith('.facebook.com') ||
+          host == 'fb.watch' ||
+          host.endsWith('.fb.watch') ||
+          host == 'fbcdn.net' ||
+          host.endsWith('.fbcdn.net');
+    }
+    if (_isX) {
+      return host == 'x.com' ||
+          host.endsWith('.x.com') ||
+          host == 'twitter.com' ||
+          host.endsWith('.twitter.com') ||
+          host == 't.co';
+    }
+    // Fallback: allow the domain of the initial url
+    try {
+      final initialHost = Uri.parse(widget.initialUrl).host.toLowerCase();
+      if (host == initialHost || host.endsWith('.$initialHost')) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   Future<String> _getNetscapeCookiesForPlatform() async {

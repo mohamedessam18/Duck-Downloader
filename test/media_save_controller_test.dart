@@ -50,6 +50,7 @@ class FakeBatchApiClient extends DuckApiClient {
 
   final Set<String> failUrls;
   final List<String> startedUrls = [];
+  final List<({String url, DownloadType type})> startedDownloads = [];
 
   @override
   Future<String> startDownload({
@@ -60,6 +61,7 @@ class FakeBatchApiClient extends DuckApiClient {
   }) async {
     if (failUrls.contains(url)) throw Exception('Start failed');
     startedUrls.add(url);
+    startedDownloads.add((url: url, type: type));
     return 'download-${startedUrls.length}';
   }
 
@@ -401,6 +403,43 @@ void main() {
       'https://cdninstagram.com/full-1.jpg',
     );
     expect(controller.status, 'Started 1 images, 1 failed');
+  });
+
+  test('batch hybrid download downloads images as images and videos as videos', () async {
+    final box = await Hive.openBox('media-save-controller-hybrid-batch');
+    addTearDown(box.close);
+    await box.clear();
+    final api = FakeBatchApiClient();
+    final controller = _controller(box, FakeMediaSaveService(), api: api);
+    addTearDown(controller.dispose);
+    controller.batchPlatform = 'Instagram';
+    controller.batchItems = const [
+      PlaylistItem(
+        url: 'https://cdninstagram.com/image-1.jpg',
+        title: 'Image 1',
+        thumbnail: 'https://cdninstagram.com/image-1.jpg',
+        isVideo: false,
+      ),
+      PlaylistItem(
+        url: 'https://cdninstagram.com/video-1.mp4',
+        title: 'Video 1',
+        thumbnail: 'https://cdninstagram.com/video-1.mp4',
+        isVideo: true,
+      ),
+    ];
+
+    await controller.startBatchDownload(
+      urls: controller.batchItems!.map((item) => item.url).toList(),
+      type: DownloadType.video,
+      quality: 'Best',
+      forceHybrid: true,
+    );
+
+    expect(api.startedDownloads, hasLength(2));
+    expect(api.startedDownloads[0].url, 'https://cdninstagram.com/image-1.jpg');
+    expect(api.startedDownloads[0].type, DownloadType.image);
+    expect(api.startedDownloads[1].url, 'https://cdninstagram.com/video-1.mp4');
+    expect(api.startedDownloads[1].type, DownloadType.video);
   });
 
   test('batch image download rejects preview-only Instagram items', () async {
