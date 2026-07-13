@@ -500,11 +500,17 @@ class DuckDownloadsController extends ChangeNotifier
           flow = DuckFlow.ready;
           status = 'Choose videos to download';
           return;
-        } catch (_) {
-          // fall through to backend on failure
+        } catch (e) {
+          // Don't fall through to backend for YouTube playlists —
+          // the backend will always be bot-checked. Show the error directly.
+          throw Exception(
+            'Could not load YouTube playlist. It may be private or unavailable.\n'
+            'Details: ${e.toString().replaceAll('Exception: ', '')}',
+          );
         }
       }
 
+      // Non-YouTube playlist → use backend
       final playlist = await _api.extractPlaylist(cleanUrl);
       batchTitle = playlist.title;
       batchPlatform = playlist.platform;
@@ -518,24 +524,27 @@ class DuckDownloadsController extends ChangeNotifier
         throw Exception('Copy a public social media link first.');
       }
 
-      // ── YouTube: extract directly on the device via youtube_explode_dart ──
+      // ── YouTube: ALWAYS use youtube_explode_dart — NEVER hit the backend ──
+      // The backend (Railway) gets bot-checked by YouTube every time.
+      // youtube_explode_dart runs on the user's device with a residential IP.
       if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
-        try {
-          flow = DuckFlow.extracting;
-          status = 'Fetching YouTube info...';
-          notifyListeners();
-          final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
-          if (ytMeta != null) {
-            metadata = ytMeta;
-            selectedType = DownloadType.video;
-            quality = _firstQuality(ytMeta, DownloadType.video);
-            flow = DuckFlow.ready;
-            status = 'Choose video or audio';
-            return;
-          }
-        } catch (_) {
-          // fall through to backend if youtube_explode_dart fails
+        flow = DuckFlow.extracting;
+        status = 'Fetching YouTube info...';
+        notifyListeners();
+        // Let any exception bubble up to the outer catch → shows error to user
+        final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+        if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+          metadata = ytMeta;
+          selectedType = DownloadType.video;
+          quality = _firstQuality(ytMeta, DownloadType.video);
+          flow = DuckFlow.ready;
+          status = 'Choose video or audio';
+          return;
         }
+        throw Exception(
+          'Could not load YouTube video. The video may be private, '
+          'age-restricted, or unavailable in your region.',
+        );
       }
 
       if (cleanUrl.contains('instagram.com')) {
