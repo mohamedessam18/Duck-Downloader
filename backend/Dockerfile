@@ -22,7 +22,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DUCK_STORAGE_DIR=/tmp/duck-downloads
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates unzip libstdc++6 \
+    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates unzip libstdc++6 git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pot-provider /usr/local/bin/node /usr/local/bin/node
