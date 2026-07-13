@@ -1555,7 +1555,9 @@ class DuckDownloadsController extends ChangeNotifier
         lowerUrl.contains('x.com') ||
         lowerUrl.contains('twitter.com') ||
         lowerUrl.contains('youtube.com') ||
-        lowerUrl.contains('youtu.be');
+        lowerUrl.contains('youtu.be') ||
+        lowerUrl.contains('facebook.com') ||
+        lowerUrl.contains('fb.watch');
   }
 
   String _browserPlatformFor(String url) {
