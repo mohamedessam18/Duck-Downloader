@@ -32,6 +32,7 @@ class DuckDownloadsController extends ChangeNotifier
     required PremiumManager premiumManager,
     NotificationService? notificationService,
     PermissionService? permissionService,
+    YouTubeExplodeService? ytExplode,
     bool initializePremium = true,
     bool initializePlatformServices = true,
   }) : _api = api,
@@ -41,7 +42,8 @@ class DuckDownloadsController extends ChangeNotifier
        _store = store,
        premium = premiumManager,
        _notifications = notificationService ?? NotificationService(),
-       _permissions = permissionService ?? PermissionService() {
+       _permissions = permissionService ?? PermissionService(),
+       _ytExplode = ytExplode ?? YouTubeExplodeService() {
     _downloads = _store.readDownloads();
     _videoResumePositions = _store.readVideoResumePositions();
     autoSaveVideos = _store.readAutoSaveVideos();
@@ -119,7 +121,7 @@ class DuckDownloadsController extends ChangeNotifier
   final NotificationService _notifications;
   final PermissionService _permissions;
   final TrimService _trimService = TrimService();
-  final YouTubeExplodeService _ytExplode = YouTubeExplodeService();
+  final YouTubeExplodeService _ytExplode;
 
   List<DownloadItem> _downloads = [];
   List<Playlist> _playlists = [];

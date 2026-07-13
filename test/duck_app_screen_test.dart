@@ -8,6 +8,7 @@ import 'package:duck_downloader/services/premium_manager.dart';
 import 'package:duck_downloader/services/purchase_repository.dart';
 import 'package:duck_downloader/services/subscription_service.dart';
 import 'package:duck_downloader/services/media_save_service.dart';
+import 'package:duck_downloader/services/youtube_explode_service.dart';
 import 'package:duck_downloader/state/downloads_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,6 +66,25 @@ class FakeApiClient extends Fake implements DuckApiClient {
     );
   }
 }
+
+class FakeYouTubeExplodeService extends Fake implements YouTubeExplodeService {
+  bool extractMetadataCalled = false;
+  String? extractedUrl;
+
+  @override
+  Future<MediaMetadata?> extractMetadata(String url) async {
+    extractMetadataCalled = true;
+    extractedUrl = url;
+    return MediaMetadata(
+      url: url,
+      title: 'Fake YouTube Video',
+      platform: 'YouTube',
+      qualities: [const FormatInfo(id: 'https://fake-stream-url.com/video.mp4', label: '720p')],
+      audioFormats: [],
+    );
+  }
+}
+
 
 void main() {
   testWidgets('metadata options state scrolls instead of overflowing', (
@@ -218,10 +238,10 @@ void main() {
   testWidgets('clipboard detection extract navigates and loads url', (
     tester,
   ) async {
-    // Non-YouTube URL → should still call the backend API
+    // Non-YouTube URL → should still call the backend API (extract)
     final box = FakeBox();
     final clipboard = FakeClipboardService()
-      ..clipboardText = 'https://www.instagram.com/reel/abc123/';
+      ..clipboardText = 'https://www.tiktok.com/@user/video/abc123/';
     final api = FakeApiClient();
 
     final controller = DuckDownloadsController(
@@ -248,7 +268,7 @@ void main() {
     await tester.pump();
 
     expect(api.extractCalled, isTrue);
-    expect(api.extractedUrl, 'https://www.instagram.com/reel/abc123/');
+    expect(api.extractedUrl, 'https://www.tiktok.com/@user/video/abc123/');
   });
 
   testWidgets('YouTube URLs bypass backend and use on-device extraction', (
@@ -259,6 +279,7 @@ void main() {
     final clipboard = FakeClipboardService()
       ..clipboardText = 'https://youtube.com/watch?v=dQw4w9WgXcQ';
     final api = FakeApiClient();
+    final ytExplode = FakeYouTubeExplodeService();
 
     final controller = DuckDownloadsController(
       api: api,
@@ -267,6 +288,7 @@ void main() {
       mediaSaver: MediaSaveService(),
       store: DownloadStore(box),
       premiumManager: _premiumManager(box),
+      ytExplode: ytExplode,
       initializePremium: false,
       initializePlatformServices: false,
     );
@@ -284,6 +306,7 @@ void main() {
 
     // Backend must NOT be called for YouTube (on-device extraction only)
     expect(api.extractCalled, isFalse);
+    expect(ytExplode.extractMetadataCalled, isTrue);
   });
 
 
