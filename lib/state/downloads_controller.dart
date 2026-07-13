@@ -19,6 +19,7 @@ import '../services/premium_entitlement.dart';
 import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
 import '../services/trim_service.dart';
+import '../services/youtube_explode_service.dart';
 
 class DuckDownloadsController extends ChangeNotifier
     with WidgetsBindingObserver {
@@ -118,6 +119,7 @@ class DuckDownloadsController extends ChangeNotifier
   final NotificationService _notifications;
   final PermissionService _permissions;
   final TrimService _trimService = TrimService();
+  final YouTubeExplodeService _ytExplode = YouTubeExplodeService();
 
   List<DownloadItem> _downloads = [];
   List<Playlist> _playlists = [];
@@ -497,6 +499,27 @@ class DuckDownloadsController extends ChangeNotifier
       if (!_isPublicMediaCandidate(cleanUrl)) {
         throw Exception('Copy a public social media link first.');
       }
+
+      // ── YouTube: extract directly on the device via youtube_explode_dart ──
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        try {
+          flow = DuckFlow.extracting;
+          status = 'Fetching YouTube info...';
+          notifyListeners();
+          final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+          if (ytMeta != null) {
+            metadata = ytMeta;
+            selectedType = DownloadType.video;
+            quality = _firstQuality(ytMeta, DownloadType.video);
+            flow = DuckFlow.ready;
+            status = 'Choose video or audio';
+            return;
+          }
+        } catch (_) {
+          // fall through to backend if youtube_explode_dart fails
+        }
+      }
+
       if (cleanUrl.contains('instagram.com')) {
         try {
           final playlist = await _api.extractPlaylist(cleanUrl);
@@ -641,6 +664,13 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
 
     try {
+      // Detect youtube_explode_dart metadata: quality id is a raw https stream URL
+      final isYtExplode = quality.startsWith('https://');
+      if (isYtExplode) {
+        await _startYouTubeExplodeDownload(media);
+        return;
+      }
+
       final id = await _api.startDownload(
         url: media.url,
         type: selectedType,
@@ -671,6 +701,88 @@ class DuckDownloadsController extends ChangeNotifier
       notifyListeners();
     }
   }
+
+  /// Downloads a YouTube stream URL directly on-device using YouTubeExplodeService.
+  Future<void> _startYouTubeExplodeDownload(MediaMetadata media) async {
+    // Find the selected format to get its extension
+    final allFormats = [...media.qualities, ...media.audioFormats];
+    final format = allFormats.firstWhere(
+      (f) => f.id == quality,
+      orElse: () => FormatInfo(id: quality, label: 'Video', ext: 'mp4'),
+    );
+
+    final ext = format.ext ?? (selectedType == DownloadType.audio ? 'webm' : 'mp4');
+    final itemId = DateTime.now().millisecondsSinceEpoch.toString();
+
+    var item = DownloadItem(
+      id: itemId,
+      url: media.url,
+      title: media.title,
+      thumbnail: media.thumbnail,
+      platform: media.platform,
+      quality: format.label,
+      type: selectedType,
+      createdAt: DateTime.now(),
+      status: DownloadStatus.downloading,
+      progress: 0,
+      favorite: false,
+    );
+    await _saveItem(item);
+    activeId = itemId;
+
+    try {
+      final filePath = await _ytExplode.downloadStream(
+        streamUrl: quality,
+        title: media.title,
+        type: selectedType,
+        ext: ext,
+        onProgress: (received, total) async {
+          if (total <= 0) return;
+          final progress = ((received / total) * 99).clamp(0, 99).toInt();
+          item = item.copyWith(
+            status: DownloadStatus.downloading,
+            progress: progress,
+          );
+          await _saveItem(item);
+        },
+      );
+
+      item = item.copyWith(
+        filePath: filePath,
+        progress: 100,
+        status: DownloadStatus.completed,
+      );
+      await _saveItem(item);
+
+      if (item.isVideo && autoSaveVideos) {
+        item = await _trySaveVideoAfterDownload(item);
+      }
+      if (item.type == DownloadType.image) {
+        item = await _trySaveImageAfterDownload(item);
+      }
+
+      flow = DuckFlow.success;
+      status = item.isVideo && item.savedToGallery
+          ? 'Download complete and saved to gallery'
+          : 'Download complete';
+
+      unawaited(_notifications.showDownloadComplete(
+        id: item.id.hashCode,
+        title: item.title,
+        type: item.isVideo ? 'Video' : 'Audio',
+        downloadId: item.id,
+      ));
+    } catch (error) {
+      item = item.copyWith(status: DownloadStatus.failed);
+      await _saveItem(item);
+      flow = DuckFlow.error;
+      status = 'YouTube download failed: ${_cleanError(error)}';
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
 
   Future<void> pauseDownload(DownloadItem item) {
     return _controlDownload(item: item, action: 'pause');

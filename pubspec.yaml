@@ -30,6 +30,7 @@ dependencies:
   ffmpeg_kit_flutter_new_min: ^3.3.2
   liquid_glass_plus: ^0.3.2
   google_mobile_ads: ^5.1.0
+  youtube_explode_dart: ^3.1.0
 
 dev_dependencies:
   flutter_test:
