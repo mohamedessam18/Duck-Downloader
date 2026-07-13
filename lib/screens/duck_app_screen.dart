@@ -793,12 +793,7 @@ class _PremiumSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 18),
                     const _PremiumBenefit(label: 'Ad-Free Experience'),
-                    const _PremiumBenefit(label: 'Faster Processing'),
-                    const _PremiumBenefit(label: 'Priority Features'),
-                    const _PremiumBenefit(label: 'Future Premium Tools'),
-                    const _PremiumBenefit(
-                      label: 'Early Access To New Features',
-                    ),
+                    const _PremiumBenefit(label: 'Faster Downloads'),
                     const SizedBox(height: 18),
                     if (controller.premiumError != null)
                       _PremiumMessage(

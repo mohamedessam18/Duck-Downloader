@@ -50,6 +50,7 @@ class DuckApiClient {
     required DownloadType type,
     required String quality,
     bool removeMusic = false,
+    bool premiumNoWatermark = false,
   }) async {
     try {
       final data = {
@@ -57,6 +58,7 @@ class DuckApiClient {
         'type': type.name,
         'quality': quality,
         'removeMusic': removeMusic,
+        'premiumNoWatermark': premiumNoWatermark,
       };
       final response = await _dio.post<Map<String, dynamic>>(
         '/api/download',

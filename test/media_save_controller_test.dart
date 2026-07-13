@@ -58,6 +58,7 @@ class FakeBatchApiClient extends DuckApiClient {
     required DownloadType type,
     required String quality,
     bool removeMusic = false,
+    bool premiumNoWatermark = false,
   }) async {
     if (failUrls.contains(url)) throw Exception('Start failed');
     startedUrls.add(url);

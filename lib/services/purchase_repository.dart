@@ -65,6 +65,17 @@ class PurchaseRepository {
     await _box.delete(_verifiedAtKey);
   }
 
+  Set<PremiumFeature> featuresForMock(String productId) => _featuresFor(productId);
+
+  Future<void> saveMockEntitlement(PremiumEntitlement entitlement) async {
+    await _box.put(_activeKey, true);
+    await _box.put(_productIdKey, entitlement.productId);
+    await _box.put(_purchaseIdKey, entitlement.purchaseId);
+    if (entitlement.verifiedAt != null) {
+      await _box.put(_verifiedAtKey, entitlement.verifiedAt!.toIso8601String());
+    }
+  }
+
   Set<PremiumFeature> _featuresFor(String productId) {
     if (!premiumProductIds.contains(productId)) return const {};
     if (productId == musicPremiumProductId) {
