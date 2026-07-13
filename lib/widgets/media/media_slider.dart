@@ -118,6 +118,10 @@ class _MediaSliderState extends State<MediaSlider> {
           final curve = _isDragging 
               ? Curves.linear 
               : (useLiquidEffects ? Curves.easeOutBack : Curves.easeInOut);
+          final fillCurve = _isDragging 
+              ? Curves.linear 
+              : (useLiquidEffects ? Curves.easeOutCubic : Curves.easeInOut);
+
 
           double thumbLeft = _isDragging ? _dragPositionX! - (thumbSize / 2.0) : defaultThumbLeft;
           
@@ -179,7 +183,7 @@ class _MediaSliderState extends State<MediaSlider> {
                     left: trackLeft,
                     child: AnimatedContainer(
                       duration: duration,
-                      curve: curve,
+                      curve: fillCurve,
                       height: trackHeight,
                       width: fillWidth,
                       decoration: BoxDecoration(
