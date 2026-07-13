@@ -27,6 +27,18 @@ import UIKit
             message: "Use Save to Files for audio on iOS.",
             details: nil
           ))
+        case "setVideoPlaying":
+          // iOS handles audio/video session automatically — no native action needed.
+          result(nil)
+        case "enterPiP":
+          // iOS Picture-in-Picture requires AVPlayerViewController which is not
+          // set up in this app. Return a graceful error so Flutter can show a
+          // friendly message instead of crashing with MissingPluginException.
+          result(FlutterError(
+            code: "pip_not_supported",
+            message: "Picture-in-Picture is not supported on this device.",
+            details: nil
+          ))
         default:
           result(FlutterMethodNotImplemented)
         }

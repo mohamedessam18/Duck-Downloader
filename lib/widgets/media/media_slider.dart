@@ -100,12 +100,16 @@ class _MediaSliderState extends State<MediaSlider> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final totalWidth = constraints.maxWidth;
+
+          // Guard against zero or near-zero width during first layout frame (iOS)
+          if (totalWidth < 24) return const SizedBox.shrink();
+
           final thumbSize = _isDragging ? 18.0 : 14.0;
           final trackHeight = _isDragging ? 6.0 : 4.0;
           
           final trackLeft = 10.0;
           final trackRight = totalWidth - 10.0;
-          final usableWidth = trackRight - trackLeft;
+          final usableWidth = (trackRight - trackLeft).clamp(1.0, double.infinity);
 
           final currentFraction = total <= 0 ? 0.0 : current / total;
           final defaultThumbLeft = trackLeft + (currentFraction * usableWidth) - (thumbSize / 2.0);
@@ -130,6 +134,7 @@ class _MediaSliderState extends State<MediaSlider> {
 
           final fillCenter = thumbLeft + (thumbSize / 2.0);
           final fillWidth = (fillCenter - trackLeft).clamp(0.0, usableWidth + 16.0);
+
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,

@@ -248,8 +248,19 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   Future<void> _enterPiP() async {
     try {
       await _channel.invokeMethod('enterPiP');
+    } on PlatformException catch (e) {
+      if (e.code == 'pip_not_supported' && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Picture-in-Picture is not supported on this device.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        debugPrint('Failed to enter PiP mode: $e');
+      }
     } catch (e) {
-      debugPrint("Failed to enter PiP mode: $e");
+      debugPrint('Failed to enter PiP mode: $e');
     }
   }
 
