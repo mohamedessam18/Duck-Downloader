@@ -410,13 +410,15 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   }
                 },
                 behavior: HitTestBehavior.opaque,
-                child: Center(
-                  child: FittedBox(
-                    fit: _videoFit,
-                    child: SizedBox(
-                      width: value.size.width,
-                      height: value.size.height,
-                      child: VideoPlayer(video),
+                child: ClipRect(
+                  child: SizedBox.expand(
+                    child: FittedBox(
+                      fit: _videoFit,
+                      child: SizedBox(
+                        width: value.size.width,
+                        height: value.size.height,
+                        child: VideoPlayer(video),
+                      ),
                     ),
                   ),
                 ),
