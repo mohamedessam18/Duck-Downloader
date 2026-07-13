@@ -61,7 +61,8 @@ class DuckAppScreen extends StatelessWidget {
         );
     if (!context.mounted || result == null) return;
     if (result is String) {
-      await controller.extractUrl(result);
+      // fromLockedBrowser: true prevents re-opening the browser on failure
+      await controller.extractUrl(result, fromLockedBrowser: true);
     } else if (result is List<BrowserImageCandidate>) {
       if (result.isEmpty) return;
       await controller.startBrowserImageDownloads(

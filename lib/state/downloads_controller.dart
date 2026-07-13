@@ -137,6 +137,7 @@ class DuckDownloadsController extends ChangeNotifier
   LockedBrowserRequest? lockedBrowserRequest;
   String quality = 'Best';
   bool busy = false;
+  bool _justReturnedFromLockedBrowser = false;
   bool autoSaveVideos = true;
   bool enableClipboardDetection = true;
   String? detectedClipboardUrl;
@@ -605,9 +606,10 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  Future<void> extractUrl(String url) async {
+  Future<void> extractUrl(String url, {bool fromLockedBrowser = false}) async {
     if (busy) return;
     busy = true;
+    _justReturnedFromLockedBrowser = fromLockedBrowser;
     flow = DuckFlow.extracting;
     status = 'Checking link...';
     metadata = null;
@@ -624,6 +626,7 @@ class DuckDownloadsController extends ChangeNotifier
       status = _cleanError(error);
     } finally {
       busy = false;
+      _justReturnedFromLockedBrowser = false;
       notifyListeners();
     }
   }
@@ -1304,6 +1307,9 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   bool _shouldUseLockedBrowserFallback(String url, Object error) {
+    // If we already tried the locked browser once, do NOT loop back into it.
+    // Show an error instead so the user understands the server limitation.
+    if (_justReturnedFromLockedBrowser) return false;
     final lowerUrl = url.toLowerCase();
     return lowerUrl.contains('instagram.com') ||
         lowerUrl.contains('threads.net') ||
@@ -1324,11 +1330,22 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   String _cleanError(Object error) {
-    final cleaned = error
-        .toString()
+    final raw = error.toString();
+    final cleaned = raw
         .replaceFirst('Exception: ', '')
         .replaceFirst('WebSocketChannelException: ', '')
         .trim();
+
+    // If we just returned from the locked browser and the server still can't
+    // bypass the bot check, show a clear, non-looping error message.
+    if (_justReturnedFromLockedBrowser) {
+      const botKeywords = ['sign in', 'bot', 'confirm', 'captcha', 'reload', '429'];
+      final lower = cleaned.toLowerCase();
+      if (botKeywords.any(lower.contains)) {
+        return 'YouTube could not be downloaded. The server requires a fresh PO Token. Try again later or use a different video.';
+      }
+    }
+
     if (cleaned.isEmpty || cleaned == 'null') {
       return 'Download failed. Check the backend logs and try again.';
     }
