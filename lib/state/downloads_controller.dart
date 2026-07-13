@@ -487,6 +487,24 @@ class DuckDownloadsController extends ChangeNotifier
       flow = DuckFlow.extracting;
       status = 'Extracting playlist...';
       notifyListeners();
+
+      // YouTube playlists: extract on-device via youtube_explode_dart
+      if (YouTubeExplodeService.isYouTubePlaylistUrl(cleanUrl)) {
+        try {
+          final result = await _ytExplode.extractPlaylist(cleanUrl);
+          batchTitle = result.title;
+          batchPlatform = 'YouTube';
+          batchItems = result.items;
+          selectedType = DownloadType.video;
+          quality = 'Best';
+          flow = DuckFlow.ready;
+          status = 'Choose videos to download';
+          return;
+        } catch (_) {
+          // fall through to backend on failure
+        }
+      }
+
       final playlist = await _api.extractPlaylist(cleanUrl);
       batchTitle = playlist.title;
       batchPlatform = playlist.platform;

@@ -30,6 +30,35 @@ class YouTubeExplodeService {
         lower.contains('youtube.com/shorts/');
   }
 
+  static bool isYouTubePlaylistUrl(String url) {
+    final lower = url.toLowerCase();
+    return (lower.contains('youtube.com') || lower.contains('youtu.be')) &&
+        (lower.contains('list=') || lower.contains('/playlist'));
+  }
+
+  /// Extracts all videos in a YouTube playlist.
+  /// Returns a list of [PlaylistItem] with title and URL.
+  Future<({String title, List<PlaylistItem> items})> extractPlaylist(
+    String url,
+  ) async {
+    final playlistId = PlaylistId.parsePlaylistId(url);
+    if (playlistId == null) throw Exception('Invalid YouTube playlist URL');
+
+    final playlist = await _yt.playlists.get(playlistId);
+    final videos = await _yt.playlists.getVideos(playlistId).toList();
+
+    final items = videos.map((v) {
+      return PlaylistItem(
+        url: 'https://www.youtube.com/watch?v=${v.id.value}',
+        title: v.title,
+        thumbnail: v.thumbnails.highResUrl,
+        isVideo: true,
+      );
+    }).toList();
+
+    return (title: playlist.title, items: items);
+  }
+
   /// Returns null if the URL is not a recognisable YouTube video URL.
   Future<MediaMetadata?> extractMetadata(String url) async {
     if (!isYouTubeUrl(url)) return null;
