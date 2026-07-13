@@ -23,18 +23,33 @@ class YouTubeExplodeService {
     _dio.close();
   }
 
+  /// Returns true for any YouTube video URL (watch, shorts, youtu.be, mobile, embed).
   static bool isYouTubeUrl(String url) {
     final lower = url.toLowerCase();
-    return lower.contains('youtube.com/watch') ||
-        lower.contains('youtu.be/') ||
-        lower.contains('youtube.com/shorts/');
+    // Must be a YouTube domain
+    final isYtDomain = lower.contains('youtube.com') || lower.contains('youtu.be');
+    if (!isYtDomain) return false;
+    // Must NOT be a pure playlist (no video id)
+    final isPurePlaylist = !lower.contains('v=') &&
+        !lower.contains('youtu.be/') &&
+        (lower.contains('list=') || lower.contains('/playlist'));
+    if (isPurePlaylist) return false;
+    // Video URL patterns
+    return lower.contains('/watch') ||        // youtube.com/watch?v=ID
+        lower.contains('youtu.be/') ||        // youtu.be/ID
+        lower.contains('/shorts/') ||         // youtube.com/shorts/ID
+        lower.contains('/embed/') ||          // youtube.com/embed/ID
+        lower.contains('/v/') ||              // youtube.com/v/ID (old)
+        lower.contains('v=');                 // any ?v=ID param
   }
 
+  /// Returns true for YouTube playlist URLs (with or without a current video).
   static bool isYouTubePlaylistUrl(String url) {
     final lower = url.toLowerCase();
     return (lower.contains('youtube.com') || lower.contains('youtu.be')) &&
         (lower.contains('list=') || lower.contains('/playlist'));
   }
+
 
   /// Extracts all videos in a YouTube playlist.
   /// Returns a list of [PlaylistItem] with title and URL.
