@@ -693,9 +693,8 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
 
     try {
-      // Detect youtube_explode_dart metadata: quality id is a raw https stream URL
-      final isYtExplode = quality.startsWith('https://');
-      if (isYtExplode) {
+      final isYouTube = media.platform.toLowerCase() == 'youtube';
+      if (isYouTube) {
         await _startYouTubeExplodeDownload(media);
         return;
       }
@@ -736,8 +735,10 @@ class DuckDownloadsController extends ChangeNotifier
     // Find the selected format to get its extension
     final allFormats = [...media.qualities, ...media.audioFormats];
     final format = allFormats.firstWhere(
-      (f) => f.id == quality,
-      orElse: () => FormatInfo(id: quality, label: 'Video', ext: 'mp4'),
+      (f) => f.label == quality || f.id == quality,
+      orElse: () => allFormats.isNotEmpty
+          ? allFormats.first
+          : const FormatInfo(id: '', label: 'Best', ext: 'mp4'),
     );
 
     final ext = format.ext ?? (selectedType == DownloadType.audio ? 'webm' : 'mp4');
@@ -761,18 +762,19 @@ class DuckDownloadsController extends ChangeNotifier
 
     try {
       final filePath = await _ytExplode.downloadStream(
-        streamUrl: quality,
+        streamUrl: format.id,
         title: media.title,
         type: selectedType,
         ext: ext,
         onProgress: (received, total) async {
           if (total <= 0) return;
           final progress = ((received / total) * 99).clamp(0, 99).toInt();
-          item = item.copyWith(
-            status: DownloadStatus.downloading,
+          final updated = item.copyWith(
             progress: progress,
+            status: DownloadStatus.downloading,
           );
-          await _saveItem(item);
+          await _saveItem(updated);
+          notifyListeners();
         },
       );
 
@@ -785,9 +787,6 @@ class DuckDownloadsController extends ChangeNotifier
 
       if (item.isVideo && autoSaveVideos) {
         item = await _trySaveVideoAfterDownload(item);
-      }
-      if (item.type == DownloadType.image) {
-        item = await _trySaveImageAfterDownload(item);
       }
 
       flow = DuckFlow.success;
@@ -810,6 +809,97 @@ class DuckDownloadsController extends ChangeNotifier
       busy = false;
       notifyListeners();
     }
+  }
+
+  /// Downloads a YouTube URL on-device during batch/playlist download.
+  Future<void> _startYouTubeExplodeBatchDownload({
+    required String url,
+    required String title,
+    required String? thumbnail,
+    required DownloadType type,
+  }) async {
+    // 1. Extract metadata on-device to get streams
+    final ytMeta = await _ytExplode.extractMetadata(url);
+    if (ytMeta == null || ytMeta.qualities.isEmpty) {
+      throw Exception('Could not extract streams for YouTube video.');
+    }
+
+    // 2. Select first quality format
+    final allFormats = type == DownloadType.video ? ytMeta.qualities : ytMeta.audioFormats;
+    if (allFormats.isEmpty) {
+      throw Exception('No compatible quality format found.');
+    }
+    final format = allFormats.first;
+    final ext = format.ext ?? (type == DownloadType.audio ? 'webm' : 'mp4');
+
+    // 3. Create download item
+    final itemId = '${DateTime.now().millisecondsSinceEpoch}_${url.hashCode}';
+    var item = DownloadItem(
+      id: itemId,
+      url: url,
+      title: title.isNotEmpty ? title : ytMeta.title,
+      thumbnail: thumbnail ?? ytMeta.thumbnail,
+      platform: 'YouTube',
+      quality: format.label,
+      type: type,
+      createdAt: DateTime.now(),
+      status: DownloadStatus.downloading,
+      progress: 0,
+      favorite: false,
+    );
+    await _saveItem(item);
+
+    // 4. Download directly on-device in background
+    unawaited(() async {
+      try {
+        final filePath = await _ytExplode.downloadStream(
+          streamUrl: format.id,
+          title: item.title,
+          type: type,
+          ext: ext,
+          onProgress: (received, total) async {
+            if (total <= 0) return;
+            final progress = ((received / total) * 99).clamp(0, 99).toInt();
+            final updated = item.copyWith(
+              progress: progress,
+              status: DownloadStatus.downloading,
+            );
+            await _saveItem(updated);
+            notifyListeners();
+          },
+        );
+        item = item.copyWith(
+          filePath: filePath,
+          progress: 100,
+          status: DownloadStatus.completed,
+        );
+        await _saveItem(item);
+
+        if (item.isVideo && autoSaveVideos) {
+          item = await _trySaveVideoAfterDownload(item);
+        }
+
+        unawaited(_notifications.showDownloadComplete(
+          id: item.id.hashCode,
+          title: item.title,
+          type: item.isVideo ? 'Video' : 'Audio',
+          downloadId: item.id,
+        ));
+        notifyListeners();
+      } catch (e) {
+        final failedItem = item.copyWith(
+          status: DownloadStatus.failed,
+          progress: 0,
+        );
+        await _saveItem(failedItem);
+        unawaited(_notifications.showDownloadFailed(
+          id: item.id.hashCode,
+          title: item.title,
+          error: e.toString().replaceAll('Exception: ', ''),
+        ));
+        notifyListeners();
+      }
+    }());
   }
 
 
@@ -1710,6 +1800,18 @@ class DuckDownloadsController extends ChangeNotifier
           } catch (_) {}
         }
         if (title.isEmpty) title = url;
+
+        // YouTube playlist/batch items: ALWAYS download on-device
+        if (YouTubeExplodeService.isYouTubeUrl(url)) {
+          await _startYouTubeExplodeBatchDownload(
+            url: url,
+            title: title,
+            thumbnail: batchItem?.thumbnail,
+            type: itemType,
+          );
+          started++;
+          continue;
+        }
 
         String mediaUrl;
         String? thumbnail;
