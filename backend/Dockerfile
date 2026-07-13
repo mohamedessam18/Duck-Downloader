@@ -36,6 +36,11 @@ COPY static ./static
 
 RUN mkdir -p /tmp/duck-downloads && chmod 777 /tmp/duck-downloads
 
+# Copy the startup script that ensures the PO Token provider is healthy
+# before uvicorn starts, and restarts it automatically if it crashes.
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
 # The provider listens only on localhost:4416. Its yt-dlp plugin discovers it
 # automatically and generates short-lived PO tokens per YouTube request.
-CMD ["sh", "-c", "node /opt/bgutil-provider/server/build/main.js & (pip install --no-cache-dir --upgrade yt-dlp || true) && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["/start.sh"]
