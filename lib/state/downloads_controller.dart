@@ -554,7 +554,7 @@ class DuckDownloadsController extends ChangeNotifier
           final playlist = await _api.extractPlaylist(cleanUrl);
           if (playlist.items.isNotEmpty) {
             if (playlist.items.length > 1) {
-              // Carousel ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â show all images as batch
+              // Carousel - show all images as batch
               batchTitle = playlist.title;
               batchPlatform = playlist.platform;
               batchItems = playlist.items;
@@ -563,7 +563,7 @@ class DuckDownloadsController extends ChangeNotifier
               flow = DuckFlow.ready;
               status = 'Choose images to download';
             } else {
-              // Single image post ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â download directly as image
+              // Single image post - download directly as image
               batchTitle = playlist.title;
               batchPlatform = playlist.platform;
               batchItems = playlist.items;

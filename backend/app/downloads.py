@@ -803,12 +803,12 @@ class DownloadManager:
             if "registered users" in error_lower or ("only available" in error_lower and "facebook" in state.url.lower()):
                 raise RuntimeError(
                     "This Facebook post requires a logged-in account to access. "
-                    "Use the Cookie Settings (ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âª) button in the app to paste your Facebook cookies.txt and enable authenticated downloads."
+                    "Use the Cookie Settings (🍪) button in the app to paste your Facebook cookies.txt and enable authenticated downloads."
                 )
             if "registered users" in error_lower or "cookies" in error_lower:
                 raise RuntimeError(
                     "This content requires authentication. "
-                    "Use the Cookie Settings (ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âª) button in the app to paste your cookies.txt."
+                    "Use the Cookie Settings (🍪) button in the app to paste your cookies.txt."
                 )
             raise RuntimeError(error_msg)
 
