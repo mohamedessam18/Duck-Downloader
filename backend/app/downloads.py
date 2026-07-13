@@ -213,7 +213,7 @@ class DownloadManager:
                 raise ValueError("This Facebook photo is not public or requires login.")
 
         def run() -> dict[str, Any]:
-            with YoutubeDL(self._base_ydl_options(url, skip_download=True)) as ydl:
+            with YoutubeDL(self._base_ydl_options(skip_download=True)) as ydl:
                 return ydl.extract_info(url, download=False)
 
         try:
@@ -288,17 +288,13 @@ class DownloadManager:
             "audio_formats": [],
         }
 
-    def _base_ydl_options(self, url: str | None = None, *, skip_download: bool = False) -> dict[str, Any]:
+    def _base_ydl_options(self, *, skip_download: bool = False) -> dict[str, Any]:
         has_impersonate = False
         try:
             import curl_cffi
             has_impersonate = True
         except ImportError:
             pass
-
-        # Disable impersonate for Facebook/meta domains as it interferes with extractor signatures
-        if url and ("facebook.com" in url.lower() or "fb.watch" in url.lower()):
-            has_impersonate = False
 
         opts: dict[str, Any] = {
             "quiet": True,
@@ -834,11 +830,6 @@ class DownloadManager:
         except ImportError:
             pass
 
-        # Disable impersonate for Facebook/meta domains as it interferes with extractor signatures
-        url = state.url
-        if url and ("facebook.com" in url.lower() or "fb.watch" in url.lower()):
-            has_impersonate = False
-
         args = [
             sys.executable,
             "-m",
@@ -975,7 +966,7 @@ class DownloadManager:
             return images_info
 
         def run() -> dict[str, Any]:
-            opts = self._base_ydl_options(url, skip_download=True)
+            opts = self._base_ydl_options(skip_download=True)
             opts["noplaylist"] = False
             opts["extract_flat"] = True
             with YoutubeDL(opts) as ydl:
