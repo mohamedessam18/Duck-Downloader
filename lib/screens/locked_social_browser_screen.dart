@@ -287,7 +287,7 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
         // Ignore cookie sync errors and proceed
       }
 
-      if (_isYouTube) {
+      if (_isYouTube || _isFacebook) {
         if (mounted) {
           Navigator.of(context).pop(currentUrl);
           return;
@@ -609,7 +609,9 @@ const _extractScript = r'''
   const isVideoOnlyPlatform = window.location.hostname.includes('threads.net') || 
                               window.location.hostname.includes('threads.com') ||
                               window.location.hostname.includes('twitter.com') ||
-                              window.location.hostname.includes('x.com');
+                              window.location.hostname.includes('x.com') ||
+                              window.location.hostname.includes('facebook.com') ||
+                              window.location.hostname.includes('fb.watch');
   if (!isVideoOnlyPlatform) {
     scanPageData();
   }

@@ -38,34 +38,69 @@ Color get _divider => _isLight ? Colors.black.withValues(alpha: 0.06) : Colors.w
 const _danger = Color(0xFFFF7A65);
 const _green = Color(0xFF41D27D);
 
-class DuckAppScreen extends StatelessWidget {
+class DuckAppScreen extends StatefulWidget {
   const DuckAppScreen({super.key, required this.controller});
 
   final DuckDownloadsController controller;
+
+  @override
+  State<DuckAppScreen> createState() => _DuckAppScreenState();
+}
+
+class _DuckAppScreenState extends State<DuckAppScreen> {
+  DuckFlow? _prevFlow;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChange);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChange);
+    super.dispose();
+  }
+
+  void _onControllerChange() {
+    if (!mounted) return;
+    final currentFlow = widget.controller.flow;
+    if (_prevFlow != currentFlow) {
+      if (currentFlow == DuckFlow.success) {
+        _showSettingToast(context, 'Download Completed!', true);
+      } else if (currentFlow == DuckFlow.error) {
+        final err = widget.controller.status;
+        if (err.isNotEmpty && err != 'null') {
+          _showSettingToast(context, err, false);
+        }
+      }
+      _prevFlow = currentFlow;
+    }
+  }
 
   Future<void> _openLockedBrowser(
     BuildContext context,
     LockedBrowserRequest request,
   ) async {
-    if (controller.lockedBrowserRequest != request) return;
-    controller.clearLockedBrowserRequest();
+    if (widget.controller.lockedBrowserRequest != request) return;
+    widget.controller.clearLockedBrowserRequest();
     final result = await Navigator.of(context)
         .push<dynamic>(
           CupertinoPageRoute(
             builder: (_) => LockedSocialBrowserScreen(
               initialUrl: request.url,
               platform: request.platform,
-              controller: controller,
+              controller: widget.controller,
             ),
           ),
         );
     if (!context.mounted || result == null) return;
     if (result is String) {
       // fromLockedBrowser: true prevents re-opening the browser on failure
-      await controller.extractUrl(result, fromLockedBrowser: true);
+      await widget.controller.extractUrl(result, fromLockedBrowser: true);
     } else if (result is List<BrowserImageCandidate>) {
       if (result.isEmpty) return;
-      await controller.startBrowserImageDownloads(
+      await widget.controller.startBrowserImageDownloads(
         candidates: result,
         platform: request.platform,
       );
@@ -75,9 +110,9 @@ class DuckAppScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller,
+      animation: widget.controller,
       builder: (context, _) {
-        final browserRequest = controller.lockedBrowserRequest;
+        final browserRequest = widget.controller.lockedBrowserRequest;
         if (browserRequest != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
@@ -88,10 +123,10 @@ class DuckAppScreen extends StatelessWidget {
 
         final isAndroid = Theme.of(context).platform == TargetPlatform.android;
         final canPop = !isAndroid &&
-            controller.playerItem == null &&
-            controller.detectedClipboardUrl == null &&
-            controller.tab == DuckTab.home &&
-            controller.tabHistory.isEmpty;
+            widget.controller.playerItem == null &&
+            widget.controller.detectedClipboardUrl == null &&
+            widget.controller.tab == DuckTab.home &&
+            widget.controller.tabHistory.isEmpty;
 
         return PopScope(
           canPop: canPop,
@@ -99,27 +134,27 @@ class DuckAppScreen extends StatelessWidget {
             if (didPop) return;
 
             // 1. If player is open, close it
-            if (controller.playerItem != null) {
-              controller.closePlayer();
+            if (widget.controller.playerItem != null) {
+              widget.controller.closePlayer();
               return;
             }
 
             // 2. If clipboard overlay is open, dismiss it
-            if (controller.detectedClipboardUrl != null) {
-              controller.dismissClipboardDetection();
+            if (widget.controller.detectedClipboardUrl != null) {
+              widget.controller.dismissClipboardDetection();
               return;
             }
 
             // 3. Otherwise pop tab history (on Android, directly jump to Home tab)
-            if (isAndroid && controller.tab != DuckTab.home) {
-              controller.tabHistory.clear();
-              controller.setTab(DuckTab.home);
+            if (isAndroid && widget.controller.tab != DuckTab.home) {
+              widget.controller.tabHistory.clear();
+              widget.controller.setTab(DuckTab.home);
               return;
             }
 
             // 4. Double-back to exit on Android when on Home tab with empty history
-            if (isAndroid && controller.tab == DuckTab.home && controller.tabHistory.isEmpty) {
-              final shouldExit = controller.handleDoubleBackToExit();
+            if (isAndroid && widget.controller.tab == DuckTab.home && widget.controller.tabHistory.isEmpty) {
+              final shouldExit = widget.controller.handleDoubleBackToExit();
               if (shouldExit) {
                 SystemNavigator.pop();
               } else {
@@ -133,7 +168,7 @@ class DuckAppScreen extends StatelessWidget {
               return;
             }
 
-            controller.popTabHistory();
+            widget.controller.popTabHistory();
           },
           child: Scaffold(
             backgroundColor: _dark,
@@ -143,42 +178,41 @@ class DuckAppScreen extends StatelessWidget {
                   child: AmbientBackground(
                     padding: EdgeInsets.only(
                       top: MediaQuery.paddingOf(context).top,
-                      bottom: controller.playingItem != null &&
-                              controller.playerItem == null
+                      bottom: widget.controller.playingItem != null &&
+                              widget.controller.playerItem == null
                           ? 80
                           : 0,
                     ),
                     child: _bodyForTab(context),
                   ),
                 ),
-                if (controller.playingItem != null &&
-                    controller.playerItem == null)
+                if (widget.controller.playingItem != null &&
+                    widget.controller.playerItem == null)
                   Builder(
                     builder: (context) {
-                      final isAndroid = Theme.of(context).platform == TargetPlatform.android;
-                      final bottomShift = isAndroid ? 98.0 : 68.0;
+                      final bottomShift = 68.0;
                       return Positioned(
                         bottom: bottomShift + MediaQuery.paddingOf(context).bottom,
                         left: 16,
                         right: 16,
-                        child: MiniPlayer(controller: controller),
+                        child: MiniPlayer(controller: widget.controller),
                       );
                     },
                   ),
-                if (controller.detectedClipboardUrl != null)
+                if (widget.controller.detectedClipboardUrl != null)
                   _ClipboardDetectorOverlay(
-                    url: controller.detectedClipboardUrl!,
-                    onDismiss: controller.dismissClipboardDetection,
-                    onAccept: controller.acceptClipboardDetection,
+                    url: widget.controller.detectedClipboardUrl!,
+                    onDismiss: widget.controller.dismissClipboardDetection,
+                    onAccept: widget.controller.acceptClipboardDetection,
                   ),
-                if (controller.playerItem != null)
-                  MediaOverlayRouter(controller: controller),
-                if (controller.playerItem == null && MediaQuery.viewInsetsOf(context).bottom == 0)
+                if (widget.controller.playerItem != null)
+                  MediaOverlayRouter(controller: widget.controller),
+                if (widget.controller.playerItem == null && MediaQuery.viewInsetsOf(context).bottom == 0)
                   Positioned(
                     bottom: 0,
                     left: 0,
                     right: 0,
-                    child: _BottomNavBar(controller: controller),
+                    child: _BottomNavBar(controller: widget.controller),
                   ),
               ],
             ),
@@ -189,25 +223,25 @@ class DuckAppScreen extends StatelessWidget {
   }
 
   Widget _bodyForTab(BuildContext context) {
-    return switch (controller.tab) {
-      DuckTab.home => _HomeView(controller: controller),
+    return switch (widget.controller.tab) {
+      DuckTab.home => _HomeView(controller: widget.controller),
       DuckTab.images => _LibraryView(
         title: 'IMAGES',
-        items: controller.images,
+        items: widget.controller.images,
         empty: 'No downloaded images yet.',
-        controller: controller,
+        controller: widget.controller,
       ),
       DuckTab.videos => _LibraryView(
         title: 'VIDEOS',
-        items: controller.videos,
+        items: widget.controller.videos,
         empty: 'No downloaded videos yet.',
-        controller: controller,
+        controller: widget.controller,
       ),
       DuckTab.audios => _LibraryView(
         title: 'AUDIOS',
-        items: controller.audios,
+        items: widget.controller.audios,
         empty: 'No downloaded audios yet.',
-        controller: controller,
+        controller: widget.controller,
       ),
     };
   }
@@ -457,53 +491,9 @@ class _HeaderToggleState extends State<_HeaderToggle> {
 
   @override
   Widget build(BuildContext context) {
-    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
-    final isLight = Theme.of(context).brightness == Brightness.light;
-
-    if (isAndroid) {
-      return InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: widget.active
-                ? _green.withOpacity(isLight ? 0.24 : 0.14)
-                : (isLight ? Colors.black.withOpacity(0.04) : Colors.white.withOpacity(0.06)),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: widget.active
-                  ? _green.withOpacity(isLight ? 0.45 : 0.34)
-                  : (isLight ? Colors.black.withOpacity(0.08) : Colors.white.withOpacity(0.08)),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                widget.icon,
-                color: widget.active ? _green : (isLight ? Colors.black54 : _muted),
-                size: 17,
-              ),
-              const SizedBox(width: 7),
-              Text(
-                widget.label,
-                style: TextStyle(
-                  color: widget.active
-                      ? (isLight ? const Color(0xFF0F3A1B) : const Color(0xFFEAF8EE))
-                      : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final useLiquidEffects = !reduceMotion;
+    final isLight = Theme.of(context).brightness == Brightness.light;
 
     final baseColor = widget.active ? _green : Colors.white;
     final containerColor = widget.active 
@@ -608,50 +598,7 @@ class _ProBadgeState extends State<_ProBadge> {
   @override
   Widget build(BuildContext context) {
     final active = widget.controller.isPremiumActive;
-    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
     final isLight = Theme.of(context).brightness == Brightness.light;
-
-    if (isAndroid) {
-      return InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: () => _showPremiumSheet(context, widget.controller),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-          decoration: BoxDecoration(
-            color: active
-                ? _gold.withOpacity(isLight ? 0.24 : 0.18)
-                : (isLight ? Colors.black.withOpacity(0.04) : Colors.white.withOpacity(0.06)),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: active
-                  ? _gold.withOpacity(isLight ? 0.45 : 0.42)
-                  : (isLight ? Colors.black.withOpacity(0.08) : Colors.white.withOpacity(0.08)),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                active
-                    ? Icons.workspace_premium
-                    : Icons.workspace_premium_outlined,
-                color: active ? _gold : (isLight ? Colors.black54 : _muted),
-                size: 18,
-              ),
-              const SizedBox(width: 7),
-              Text(
-                active ? 'PREMIUM' : 'DUCK PREMIUM',
-                style: TextStyle(
-                  color: active ? _gold : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
 
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final useLiquidEffects = !reduceMotion;
@@ -770,9 +717,6 @@ class _PremiumSheet extends StatelessWidget {
           SubscriptionPlan.monthly,
         );
         final yearly = controller.subscriptionProduct(SubscriptionPlan.yearly);
-        final musicPremium = controller.subscriptionProduct(
-          SubscriptionPlan.musicPremium,
-        );
         final busy = controller.premiumBusy;
         final active = controller.isPremiumActive;
         return Padding(
@@ -855,9 +799,6 @@ class _PremiumSheet extends StatelessWidget {
                     const _PremiumBenefit(
                       label: 'Early Access To New Features',
                     ),
-                    const _PremiumBenefit(
-                      label: 'AI Music Removal (Music Premium)',
-                    ),
                     const SizedBox(height: 18),
                     if (controller.premiumError != null)
                       _PremiumMessage(
@@ -889,16 +830,6 @@ class _PremiumSheet extends StatelessWidget {
                       enabled: yearly != null && !busy,
                       onPressed: () => controller.subscribeToPremium(
                         SubscriptionPlan.yearly,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _SubscriptionButton(
-                      label: 'Subscribe Music Premium',
-                      price: musicPremium?.localizedPrice,
-                      loading: busy,
-                      enabled: musicPremium != null && !busy,
-                      onPressed: () => controller.subscribeToPremium(
-                        SubscriptionPlan.musicPremium,
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -4174,68 +4105,8 @@ class _BottomNavBarState extends State<_BottomNavBar> {
 
   @override
   Widget build(BuildContext context) {
-    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
     final isLight = Theme.of(context).brightness == Brightness.light;
     final goldColor = isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
-
-    if (isAndroid) {
-      return Padding(
-        padding: EdgeInsets.only(
-          bottom: 12 + MediaQuery.paddingOf(context).bottom,
-          left: 20,
-          right: 20,
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.24),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: isLight
-                      ? Colors.white.withOpacity(0.82)
-                      : Colors.white.withOpacity(0.06),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: goldColor.withOpacity(isLight ? 0.12 : 0.16),
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _LibraryButton(
-                        label: 'IMAGES',
-                        onTap: () => widget.controller.setTab(DuckTab.images),
-                      ),
-                      _LibraryButton(
-                        label: 'VIDEOS',
-                        onTap: () => widget.controller.setTab(DuckTab.videos),
-                      ),
-                      _LibraryButton(
-                        label: 'AUDIOS',
-                        onTap: () => widget.controller.setTab(DuckTab.audios),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
 
     // iOS iPhone layout with 4 tabs and liquid glass support
     final screenWidth = MediaQuery.sizeOf(context).width;

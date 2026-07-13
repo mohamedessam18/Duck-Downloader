@@ -1577,18 +1577,35 @@ class DuckDownloadsController extends ChangeNotifier
         .replaceFirst('WebSocketChannelException: ', '')
         .trim();
 
-    // If we just returned from the locked browser and the server still can't
-    // bypass the bot check, show a clear, non-looping error message.
-    if (_justReturnedFromLockedBrowser) {
-      const botKeywords = ['sign in', 'bot', 'confirm', 'captcha', 'reload', '429'];
-      final lower = cleaned.toLowerCase();
-      if (botKeywords.any(lower.contains)) {
-        return 'YouTube could not be downloaded. The server requires a fresh PO Token. Try again later or use a different video.';
-      }
+    final lower = cleaned.toLowerCase();
+
+    // 1. YouTube specific bot/sign-in errors
+    if (lower.contains('sign in') || lower.contains('bot') || lower.contains('captcha') || lower.contains('confirm you are not')) {
+      return 'YouTube is blocking this download. Please try again later or try another video.';
+    }
+
+    // 2. Facebook/Instagram/TikTok parse/extraction errors
+    if (lower.contains('cannot parse data') || lower.contains('extractor') || lower.contains('unable to extract')) {
+      return 'Failed to extract media. The post might be private, restricted, or requires browser login.';
+    }
+
+    // 3. Private/Login gated content
+    if (lower.contains('login') || lower.contains('private') || lower.contains('cookies')) {
+      return 'This post requires authentication. Please log in first using the in-app browser.';
+    }
+
+    // 4. Unsupported URLs
+    if (lower.contains('unsupported url') || lower.contains('unsupported')) {
+      return 'Unsupported link. Please paste a valid YouTube, Instagram, Facebook, TikTok, or X/Twitter URL.';
+    }
+
+    // 5. Network/Timeout errors
+    if (lower.contains('timeout') || lower.contains('connection') || lower.contains('http') || lower.contains('socket')) {
+      return 'Connection error. Please check your internet connection and try again.';
     }
 
     if (cleaned.isEmpty || cleaned == 'null') {
-      return 'Download failed. Check the backend logs and try again.';
+      return 'Download failed. Please try again.';
     }
     return cleaned;
   }
