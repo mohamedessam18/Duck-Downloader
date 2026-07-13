@@ -218,9 +218,10 @@ void main() {
   testWidgets('clipboard detection extract navigates and loads url', (
     tester,
   ) async {
+    // Non-YouTube URL → should still call the backend API
     final box = FakeBox();
     final clipboard = FakeClipboardService()
-      ..clipboardText = 'https://youtube.com/watch?v=123';
+      ..clipboardText = 'https://www.instagram.com/reel/abc123/';
     final api = FakeApiClient();
 
     final controller = DuckDownloadsController(
@@ -247,8 +248,44 @@ void main() {
     await tester.pump();
 
     expect(api.extractCalled, isTrue);
-    expect(api.extractedUrl, 'https://youtube.com/watch?v=123');
+    expect(api.extractedUrl, 'https://www.instagram.com/reel/abc123/');
   });
+
+  testWidgets('YouTube URLs bypass backend and use on-device extraction', (
+    tester,
+  ) async {
+    // YouTube URL → must NOT call the backend API (bot-check prevention)
+    final box = FakeBox();
+    final clipboard = FakeClipboardService()
+      ..clipboardText = 'https://youtube.com/watch?v=dQw4w9WgXcQ';
+    final api = FakeApiClient();
+
+    final controller = DuckDownloadsController(
+      api: api,
+      clipboard: clipboard,
+      files: DuckFileService(),
+      mediaSaver: MediaSaveService(),
+      store: DownloadStore(box),
+      premiumManager: _premiumManager(box),
+      initializePremium: false,
+      initializePlatformServices: false,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(home: DuckAppScreen(controller: controller)),
+    );
+    await tester.pump();
+
+    expect(find.text('Link Detected!'), findsOneWidget);
+
+    await tester.tap(find.text('Extract'));
+    await tester.pump();
+
+    // Backend must NOT be called for YouTube (on-device extraction only)
+    expect(api.extractCalled, isFalse);
+  });
+
 
   testWidgets('navigation to images tab works and shows empty library', (
     tester,
