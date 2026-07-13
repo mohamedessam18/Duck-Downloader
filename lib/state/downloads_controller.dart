@@ -704,7 +704,7 @@ class DuckDownloadsController extends ChangeNotifier
         type: selectedType,
         quality: quality,
         removeMusic: removeMusic,
-        premiumNoWatermark: isPremiumActive,
+        premiumNoWatermark: true,
       );
       final item = DownloadItem(
         id: id,
@@ -1743,7 +1743,7 @@ class DuckDownloadsController extends ChangeNotifier
         type: type,
         quality: quality,
         removeMusic: removeMusic,
-        premiumNoWatermark: isPremiumActive,
+        premiumNoWatermark: true,
       );
       final item = DownloadItem(
         id: id,
@@ -1882,7 +1882,7 @@ class DuckDownloadsController extends ChangeNotifier
           type: itemType,
           quality: itemType == DownloadType.video ? 'Best' : quality,
           removeMusic: removeMusic,
-          premiumNoWatermark: isPremiumActive,
+          premiumNoWatermark: true,
         );
         final item = DownloadItem(
           id: id,
