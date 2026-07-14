@@ -119,13 +119,14 @@ class AdService {
 
   /// Creates and loads a new Banner Ad instance
   BannerAd createBannerAd({
+    required AdSize size,
     required bool isPremiumActive,
     required VoidCallback onAdLoaded,
     required Function(LoadAdError) onAdFailedToLoad,
   }) {
     return BannerAd(
       adUnitId: bannerAdUnitId,
-      size: AdSize.banner,
+      size: size,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {

@@ -13,12 +13,16 @@ class AdMobBannerWidget extends StatefulWidget {
 
 class _AdMobBannerWidgetState extends State<AdMobBannerWidget> {
   BannerAd? _bannerAd;
+  AdSize? _adSize;
   bool _isAdLoaded = false;
+  bool _isLoading = false;
 
   @override
-  void initState() {
-    super.initState();
-    _loadAd();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_bannerAd == null && !widget.isPremiumActive && !_isLoading) {
+      _loadAd();
+    }
   }
 
   @override
@@ -34,29 +38,53 @@ class _AdMobBannerWidgetState extends State<AdMobBannerWidget> {
     }
   }
 
-  void _loadAd() {
-    if (widget.isPremiumActive) return;
+  void _loadAd() async {
+    if (widget.isPremiumActive || _isLoading) return;
+    _isLoading = true;
 
-    _bannerAd = AdService.instance.createBannerAd(
-      isPremiumActive: widget.isPremiumActive,
-      onAdLoaded: () {
-        if (mounted) {
-          setState(() {
-            _isAdLoaded = true;
-          });
-        }
-      },
-      onAdFailedToLoad: (error) {
-        _disposeAd();
-      },
-    );
-    _bannerAd!.load();
+    try {
+      // Calculate current orientation anchored adaptive banner size
+      final width = MediaQuery.sizeOf(context).width.truncate();
+      final AdSize? size = await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(width);
+      if (size == null) {
+        debugPrint("AdMob: Failed to calculate adaptive banner size. Falling back to standard banner.");
+        _isLoading = false;
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _adSize = size;
+      });
+
+      _bannerAd = AdService.instance.createBannerAd(
+        size: size,
+        isPremiumActive: widget.isPremiumActive,
+        onAdLoaded: () {
+          if (mounted) {
+            setState(() {
+              _isAdLoaded = true;
+              _isLoading = false;
+            });
+          }
+        },
+        onAdFailedToLoad: (error) {
+          _disposeAd();
+        },
+      );
+      _bannerAd!.load();
+    } catch (e) {
+      debugPrint("AdMob: Error loading adaptive banner: $e");
+      _disposeAd();
+    }
   }
 
   void _disposeAd() {
     _bannerAd?.dispose();
     _bannerAd = null;
+    _adSize = null;
     _isAdLoaded = false;
+    _isLoading = false;
   }
 
   @override
@@ -67,14 +95,14 @@ class _AdMobBannerWidgetState extends State<AdMobBannerWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.isPremiumActive || !_isAdLoaded || _bannerAd == null) {
+    if (widget.isPremiumActive || !_isAdLoaded || _bannerAd == null || _adSize == null) {
       return const SizedBox.shrink();
     }
 
     return Container(
       alignment: Alignment.center,
-      width: _bannerAd!.size.width.toDouble(),
-      height: _bannerAd!.size.height.toDouble(),
+      width: _adSize!.width.toDouble(),
+      height: _adSize!.height.toDouble(),
       margin: const EdgeInsets.only(bottom: 6),
       child: AdWidget(ad: _bannerAd!),
     );
