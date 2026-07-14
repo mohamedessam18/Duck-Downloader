@@ -166,10 +166,11 @@ class YouTubeExplodeService {
     final folder = Directory(p.join(root.path, 'Duck Downloader', subfolder));
     await folder.create(recursive: true);
 
-    // YouTube audio is WebM/Opus — transcode to M4A for universal compatibility
-    final needsTranscode = type == DownloadType.audio &&
-        ext.toLowerCase() == 'webm';
-    final downloadExt = needsTranscode ? 'webm' : ext;
+    // Always transcode YouTube audio to M4A for maximum device compatibility.
+    // YouTube serves audio as WebM/Opus or MP4/AAC — we normalize to .m4a.
+    // For MP4 audio, FFmpeg does a fast remux (no re-encode needed).
+    final needsTranscode = type == DownloadType.audio;
+    final downloadExt = ext; // keep original ext for temp file
     final finalExt = needsTranscode ? 'm4a' : ext;
 
     final safe = _sanitizeFilename('$title.$downloadExt');
@@ -206,24 +207,43 @@ class YouTubeExplodeService {
     return m4aPath;
   }
 
-  /// Transcodes a WebM/Opus audio file to M4A/AAC using FFmpeg.
+  /// Transcodes/remuxes an audio file to M4A/AAC using FFmpeg.
+  ///
+  /// - WebM/Opus input → re-encoded to AAC 192kbps
+  /// - MP4/AAC input → stream-copied (fast remux, no quality loss)
+  ///
   /// Throws an [Exception] if FFmpeg fails or is unavailable.
   Future<void> transcodeWebmToM4a(String inputPath, String outputPath) async {
-    // -y            : overwrite output without asking
-    // -i            : input file
-    // -vn           : no video
-    // -c:a aac      : encode audio as AAC
-    // -b:a 192k     : 192 kbps target bitrate
-    // -movflags +faststart : enable streaming-friendly M4A layout
-    final command =
-        '-y -i "$inputPath" -vn -c:a aac -b:a 192k -movflags +faststart "$outputPath"';
+    // Detect if this is already AAC audio (MP4 container) — use copy mode
+    final ext = p.extension(inputPath).toLowerCase().replaceAll('.', '');
+    final isAlreadyAac = ext == 'mp4' || ext == 'm4a';
 
-    final session = await FFmpegKit.execute(command);
+    // Use executeWithArguments (same as TrimService) to safely handle
+    // paths that contain spaces or special characters.
+    final args = [
+      '-y',             // overwrite output without prompting
+      '-i', inputPath,
+      '-vn',            // no video stream
+      '-c:a', isAlreadyAac ? 'copy' : 'aac', // copy AAC, re-encode Opus/Vorbis
+      if (!isAlreadyAac) ...[ '-b:a', '192k' ], // bitrate only when encoding
+      '-movflags', '+faststart', // streaming-friendly layout
+      outputPath,
+    ];
+
+    final session = await FFmpegKit.executeWithArguments(args);
     final returnCode = await session.getReturnCode();
 
     if (!ReturnCode.isSuccess(returnCode)) {
-      final logs = await session.getLogsAsString();
-      throw Exception('FFmpeg transcoding failed: $logs');
+      final logs = await session.getAllLogsAsString();
+      throw Exception(
+        'FFmpeg transcoding failed: ${logs?.trim() ?? 'unknown error'}',
+      );
+    }
+
+    // Verify output was actually created and is non-empty
+    final outputFile = File(outputPath);
+    if (!await outputFile.exists() || await outputFile.length() <= 0) {
+      throw Exception('FFmpeg produced an empty output file.');
     }
   }
 

@@ -9,7 +9,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AdService.instance.initialize();
   await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.duck.downloader.audio',
+    androidNotificationChannelId: 'com.duck.downloader.audio',   
     androidNotificationChannelName: 'Duck Audio Playback',
     androidNotificationOngoing: true,
   );

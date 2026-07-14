@@ -744,15 +744,33 @@ class DuckDownloadsController extends ChangeNotifier
 
   /// Downloads a YouTube stream URL directly on-device using YouTubeExplodeService.
   Future<void> _startYouTubeExplodeDownload(MediaMetadata media) async {
-    // Find the selected format to get its extension
+    // Search in the correct format pool based on selectedType:
+    // - Audio downloads must use audioFormats (audio-only streams)
+    // - Video downloads use qualities (muxed or video-only)
+    // Mixing both lists caused video stream URLs to be used for audio.
+    final formatPool = selectedType == DownloadType.audio
+        ? media.audioFormats
+        : media.qualities;
     final allFormats = [...media.qualities, ...media.audioFormats];
-    final format = allFormats.firstWhere(
-      (f) => f.label == quality || f.id == quality,
-      orElse: () => allFormats.isNotEmpty
-          ? allFormats.first
-          : const FormatInfo(id: '', label: 'Best', ext: 'mp4'),
-    );
 
+    FormatInfo format;
+    if (formatPool.isNotEmpty) {
+      format = formatPool.firstWhere(
+        (f) => f.label == quality || f.id == quality,
+        orElse: () => formatPool.first,
+      );
+    } else {
+      // fallback: search everywhere
+      format = allFormats.firstWhere(
+        (f) => f.label == quality || f.id == quality,
+        orElse: () => allFormats.isNotEmpty
+            ? allFormats.first
+            : const FormatInfo(id: '', label: 'Best', ext: 'mp4'),
+      );
+    }
+
+    // For audio: default to webm (YouTube's native Opus container) so the
+    // transcode step always fires and produces a playable .m4a
     final ext = format.ext ?? (selectedType == DownloadType.audio ? 'webm' : 'mp4');
     final itemId = DateTime.now().millisecondsSinceEpoch.toString();
 
