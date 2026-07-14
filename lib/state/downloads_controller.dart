@@ -539,7 +539,28 @@ class DuckDownloadsController extends ChangeNotifier
         throw Exception('Copy a public social media link first.');
       }
 
-
+      // ── YouTube: ALWAYS use youtube_explode_dart — NEVER hit the backend ──
+      // The backend (Railway) gets bot-checked by YouTube every time.
+      // youtube_explode_dart runs on the user's device with a residential IP.
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        flow = DuckFlow.extracting;
+        status = 'Fetching YouTube info...';
+        notifyListeners();
+        // Let any exception bubble up to the outer catch → shows error to user
+        final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+        if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+          metadata = ytMeta;
+          selectedType = DownloadType.video;
+          quality = _firstQuality(ytMeta, DownloadType.video);
+          flow = DuckFlow.ready;
+          status = 'Choose video or audio';
+          return;
+        }
+        throw Exception(
+          'Could not load YouTube video. The video may be private, '
+          'age-restricted, or unavailable in your region.',
+        );
+      }
 
       if (cleanUrl.contains('instagram.com')) {
         try {
@@ -683,7 +704,11 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
 
     try {
-
+      final isYouTube = media.platform.toLowerCase() == 'youtube';
+      if (isYouTube) {
+        await _startYouTubeExplodeDownload(media);
+        return;
+      }
 
       final id = await _api.startDownload(
         url: media.url,
@@ -2060,9 +2085,17 @@ class DuckDownloadsController extends ChangeNotifier
             }
           } catch (_) {}
         }
-        if (title.isEmpty) title = url;
-
-
+        // YouTube playlist/batch items: ALWAYS download on-device
+        if (YouTubeExplodeService.isYouTubeUrl(url)) {
+          await _startYouTubeExplodeBatchDownload(
+            url: url,
+            title: title,
+            thumbnail: batchItem?.thumbnail,
+            type: itemType,
+          );
+          started++;
+          continue;
+        }
 
         String mediaUrl;
         String? thumbnail;
@@ -2292,7 +2325,20 @@ class DuckDownloadsController extends ChangeNotifier
         throw Exception('BLOCKED_ADULT_CONTENT');
       }
 
-
+      // 1. YouTube
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+        if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+          metadata = ytMeta;
+          selectedType = DownloadType.video;
+          quality = _firstQuality(ytMeta, DownloadType.video);
+          busy = false;
+          await startDownload();
+          showAdOnOpen = true;
+          notifyListeners();
+          return;
+        }
+      }
 
       // 2. Instagram
       if (cleanUrl.contains('instagram.com')) {
