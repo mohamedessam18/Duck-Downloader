@@ -37,7 +37,7 @@ class DuckPlayerOverlay extends StatefulWidget {
 }
 
 class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   VideoPlayerController? _video;
   String? _error;
   BoxFit _videoFit = BoxFit.contain;
@@ -47,6 +47,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   bool _showControls = true;
   Timer? _hideTimer;
   bool _isInPiP = false;
+  bool _backgroundHandoffActive = false;
+  Duration _savedPositionForHandoff = Duration.zero;
   late final AnimationController _discRotationController;
 
   // Double-tap seek overlays
@@ -123,6 +125,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _discRotationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
@@ -274,6 +277,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_syncDiscRotation);
     _discRotationController.dispose();
     if (widget.item.isVideo) {
@@ -291,6 +295,59 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     _channel.setMethodCallHandler(null);
     _video?.dispose();
     super.dispose();
+  }
+
+  /// Called when app lifecycle changes (foreground ↔ background / screen lock).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    // Only applies to video playback
+    if (!widget.item.isVideo) return;
+
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _handoffVideoAudioToBackground();
+    } else if (state == AppLifecycleState.resumed) {
+      _resumeVideoFromBackground();
+    }
+  }
+
+  /// Saves the current video position and hands audio off to just_audio_background
+  /// so the sound continues while the screen is locked.
+  void _handoffVideoAudioToBackground() {
+    final video = _video;
+    if (video == null || !video.value.isInitialized) return;
+    if (!video.value.isPlaying) return; // only if actually playing
+    if (_backgroundHandoffActive) return;
+
+    _backgroundHandoffActive = true;
+    _savedPositionForHandoff = video.value.position;
+
+    // Pause the video (releases GPU decoder, saves battery)
+    video.pause();
+
+    // Hand off audio to just_audio_background for lock screen controls
+    widget.controller.playVideoAudioInBackground(
+      widget.item,
+      _savedPositionForHandoff,
+    );
+  }
+
+  /// Resumes the video player from the saved position after returning from background.
+  Future<void> _resumeVideoFromBackground() async {
+    if (!_backgroundHandoffActive) return;
+    _backgroundHandoffActive = false;
+
+    // Stop background audio
+    await widget.controller.stopBackgroundVideoAudio();
+
+    // Re-init video at saved position
+    final video = _video;
+    if (video == null || !mounted) return;
+    await video.seekTo(_savedPositionForHandoff);
+    await video.play();
+    if (mounted) setState(() {});
   }
 
   @override

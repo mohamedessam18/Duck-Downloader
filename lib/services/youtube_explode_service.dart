@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -144,12 +146,16 @@ class YouTubeExplodeService {
   /// Downloads the stream directly to local storage.
   /// [streamUrl] is one of the `FormatInfo.id` values returned by [extractMetadata].
   /// Returns the local file path.
+  ///
+  /// For YouTube audio-only streams (WebM/Opus), the file is automatically
+  /// transcoded to M4A (AAC) so it plays on all devices.
   Future<String> downloadStream({
     required String streamUrl,
     required String title,
     required DownloadType type,
     required String ext,
     void Function(int received, int total)? onProgress,
+    void Function()? onTranscoding,
   }) async {
     final root = await getApplicationDocumentsDirectory();
     final subfolder = type == DownloadType.audio
@@ -160,12 +166,18 @@ class YouTubeExplodeService {
     final folder = Directory(p.join(root.path, 'Duck Downloader', subfolder));
     await folder.create(recursive: true);
 
-    final safe = _sanitizeFilename('$title.$ext');
-    final filePath = p.join(folder.path, safe);
+    // YouTube audio is WebM/Opus — transcode to M4A for universal compatibility
+    final needsTranscode = type == DownloadType.audio &&
+        ext.toLowerCase() == 'webm';
+    final downloadExt = needsTranscode ? 'webm' : ext;
+    final finalExt = needsTranscode ? 'm4a' : ext;
+
+    final safe = _sanitizeFilename('$title.$downloadExt');
+    final webmPath = p.join(folder.path, safe);
 
     await _dio.download(
       streamUrl,
-      filePath,
+      webmPath,
       onReceiveProgress: onProgress,
       options: Options(
         // YouTube requires a proper referer or it returns 403
@@ -175,7 +187,44 @@ class YouTubeExplodeService {
         },
       ),
     );
-    return filePath;
+
+    if (!needsTranscode) return webmPath;
+
+    // Transcode WebM/Opus → M4A/AAC
+    onTranscoding?.call();
+    final m4aPath = p.join(
+      folder.path,
+      _sanitizeFilename('$title.$finalExt'),
+    );
+    await transcodeWebmToM4a(webmPath, m4aPath);
+
+    // Clean up the temporary .webm file
+    try {
+      await File(webmPath).delete();
+    } catch (_) {}
+
+    return m4aPath;
+  }
+
+  /// Transcodes a WebM/Opus audio file to M4A/AAC using FFmpeg.
+  /// Throws an [Exception] if FFmpeg fails or is unavailable.
+  Future<void> transcodeWebmToM4a(String inputPath, String outputPath) async {
+    // -y            : overwrite output without asking
+    // -i            : input file
+    // -vn           : no video
+    // -c:a aac      : encode audio as AAC
+    // -b:a 192k     : 192 kbps target bitrate
+    // -movflags +faststart : enable streaming-friendly M4A layout
+    final command =
+        '-y -i "$inputPath" -vn -c:a aac -b:a 192k -movflags +faststart "$outputPath"';
+
+    final session = await FFmpegKit.execute(command);
+    final returnCode = await session.getReturnCode();
+
+    if (!ReturnCode.isSuccess(returnCode)) {
+      final logs = await session.getLogsAsString();
+      throw Exception('FFmpeg transcoding failed: $logs');
+    }
   }
 
   String _formatDuration(Duration? d) {

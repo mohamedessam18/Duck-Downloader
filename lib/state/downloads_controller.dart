@@ -788,6 +788,16 @@ class DuckDownloadsController extends ChangeNotifier
           await _saveItem(updated);
           notifyListeners();
         },
+        onTranscoding: () async {
+          // WebM → M4A conversion in progress
+          status = 'Converting to M4A...';
+          final updated = item.copyWith(
+            progress: 99,
+            status: DownloadStatus.processing,
+          );
+          await _saveItem(updated);
+          notifyListeners();
+        },
       );
 
       item = item.copyWith(
@@ -875,6 +885,15 @@ class DuckDownloadsController extends ChangeNotifier
             final updated = item.copyWith(
               progress: progress,
               status: DownloadStatus.downloading,
+            );
+            await _saveItem(updated);
+            notifyListeners();
+          },
+          onTranscoding: () async {
+            // WebM → M4A conversion in progress
+            final updated = item.copyWith(
+              progress: 99,
+              status: DownloadStatus.processing,
             );
             await _saveItem(updated);
             notifyListeners();
@@ -1483,6 +1502,57 @@ class DuckDownloadsController extends ChangeNotifier
 
   void setAudioSpeed(double speed) {
     audioPlayer.setSpeed(speed);
+    notifyListeners();
+  }
+
+  // ── Background Video Audio ───────────────────────────────────────────────
+  // When a video is playing and the screen locks / app is backgrounded,
+  // we hand off the audio to just_audio so it continues in the background
+  // with lock screen controls. On return, the video player resumes.
+
+  bool _backgroundVideoActive = false;
+  bool get isBackgroundVideoActive => _backgroundVideoActive;
+
+  /// Starts playing the audio track of a video file in the background
+  /// (via just_audio_background) so audio continues when screen is locked.
+  ///
+  /// [item] — the video DownloadItem
+  /// [position] — current playback position to seek to
+  Future<void> playVideoAudioInBackground(
+    DownloadItem item,
+    Duration position,
+  ) async {
+    if (_backgroundVideoActive) return;
+    final filePath = item.filePath;
+    if (filePath == null) return;
+    try {
+      _backgroundVideoActive = true;
+      await _ensureAudioBackgroundReady();
+      await audioPlayer.setAudioSource(
+        AudioSource.file(
+          filePath,
+          tag: MediaItem(
+            id: '${item.id}_bg',
+            title: item.title,
+            artist: item.platform,
+            artUri: _artUriFor(item),
+          ),
+        ),
+      );
+      await audioPlayer.seek(position);
+      await audioPlayer.play();
+      notifyListeners();
+    } catch (_) {
+      _backgroundVideoActive = false;
+    }
+  }
+
+  /// Stops background video audio and releases the audio player source.
+  /// Call this when the user returns to the app and the video player resumes.
+  Future<void> stopBackgroundVideoAudio() async {
+    if (!_backgroundVideoActive) return;
+    _backgroundVideoActive = false;
+    await audioPlayer.stop();
     notifyListeners();
   }
 
