@@ -6,6 +6,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../constants/asset_paths.dart';
 import '../core/notifications/notification_service.dart';
@@ -82,9 +83,13 @@ class DuckDownloadsController extends ChangeNotifier
     _playerPositionSubscription = audioPlayer.positionStream.listen((_) {
       notifyListeners();
     });
+    _initSharingListener();
   }
 
   final AudioPlayer audioPlayer = AudioPlayer();
+  final AudioPlayer _sfxPlayer = AudioPlayer();
+  StreamSubscription? _intentSub;
+  bool showAdOnOpen = false;
   late final StreamSubscription<PlayerState> _playerStateSubscription;
   late final StreamSubscription<Duration> _playerPositionSubscription;
   DownloadItem? playingItem;
@@ -631,10 +636,8 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<void> _playQuack() async {
     try {
-      if (!audioPlayer.playing) {
-        await audioPlayer.setAsset(DuckAssets.quackTap);
-        await audioPlayer.play();
-      }
+      await _sfxPlayer.setAsset(DuckAssets.quackTap);
+      await _sfxPlayer.play();
     } catch (_) {}
   }
 
@@ -1684,6 +1687,8 @@ class DuckDownloadsController extends ChangeNotifier
 
   @override
   void dispose() {
+    _intentSub?.cancel();
+    _sfxPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
     premium.removeListener(_premiumChanged);
     _playerStateSubscription.cancel();
@@ -2102,5 +2107,103 @@ class DuckDownloadsController extends ChangeNotifier
       return false;
     }
     return true;
+  }
+
+  void _initSharingListener() {
+    // For sharing while app is running/backgrounded
+    _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen((value) {
+      if (value.isNotEmpty) {
+        final path = value.first.path;
+        _handleSharedText(path);
+      }
+    }, onError: (err) {
+      debugPrint("Sharing intent stream error: $err");
+    });
+
+    // For sharing that triggers a cold start
+    ReceiveSharingIntent.instance.getInitialMedia().then((value) {
+      if (value.isNotEmpty) {
+        final path = value.first.path;
+        _handleSharedText(path);
+      }
+    });
+  }
+
+  Future<void> _handleSharedText(String text) async {
+    final regExp = RegExp(r'(https?://[^\s]+)');
+    final match = regExp.firstMatch(text);
+    final url = match?.group(0);
+    if (url != null) {
+      unawaited(autoExtractAndDownload(url));
+    }
+  }
+
+  Future<void> autoExtractAndDownload(String url) async {
+    if (busy) return;
+    busy = true;
+    flow = DuckFlow.extracting;
+    status = 'Auto-downloading shared link...';
+    notifyListeners();
+
+    try {
+      final cleanUrl = url.trim();
+      final isAdult = await _isAdultUrl(cleanUrl);
+      if (isAdult) {
+        isAdultContentBlocked = true;
+        notifyListeners();
+        throw Exception('BLOCKED_ADULT_CONTENT');
+      }
+
+      // 1. YouTube
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+        if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+          metadata = ytMeta;
+          selectedType = DownloadType.video;
+          quality = _firstQuality(ytMeta, DownloadType.video);
+          busy = false;
+          await startDownload();
+          showAdOnOpen = true;
+          notifyListeners();
+          return;
+        }
+      }
+
+      // 2. Instagram
+      if (cleanUrl.contains('instagram.com')) {
+        final playlist = await _api.extractPlaylist(cleanUrl);
+        if (playlist.items.isNotEmpty) {
+          busy = false;
+          for (final item in playlist.items) {
+            final itemMeta = await _api.extract(item.url);
+            metadata = itemMeta;
+            selectedType = _isImageMetadata(itemMeta) ? DownloadType.image : DownloadType.video;
+            quality = _firstQuality(itemMeta, selectedType);
+            await startDownload();
+            busy = false;
+          }
+          showAdOnOpen = true;
+          notifyListeners();
+          return;
+        }
+      }
+
+      // 3. Other Platforms (Facebook, TikTok, Twitter, etc.)
+      final media = await _api.extract(cleanUrl);
+      metadata = media;
+      final isImg = _isImageMetadata(media) || _looksLikeImageUrl(cleanUrl);
+      selectedType = isImg ? DownloadType.image : DownloadType.video;
+      quality = _firstQuality(media, selectedType);
+      busy = false;
+      await startDownload();
+      showAdOnOpen = true;
+      notifyListeners();
+    } catch (error) {
+      flow = DuckFlow.error;
+      status = _cleanError(error);
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
   }
 }

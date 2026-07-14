@@ -70,6 +70,14 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
       return;
     }
 
+    if (widget.controller.showAdOnOpen) {
+      widget.controller.showAdOnOpen = false;
+      AdService.instance.showInterstitialAd(
+        isPremiumActive: widget.controller.isPremiumActive,
+        onAdClosed: () {},
+      );
+    }
+
     final currentFlow = widget.controller.flow;
     if (_prevFlow != currentFlow) {
       if (currentFlow == DuckFlow.success) {
@@ -120,7 +128,7 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
                   border: Border.all(color: _danger.withOpacity(0.15)),
                 ),
                 child: Text(
-                  '﴿وَلَا تَقْرَبُوا الزِّنَىٰ ۖ إِنَّهُ كَانَ فَاحِشَةً وَسَاءَ سَبِيلًا﴾\n[الإسراء: ٣٢]',
+                  'تنبيه لحماية خصوصيتك وصحتك النفسية',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: _danger,
@@ -132,7 +140,7 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
               ),
               const SizedBox(height: 18),
               Text(
-                'الإباحية سجنك في الحياة، عليك أن تقلع عنها لتستمتع بحياتك وشبابك، ولا تنسى أنها من الكبائر وقد توقعك في الزنا.',
+                'الإباحية سجن نفسي وعقلي يستنزف طاقتك وشبابك. الإقلاع عنها هو خطوتك الأولى لاستعادة توازنك النفسي وحريتك الشخصية والاستمتاع بحياتك الحقيقية. لحمايتك وحماية خصوصيتك، تم حظر هذا المحتوى بالكامل.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: _text,
@@ -157,7 +165,7 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
                   ),
                   onPressed: () => Navigator.pop(context),
                   child: const Text(
-                    'أستغفر الله العظيم',
+                    'موافق',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
