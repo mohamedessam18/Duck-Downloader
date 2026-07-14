@@ -1,7 +1,12 @@
 import 'dart:ui';
 
-bool get mediaIsLight =>
-    PlatformDispatcher.instance.platformBrightness == Brightness.light;
+bool get mediaIsLight {
+  try {
+    return PlatformDispatcher.instance.platformBrightness == Brightness.light;
+  } catch (_) {
+    return false;
+  }
+}
 
 Color get mediaGold =>
     mediaIsLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);

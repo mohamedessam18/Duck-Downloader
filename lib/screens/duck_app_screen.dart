@@ -22,7 +22,13 @@ import '../widgets/admob_banner_widget.dart';
 import '../services/ad_service.dart';
 import 'locked_social_browser_screen.dart';
 
-bool get _isLight => PlatformDispatcher.instance.platformBrightness == Brightness.light;
+bool get _isLight {
+  try {
+    return PlatformDispatcher.instance.platformBrightness == Brightness.light;
+  } catch (_) {
+    return false;
+  }
+}
 
 Color get _gold => _isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
 Color get _warmGold => _isLight ? const Color(0xFFB58032) : const Color(0xFFF6BD6A);
