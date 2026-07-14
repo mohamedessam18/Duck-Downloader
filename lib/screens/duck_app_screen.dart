@@ -16,7 +16,6 @@ import '../widgets/ambient_background.dart';
 import '../widgets/animated_duck.dart';
 import '../widgets/duck_liquid_glass.dart';
 import '../widgets/glass_panel.dart';
-import '../widgets/media/media_overlay_router.dart';
 import '../widgets/media/media_thumb.dart';
 import '../widgets/media/mini_player.dart';
 import '../widgets/admob_banner_widget.dart';
@@ -205,8 +204,6 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
                     onDismiss: widget.controller.dismissClipboardDetection,
                     onAccept: widget.controller.acceptClipboardDetection,
                   ),
-                if (widget.controller.playerItem != null)
-                  MediaOverlayRouter(controller: widget.controller),
                 if (widget.controller.playerItem == null && MediaQuery.viewInsetsOf(context).bottom == 0)
                   Positioned(
                     bottom: 0,
@@ -2733,6 +2730,8 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   String _firstPin = '';
   bool _confirmMode = false;
   String _message = '';
+  bool _resetMode = false;
+  bool _newPinMode = false;
 
   @override
   void initState() {
@@ -2759,9 +2758,65 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
     });
   }
 
+  void _onResetPress() {
+    setState(() {
+      _resetMode = true;
+      _newPinMode = false;
+      _confirmMode = false;
+      _pin = '';
+      _message = 'Enter current passcode to reset';
+    });
+  }
+
   void _handlePinComplete() {
     Future.delayed(const Duration(milliseconds: 200), () {
       if (!mounted) return;
+
+      if (_resetMode) {
+        final correct = widget.controller.checkVaultPin(_pin);
+        if (correct) {
+          setState(() {
+            _resetMode = false;
+            _newPinMode = true;
+            _confirmMode = false;
+            _pin = '';
+            _message = 'Create a new 4-digit passcode';
+          });
+          widget.controller.lockVault();
+        } else {
+          setState(() {
+            _pin = '';
+            _message = 'Incorrect passcode. Try again.';
+          });
+        }
+        return;
+      }
+
+      if (_newPinMode) {
+        if (!_confirmMode) {
+          setState(() {
+            _firstPin = _pin;
+            _pin = '';
+            _confirmMode = true;
+            _message = 'Confirm your new passcode';
+          });
+        } else {
+          if (_pin == _firstPin) {
+            widget.controller.setVaultPin(_pin);
+            widget.controller.checkVaultPin(_pin);
+            Navigator.pop(context);
+            widget.onSuccess();
+          } else {
+            setState(() {
+              _pin = '';
+              _confirmMode = false;
+              _message = 'Passcodes do not match. Try again.';
+            });
+          }
+        }
+        return;
+      }
+
       if (!widget.controller.isVaultSetup) {
         if (!_confirmMode) {
           setState(() {
@@ -2870,14 +2925,14 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
       ['1', '2', '3'],
       ['4', '5', '6'],
       ['7', '8', '9'],
-      ['C', '0', 'ÃƒÂ¢Ã…â€™Ã‚Â«'],
+      [widget.controller.isVaultSetup ? 'Reset' : 'C', '0', '⌫'],
     ];
     return Column(
       children: keys.map((row) {
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: row.map((val) {
-            final isAction = val == 'C' || val == 'ÃƒÂ¢Ã…â€™Ã‚Â«';
+            final isAction = val == 'C' || val == 'Reset' || val == '⌫';
             return Container(
               width: 72,
               height: 72,
@@ -2889,21 +2944,27 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
                     onTap: () {
                       if (val == 'C') {
                         setState(() => _pin = '');
-                      } else if (val == 'ÃƒÂ¢Ã…â€™Ã‚Â«') {
+                      } else if (val == 'Reset') {
+                        _onResetPress();
+                      } else if (val == '⌫') {
                         _onBackspace();
                       } else {
                         _onKeyPress(val);
                       }
                     },
                     child: Center(
-                      child: Text(
-                        val,
-                        style: TextStyle(
-                          color: isAction ? _muted : _text,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: val == '⌫'
+                          ? Icon(Icons.backspace_outlined, color: _text, size: 22)
+                          : val == 'Reset'
+                              ? Icon(Icons.lock_reset, color: _text, size: 26)
+                              : Text(
+                                  val,
+                                  style: TextStyle(
+                                    color: isAction ? _muted : _text,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                     ),
                   ),
                 ),
@@ -2921,60 +2982,119 @@ class _SecureVaultView extends StatelessWidget {
 
   final DuckDownloadsController controller;
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _dark,
-      appBar: AppBar(
-        backgroundColor: _nav,
-        title: Text(
-          'SECURE VAULT',
-          style: TextStyle(
-            color: _gold,
-            fontWeight: FontWeight.w900,
-            fontSize: 18,
-            letterSpacing: 2,
+  Future<void> _onBackRequested(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: _dark,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: _border),
           ),
-        ),
-        centerTitle: true,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: _text),
-          onPressed: () {
-            controller.lockVault();
-            Navigator.pop(context);
-          },
-        ),
-      ),
-      body: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) {
-          final items = controller.privateDownloads;
-          Widget mainContent;
-          if (items.isEmpty) {
-            mainContent = Center(
+          title: Text(
+            'Exit Vault?',
+            style: TextStyle(
+              color: _text,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Text(
+            'Are you sure you want to exit the secure vault and lock it?',
+            style: TextStyle(color: _muted),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
               child: Text(
-                'No private files in vault.',
+                'Cancel',
                 style: TextStyle(color: _muted),
               ),
-            );
-          } else {
-            mainContent = ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: items.length,
-              itemBuilder: (context, index) {
-                final item = items[index];
-                return _VaultItemTile(item: item, controller: controller);
-              },
-            );
-          }
-          return Stack(
-            children: [
-              mainContent,
-              if (controller.playerItem != null)
-                MediaOverlayRouter(controller: controller),
-            ],
-          );
-        },
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Exit',
+                style: TextStyle(
+                  color: _danger,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      // 1. Stop all media playback
+      controller.closePlayer();
+      await controller.audioPlayer.stop();
+
+      // 2. Lock the vault
+      controller.lockVault();
+
+      // 3. Pop the vault screen
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
+
+      // 4. Force navigation to the Home tab
+      controller.tabHistory.clear();
+      controller.setTab(DuckTab.home);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _onBackRequested(context);
+      },
+      child: Scaffold(
+        backgroundColor: _dark,
+        appBar: AppBar(
+          backgroundColor: _nav,
+          title: Text(
+            'SECURE VAULT',
+            style: TextStyle(
+              color: _gold,
+              fontWeight: FontWeight.w900,
+              fontSize: 18,
+              letterSpacing: 2,
+            ),
+          ),
+          centerTitle: true,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back_ios_new, color: _text),
+            onPressed: () => _onBackRequested(context),
+          ),
+        ),
+        body: AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) {
+            final items = controller.privateDownloads;
+            if (items.isEmpty) {
+              return Center(
+                child: Text(
+                  'No private files in vault.',
+                  style: TextStyle(color: _muted),
+                ),
+              );
+            } else {
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return _VaultItemTile(item: item, controller: controller);
+                },
+              );
+            }
+          },
+        ),
       ),
     );
   }
@@ -3102,7 +3222,7 @@ class _PlaylistItemsView extends StatelessWidget {
         ),
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+          icon: Icon(Icons.arrow_back_ios_new, color: _text),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -3122,16 +3242,15 @@ class _PlaylistItemsView extends StatelessWidget {
               )
               .toList();
 
-          Widget mainContent;
           if (items.isEmpty) {
-            mainContent = Center(
+            return Center(
               child: Text(
                 'No completed items in this playlist.',
                 style: TextStyle(color: _muted),
               ),
             );
           } else {
-            mainContent = ListView.separated(
+            return ListView.separated(
               padding: const EdgeInsets.all(16),
               itemBuilder: (context, index) {
                 final item = items[index];
@@ -3152,41 +3271,38 @@ class _PlaylistItemsView extends StatelessWidget {
                           ),
                           child: Row(
                             children: [
-                              _Thumb(
-                                url: item.thumbnail,
-                                filePath: item.filePath,
-                                width: 58,
-                                height: 66,
-                                icon: item.isAudio
-                                    ? Icons.music_note
-                                    : Icons.play_arrow,
-                                radius: 0,
+                              Container(
+                                width: 50,
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: _border),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: item.isImage
+                                      ? Image.file(
+                                          File(item.filePath!),
+                                          fit: BoxFit.cover,
+                                        )
+                                      : Icon(
+                                          item.isAudio
+                                              ? Icons.audiotrack
+                                              : Icons.videocam,
+                                          color: _gold,
+                                        ),
+                                ),
                               ),
-                              const SizedBox(width: 22),
+                              const SizedBox(width: 12),
                               Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Color(0xFFE7E7E7),
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w300,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 7),
-                                    Text(
-                                      item.platform,
-                                      style: const TextStyle(
-                                        color: Color(0xFFC8C8C8),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w300,
-                                      ),
-                                    ),
-                                  ],
+                                child: Text(
+                                  item.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: _text,
+                                    fontSize: 13,
+                                  ),
                                 ),
                               ),
                             ],
@@ -3214,14 +3330,6 @@ class _PlaylistItemsView extends StatelessWidget {
               itemCount: items.length,
             );
           }
-
-          return Stack(
-            children: [
-              mainContent,
-              if (controller.playerItem != null)
-                MediaOverlayRouter(controller: controller),
-            ],
-          );
         },
       ),
     );

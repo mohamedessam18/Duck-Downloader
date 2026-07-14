@@ -12,6 +12,7 @@ import 'services/purchase_repository.dart';
 import 'services/subscription_service.dart';
 import 'services/media_save_service.dart';
 import 'state/downloads_controller.dart';
+import 'widgets/media/media_overlay_router.dart';
 
 class DuckDownloaderApp extends StatefulWidget {
   const DuckDownloaderApp({super.key});
@@ -57,6 +58,21 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
       theme: DuckTheme.light,
       darkTheme: DuckTheme.dark,
       home: SplashScreen(controller: controller),
+      builder: (context, child) {
+        return AnimatedBuilder(
+          animation: controller,
+          builder: (context, child) {
+            return Stack(
+              children: [
+                if (child != null) child,
+                if (controller.playerItem != null)
+                  MediaOverlayRouter(controller: controller),
+              ],
+            );
+          },
+          child: child,
+        );
+      },
     );
   }
 }
