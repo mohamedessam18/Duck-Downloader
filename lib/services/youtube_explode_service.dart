@@ -9,11 +9,12 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../models/download_models.dart';
 
-/// Extracts YouTube video metadata and stream URLs **directly on the client device**,
-/// bypassing the backend server entirely.
+/// Extracts YouTube video metadata and downloads streams **directly on the
+/// client device**, bypassing the backend server entirely.
 ///
-/// This avoids the "Sign in to confirm you're not a bot" errors that occur when
-/// a server IP (e.g. Railway data-center) is blocked by YouTube.
+/// Audio downloads use [YoutubeExplode.videos.streamsClient.get()] which
+/// handles YouTube auth, headers and cookies internally — far more reliable
+/// than raw HTTP requests to the signed stream URL.
 class YouTubeExplodeService {
   YouTubeExplodeService() : _yt = YoutubeExplode(), _dio = Dio();
 
@@ -25,24 +26,24 @@ class YouTubeExplodeService {
     _dio.close();
   }
 
-  /// Returns true for any YouTube video URL (watch, shorts, youtu.be, mobile, embed).
+  // ── URL helpers ────────────────────────────────────────────────────────────
+
+  /// Returns true for any YouTube video URL (watch, shorts, youtu.be, etc).
   static bool isYouTubeUrl(String url) {
     final lower = url.toLowerCase();
-    // Must be a YouTube domain
-    final isYtDomain = lower.contains('youtube.com') || lower.contains('youtu.be');
+    final isYtDomain =
+        lower.contains('youtube.com') || lower.contains('youtu.be');
     if (!isYtDomain) return false;
-    // Must NOT be a pure playlist (no video id)
     final isPurePlaylist = !lower.contains('v=') &&
         !lower.contains('youtu.be/') &&
         (lower.contains('list=') || lower.contains('/playlist'));
     if (isPurePlaylist) return false;
-    // Video URL patterns
-    return lower.contains('/watch') ||        // youtube.com/watch?v=ID
-        lower.contains('youtu.be/') ||        // youtu.be/ID
-        lower.contains('/shorts/') ||         // youtube.com/shorts/ID
-        lower.contains('/embed/') ||          // youtube.com/embed/ID
-        lower.contains('/v/') ||              // youtube.com/v/ID (old)
-        lower.contains('v=');                 // any ?v=ID param
+    return lower.contains('/watch') ||
+        lower.contains('youtu.be/') ||
+        lower.contains('/shorts/') ||
+        lower.contains('/embed/') ||
+        lower.contains('/v/') ||
+        lower.contains('v=');
   }
 
   /// Returns true for YouTube playlist URLs (with or without a current video).
@@ -52,9 +53,9 @@ class YouTubeExplodeService {
         (lower.contains('list=') || lower.contains('/playlist'));
   }
 
+  // ── Playlist extraction ────────────────────────────────────────────────────
 
   /// Extracts all videos in a YouTube playlist.
-  /// Returns a list of [PlaylistItem] with title and URL.
   Future<({String title, List<PlaylistItem> items})> extractPlaylist(
     String url,
   ) async {
@@ -75,6 +76,8 @@ class YouTubeExplodeService {
 
     return (title: playlist.title, items: items);
   }
+
+  // ── Metadata extraction ────────────────────────────────────────────────────
 
   /// Returns null if the URL is not a recognisable YouTube video URL.
   Future<MediaMetadata?> extractMetadata(String url) async {
@@ -107,7 +110,8 @@ class YouTubeExplodeService {
     final videoOnly = manifest.videoOnly.sortByVideoQuality().reversed.toList();
     for (final stream in videoOnly) {
       final res = stream.videoResolution;
-      final label = '${res.height}p HD (${stream.container.name.toUpperCase()})';
+      final label =
+          '${res.height}p HD (${stream.container.name.toUpperCase()})';
       videoFormats.add(FormatInfo(
         id: stream.url.toString(),
         label: label,
@@ -123,7 +127,8 @@ class YouTubeExplodeService {
     final audioOnly = manifest.audioOnly.sortByBitrate().reversed.toList();
     for (final stream in audioOnly) {
       final bitrateKbps = (stream.bitrate.bitsPerSecond / 1000).round();
-      final label = '${bitrateKbps} kbps (${stream.container.name.toUpperCase()})';
+      final label =
+          '${bitrateKbps} kbps (${stream.container.name.toUpperCase()})';
       audioFormats.add(FormatInfo(
         id: stream.url.toString(),
         label: label,
@@ -143,19 +148,79 @@ class YouTubeExplodeService {
     );
   }
 
-  /// Downloads the stream directly to local storage.
-  /// [streamUrl] is one of the `FormatInfo.id` values returned by [extractMetadata].
-  /// Returns the local file path.
+  // ── Audio download (native) ─────────────────────────────────────────────────
+
+  /// Downloads the best YouTube audio stream using youtube_explode_dart's
+  /// **native streaming client** — not raw HTTP — and transcodes to M4A.
   ///
-  /// For YouTube audio-only streams (WebM/Opus), the file is automatically
-  /// transcoded to M4A (AAC) so it plays on all devices.
+  /// Re-fetches a fresh stream manifest at download time so URLs are never
+  /// stale. Progress is reported in bytes.
+  Future<String> downloadAudioNative({
+    required String videoUrl,
+    required String title,
+    void Function(int received, int total)? onProgress,
+    void Function()? onTranscoding,
+  }) async {
+    final videoId = VideoId.parseVideoId(videoUrl);
+    if (videoId == null) throw Exception('Invalid YouTube video URL');
+
+    // Re-fetch fresh manifest so signed URLs are not expired
+    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    final streamInfo = manifest.audioOnly.withHighestBitrate();
+
+    final root = await getApplicationDocumentsDirectory();
+    final folder = Directory(p.join(root.path, 'Duck Downloader', 'Audios'));
+    await folder.create(recursive: true);
+
+    final tempExt = streamInfo.container.name; // 'webm' or 'mp4'
+    final tempPath =
+        p.join(folder.path, _sanitizeFilename('$title.$tempExt'));
+
+    // ── Write stream chunks to file ──────────────────────────────────────────
+    // Uses youtube_explode_dart's internal HTTP client which handles all
+    // YouTube auth headers, cookies and redirects correctly.
+    final stream = _yt.videos.streamsClient.get(streamInfo);
+    final totalBytes = streamInfo.size.totalBytes;
+    int received = 0;
+
+    final sink = File(tempPath).openWrite();
+    try {
+      await for (final chunk in stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(received, totalBytes);
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
+    }
+
+    // ── Transcode to M4A ─────────────────────────────────────────────────────
+    onTranscoding?.call();
+    final m4aPath =
+        p.join(folder.path, _sanitizeFilename('$title.m4a'));
+    await transcodeToM4a(tempPath, m4aPath);
+
+    // Clean up temp file
+    try {
+      await File(tempPath).delete();
+    } catch (_) {}
+
+    return m4aPath;
+  }
+
+  // ── Video / other stream download (Dio) ────────────────────────────────────
+
+  /// Downloads a video stream URL directly to local storage using Dio.
+  /// For audio, prefer [downloadAudioNative] instead.
+  ///
+  /// Returns the local file path.
   Future<String> downloadStream({
     required String streamUrl,
     required String title,
     required DownloadType type,
     required String ext,
     void Function(int received, int total)? onProgress,
-    void Function()? onTranscoding,
   }) async {
     final root = await getApplicationDocumentsDirectory();
     final subfolder = type == DownloadType.audio
@@ -166,67 +231,44 @@ class YouTubeExplodeService {
     final folder = Directory(p.join(root.path, 'Duck Downloader', subfolder));
     await folder.create(recursive: true);
 
-    // Always transcode YouTube audio to M4A for maximum device compatibility.
-    // YouTube serves audio as WebM/Opus or MP4/AAC — we normalize to .m4a.
-    // For MP4 audio, FFmpeg does a fast remux (no re-encode needed).
-    final needsTranscode = type == DownloadType.audio;
-    final downloadExt = ext; // keep original ext for temp file
-    final finalExt = needsTranscode ? 'm4a' : ext;
-
-    final safe = _sanitizeFilename('$title.$downloadExt');
-    final webmPath = p.join(folder.path, safe);
+    final safe = _sanitizeFilename('$title.$ext');
+    final filePath = p.join(folder.path, safe);
 
     await _dio.download(
       streamUrl,
-      webmPath,
+      filePath,
       onReceiveProgress: onProgress,
       options: Options(
-        // YouTube requires a proper referer or it returns 403
         headers: {
           'Referer': 'https://www.youtube.com/',
           'Origin': 'https://www.youtube.com',
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         },
       ),
     );
-
-    if (!needsTranscode) return webmPath;
-
-    // Transcode WebM/Opus → M4A/AAC
-    onTranscoding?.call();
-    final m4aPath = p.join(
-      folder.path,
-      _sanitizeFilename('$title.$finalExt'),
-    );
-    await transcodeWebmToM4a(webmPath, m4aPath);
-
-    // Clean up the temporary .webm file
-    try {
-      await File(webmPath).delete();
-    } catch (_) {}
-
-    return m4aPath;
+    return filePath;
   }
 
-  /// Transcodes/remuxes an audio file to M4A/AAC using FFmpeg.
+  // ── FFmpeg helpers ─────────────────────────────────────────────────────────
+
+  /// Transcodes/remuxes any audio file to M4A/AAC using FFmpeg.
   ///
-  /// - WebM/Opus input → re-encoded to AAC 192kbps
-  /// - MP4/AAC input → stream-copied (fast remux, no quality loss)
-  ///
-  /// Throws an [Exception] if FFmpeg fails or is unavailable.
-  Future<void> transcodeWebmToM4a(String inputPath, String outputPath) async {
-    // Detect if this is already AAC audio (MP4 container) — use copy mode
+  /// - WebM/Opus input → re-encoded to AAC 192 kbps
+  /// - MP4/AAC input  → stream-copied (fast remux, no quality loss)
+  Future<void> transcodeToM4a(String inputPath, String outputPath) async {
     final ext = p.extension(inputPath).toLowerCase().replaceAll('.', '');
     final isAlreadyAac = ext == 'mp4' || ext == 'm4a';
 
-    // Use executeWithArguments (same as TrimService) to safely handle
-    // paths that contain spaces or special characters.
+    // Use executeWithArguments — same pattern as TrimService (proven working)
     final args = [
-      '-y',             // overwrite output without prompting
+      '-y',
       '-i', inputPath,
-      '-vn',            // no video stream
-      '-c:a', isAlreadyAac ? 'copy' : 'aac', // copy AAC, re-encode Opus/Vorbis
-      if (!isAlreadyAac) ...[ '-b:a', '192k' ], // bitrate only when encoding
-      '-movflags', '+faststart', // streaming-friendly layout
+      '-vn',
+      '-c:a', isAlreadyAac ? 'copy' : 'aac',
+      if (!isAlreadyAac) ...['-b:a', '192k'],
+      '-movflags', '+faststart',
       outputPath,
     ];
 
@@ -236,16 +278,17 @@ class YouTubeExplodeService {
     if (!ReturnCode.isSuccess(returnCode)) {
       final logs = await session.getAllLogsAsString();
       throw Exception(
-        'FFmpeg transcoding failed: ${logs?.trim() ?? 'unknown error'}',
+        'FFmpeg transcode failed: ${logs?.trim() ?? 'unknown error'}',
       );
     }
 
-    // Verify output was actually created and is non-empty
-    final outputFile = File(outputPath);
-    if (!await outputFile.exists() || await outputFile.length() <= 0) {
+    final out = File(outputPath);
+    if (!await out.exists() || await out.length() <= 0) {
       throw Exception('FFmpeg produced an empty output file.');
     }
   }
+
+  // ── Private helpers ────────────────────────────────────────────────────────
 
   String _formatDuration(Duration? d) {
     if (d == null) return '';
