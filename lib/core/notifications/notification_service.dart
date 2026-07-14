@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -12,9 +14,10 @@ class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
-  static const _successChannelId = 'duck_downloads_success_v2';
-  static const _failChannelId = 'duck_downloads_fail_v2';
-  static const _clipboardChannelId = 'duck_clipboard_v2';
+  // Channel IDs — bump suffix to force re-creation with correct sound
+  static const _successChannelId = 'duck_downloads_success_v4';
+  static const _failChannelId = 'duck_downloads_fail_v4';
+  static const _clipboardChannelId = 'duck_clipboard_v4';
 
   Future<void> _tryInitialize() async {
     if (kIsWeb) return;
@@ -22,9 +25,12 @@ class NotificationService {
       const androidSettings =
           AndroidInitializationSettings('@mipmap/ic_launcher');
       const iosSettings = DarwinInitializationSettings(
-        requestAlertPermission: false,
-        requestBadgePermission: false,
-        requestSoundPermission: false,
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+        defaultPresentAlert: true,
+        defaultPresentBadge: true,
+        defaultPresentSound: true,
       );
       const settings = InitializationSettings(
         android: androidSettings,
@@ -36,9 +42,60 @@ class NotificationService {
           _onTap?.call(response.payload);
         },
       );
+
+      // ── Android 8+ requires explicit channel creation with sound ──────────
+      // The sound is tied to the channel, not the individual notification.
+      // We must call createNotificationChannel() so the OS registers the
+      // custom sound before the first notification is shown.
+      if (!kIsWeb && Platform.isAndroid) {
+        await _createAndroidChannels();
+      }
     } catch (_) {
       // Notifications are best-effort; fail silently in test/CLI envs.
     }
+  }
+
+  Future<void> _createAndroidChannels() async {
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return;
+
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _successChannelId,
+        'Duck Downloads',
+        description: 'Download completed notifications',
+        importance: Importance.max,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('quack_success'),
+        enableVibration: true,
+      ),
+    );
+
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _failChannelId,
+        'Duck Download Errors',
+        description: 'Download failure notifications',
+        importance: Importance.max,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('quack_fail'),
+        enableVibration: true,
+      ),
+    );
+
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _clipboardChannelId,
+        'Duck Clipboard',
+        description: 'Clipboard link detected notifications',
+        importance: Importance.high,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('quack_clipboard'),
+        enableVibration: false,
+      ),
+    );
   }
 
   Future<void> initialize({NotificationTapHandler? onTap}) async {
@@ -61,11 +118,14 @@ class NotificationService {
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
+        enableVibration: true,
         sound: RawResourceAndroidNotificationSound('quack_success'),
       );
       const details = NotificationDetails(
         android: androidDetails,
         iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
           presentSound: true,
           sound: 'quack_success.mp3',
         ),
@@ -96,11 +156,14 @@ class NotificationService {
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
+        enableVibration: true,
         sound: RawResourceAndroidNotificationSound('quack_fail'),
       );
       const details = NotificationDetails(
         android: androidDetails,
         iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
           presentSound: true,
           sound: 'quack_fail.mp3',
         ),
@@ -129,11 +192,14 @@ class NotificationService {
         importance: Importance.high,
         priority: Priority.high,
         playSound: true,
+        enableVibration: false,
         sound: RawResourceAndroidNotificationSound('quack_clipboard'),
       );
       const details = NotificationDetails(
         android: androidDetails,
         iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: false,
           presentSound: true,
           sound: 'quack_clipboard.mp3',
         ),

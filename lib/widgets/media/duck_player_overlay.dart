@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/app_navigator.dart';
 import '../../models/download_models.dart';
 import '../../services/trim_service.dart';
 import '../../state/downloads_controller.dart';
@@ -57,6 +58,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   // Center play/pause overlays
   bool _showCenterPlayIndicator = false;
   bool _showCenterPauseIndicator = false;
+
+  bool _showSpeedPanel = false;
   Timer? _centerPlayPauseTimer;
 
   // Aspect ratio fit toast overlay
@@ -215,6 +218,11 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       widget.item.id,
       video.value.position,
     );
+    // Re-apply speed on Android every time the video starts playing
+    // (Android may reset speed after seek/buffer events)
+    if (isPlaying && _speed != 1.0) {
+      video.setPlaybackSpeed(_speed);
+    }
     if (mounted) setState(() {});
   }
 
@@ -751,25 +759,31 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                         height: 48,
                                         useOwnLayer: false,
                                       ),
-                                      PopupMenuButton<double>(
-                                        tooltip: 'Speed',
-                                        color: const Color(0xFF1E1E1E),
-                                        onSelected: (spd) {
+                                      GestureDetector(
+                                        onTap: () {
                                           _resetHideTimer();
-                                          _setSpeed(spd);
+                                          _showSpeedSheet(context);
                                         },
-                                        itemBuilder: (context) => const [
-                                          PopupMenuItem(value: 0.75, child: Text('0.75x')),
-                                          PopupMenuItem(value: 1.0, child: Text('1.0x')),
-                                          PopupMenuItem(value: 1.25, child: Text('1.25x')),
-                                          PopupMenuItem(value: 1.5, child: Text('1.5x')),
-                                          PopupMenuItem(value: 2.0, child: Text('2.0x')),
-                                        ],
-                                        child: _buildCircularGlassButton(
-                                          size: 48,
-                                          child: const Icon(Icons.speed, color: Colors.white, size: 22),
-                                          onPressed: null,
+                                        child: _buildCapsuleGlassContainer(
+                                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                                          height: 48,
                                           useOwnLayer: false,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.speed_rounded, color: Colors.white, size: 18),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                  letterSpacing: 0.3,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -879,6 +893,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                 ),
               ),
             ),
+            _buildSpeedOverlay(),
           ],
         ),
       ),
@@ -1288,34 +1303,37 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                             ),
                             onPressed: widget.controller.toggleShuffle,
                           ),
-                          PopupMenuButton<double>(
-                            tooltip: 'Speed',
-                            color: const Color(0xFF1E1E1E),
-                            onSelected: (spd) {
+                          GestureDetector(
+                            onTap: () {
                               _resetHideTimer();
-                              _setSpeed(spd);
+                              _showSpeedSheet(context);
                             },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(value: 0.75, child: Text('0.75x')),
-                              PopupMenuItem(value: 1.0, child: Text('1.0x')),
-                              PopupMenuItem(value: 1.25, child: Text('1.25x')),
-                              PopupMenuItem(value: 1.5, child: Text('1.5x')),
-                              PopupMenuItem(value: 2.0, child: Text('2.0x')),
-                            ],
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.speed, size: 16, color: mediaGold),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                  style: TextStyle(
-                                    color: mediaGold,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: mediaGold.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: mediaGold.withValues(alpha: 0.45),
+                                  width: 1,
                                 ),
-                              ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.speed_rounded, size: 15, color: mediaGold),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
+                                    style: TextStyle(
+                                      color: mediaGold,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                           if (!kIsWeb)
@@ -1365,6 +1383,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               ),
             ),
           ),
+          _buildSpeedOverlay(),
         ],
       ),
     );
@@ -1640,6 +1659,185 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               setState(() => _error = 'This file could not be played.');
             }
           });
+  }
+
+  // ─── Speed sheet ──────────────────────────────────────────────────────────
+  void _showSpeedSheet(BuildContext context) {
+    setState(() {
+      _showSpeedPanel = true;
+    });
+  }
+
+  Widget _buildSpeedOverlay() {
+    if (!_showSpeedPanel) return const SizedBox.shrink();
+
+    const speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          // Dismiss tap target backdrop
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showSpeedPanel = false;
+                });
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                color: Colors.black.withOpacity(0.4),
+              ),
+            ),
+          ),
+          // Speed panel content aligned to bottom
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: DuckLiquidGlassSurface(
+                borderRadius: 28,
+                variant: DuckLiquidGlassVariant.panel,
+                isLight: isLight,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    20,
+                    24,
+                    28 + MediaQuery.paddingOf(context).bottom,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Drag handle indicator
+                      Container(
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      // Title row
+                      Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: mediaGold.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(Icons.speed_rounded, color: mediaGold, size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Playback Speed',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              Text(
+                                'Current: ${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
+                                style: TextStyle(
+                                  color: mediaGold,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      // Speed options grid
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 2.2,
+                        ),
+                        itemCount: speeds.length,
+                        itemBuilder: (_, i) {
+                          final spd = speeds[i];
+                          final isSelected = _speed == spd;
+                          return GestureDetector(
+                            onTap: () {
+                              _setSpeed(spd);
+                              setState(() {
+                                _showSpeedPanel = false;
+                              });
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              curve: Curves.easeOutCubic,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? mediaGold.withOpacity(0.18)
+                                    : Colors.white.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? mediaGold.withOpacity(0.7)
+                                      : Colors.white.withOpacity(0.1),
+                                  width: isSelected ? 1.5 : 1,
+                                ),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${spd.toStringAsFixed(spd == spd.roundToDouble() ? 0 : 2)}x',
+                                  style: TextStyle(
+                                    color: isSelected ? mediaGold : Colors.white70,
+                                    fontSize: 13,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w800
+                                        : FontWeight.w500,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      // Normal speed shortcut button
+                      if (_speed != 1.0)
+                        TextButton(
+                          onPressed: () {
+                            _setSpeed(1.0);
+                            setState(() {
+                              _showSpeedPanel = false;
+                            });
+                          },
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white60,
+                            textStyle: const TextStyle(fontSize: 13),
+                          ),
+                          child: const Text('Reset to Normal (1x)'),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildCircularGlassButton({

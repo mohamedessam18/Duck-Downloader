@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import 'core/app_navigator.dart';
 import 'theme/duck_theme.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_client.dart';
@@ -52,6 +53,7 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: 'Duck Downloader',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.system,
