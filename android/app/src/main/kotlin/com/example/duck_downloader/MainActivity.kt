@@ -13,11 +13,29 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileInputStream
+import android.content.Intent
+import android.os.Bundle
 
 class MainActivity : AudioServiceActivity() {
     private val channelName = "duck_downloader/media"
     private var methodChannel: MethodChannel? = null
     private var isVideoPlaying = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            moveTaskToBack(true)
+        }
+    }
 
     override fun provideFlutterEngine(context: Context): FlutterEngine? {
         return AudioServicePlugin.getFlutterEngine(context)

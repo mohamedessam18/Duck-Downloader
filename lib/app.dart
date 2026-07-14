@@ -66,7 +66,10 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
               children: [
                 if (child != null) child,
                 if (controller.playerItem != null)
-                  MediaOverlayRouter(controller: controller),
+                  Material(
+                    type: MaterialType.transparency,
+                    child: MediaOverlayRouter(controller: controller),
+                  ),
               ],
             );
           },
