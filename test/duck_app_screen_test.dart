@@ -271,10 +271,10 @@ void main() {
     expect(api.extractedUrl, 'https://www.tiktok.com/@user/video/abc123/');
   });
 
-  testWidgets('YouTube URLs bypass backend and use on-device extraction', (
+  testWidgets('YouTube URLs hit backend for extraction', (
     tester,
   ) async {
-    // YouTube URL → must NOT call the backend API (bot-check prevention)
+    // YouTube URL → must call the backend API (yt-dlp)
     final box = FakeBox();
     final clipboard = FakeClipboardService()
       ..clipboardText = 'https://youtube.com/watch?v=dQw4w9WgXcQ';
@@ -304,9 +304,9 @@ void main() {
     await tester.tap(find.text('Extract'));
     await tester.pump();
 
-    // Backend must NOT be called for YouTube (on-device extraction only)
-    expect(api.extractCalled, isFalse);
-    expect(ytExplode.extractMetadataCalled, isTrue);
+    // Backend must be called for YouTube (yt-dlp routing)
+    expect(api.extractCalled, isTrue);
+    expect(ytExplode.extractMetadataCalled, isFalse);
   });
 
 
