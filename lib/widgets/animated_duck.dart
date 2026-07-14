@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../constants/asset_paths.dart';
@@ -31,9 +33,21 @@ class _AnimatedDuckState extends State<AnimatedDuck>
   late final Animation<double> _pressScale;
   late DuckSpriteState _sprite;
 
+  /// The flow used as key for AnimatedSwitcher (may differ from widget.flow
+  /// while the return-to-idle delay is counting down).
+  late DuckFlow _displayFlow;
+
+  /// Timer that fires after a transient flow (success / error) to switch
+  /// the duck back to idle.
+  Timer? _idleReturnTimer;
+
+  /// How long to show the success / error animation before returning to idle.
+  static const _idleReturnDelay = Duration(seconds: 3);
+
   @override
   void initState() {
     super.initState();
+    _displayFlow = widget.flow;
     _sprite = DuckAssets.spriteFor(widget.flow);
     _glowController = AnimationController(
       vsync: this,
@@ -51,18 +65,37 @@ class _AnimatedDuckState extends State<AnimatedDuck>
     _pressScale = Tween<double>(begin: 0.96, end: 1.0).animate(
       CurvedAnimation(parent: _pressController, curve: Curves.easeOut),
     );
+    _scheduleIdleReturnIfNeeded(widget.flow);
   }
 
   @override
   void didUpdateWidget(AnimatedDuck oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.flow != widget.flow) {
+      _idleReturnTimer?.cancel();
+      _idleReturnTimer = null;
+      _displayFlow = widget.flow;
       _sprite = DuckAssets.spriteFor(widget.flow);
+      _scheduleIdleReturnIfNeeded(widget.flow);
+    }
+  }
+
+  /// Schedules a return to idle after [_idleReturnDelay] for transient flows.
+  void _scheduleIdleReturnIfNeeded(DuckFlow flow) {
+    if (flow == DuckFlow.success || flow == DuckFlow.error) {
+      _idleReturnTimer = Timer(_idleReturnDelay, () {
+        if (!mounted) return;
+        setState(() {
+          _displayFlow = DuckFlow.idle;
+          _sprite = DuckAssets.duckIdleSprite();
+        });
+      });
     }
   }
 
   @override
   void dispose() {
+    _idleReturnTimer?.cancel();
     _glowController.dispose();
     _pressController.dispose();
     super.dispose();
@@ -89,7 +122,7 @@ class _AnimatedDuckState extends State<AnimatedDuck>
         return FadeTransition(opacity: animation, child: child);
       },
       child: DuckSpritePlayer(
-        key: ValueKey(widget.flow),
+        key: ValueKey(_displayFlow),
         sprite: _sprite,
         size: duckSize,
         reduceMotion: reduceMotion,
