@@ -63,18 +63,113 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
 
   void _onControllerChange() {
     if (!mounted) return;
+
+    if (widget.controller.isAdultContentBlocked) {
+      widget.controller.isAdultContentBlocked = false;
+      _showAdultContentWarningDialog(context);
+      return;
+    }
+
     final currentFlow = widget.controller.flow;
     if (_prevFlow != currentFlow) {
       if (currentFlow == DuckFlow.success) {
         _showSettingToast(context, 'Download Completed!', true);
       } else if (currentFlow == DuckFlow.error) {
         final err = widget.controller.status;
-        if (err.isNotEmpty && err != 'null') {
+        if (err.isNotEmpty && err != 'null' && !err.contains('BLOCKED_ADULT_CONTENT')) {
           _showSettingToast(context, err, false);
         }
       }
       _prevFlow = currentFlow;
     }
+  }
+
+  void _showAdultContentWarningDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: _panel,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: _danger.withOpacity(0.5), width: 2),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: _danger, size: 28),
+              const SizedBox(width: 12),
+              Text(
+                'تنبيه هام',
+                style: TextStyle(
+                  color: _text,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _danger.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: _danger.withOpacity(0.15)),
+                ),
+                child: Text(
+                  '﴿وَلَا تَقْرَبُوا الزِّنَىٰ ۖ إِنَّهُ كَانَ فَاحِشَةً وَسَاءَ سَبِيلًا﴾\n[الإسراء: ٣٢]',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: _danger,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'الإباحية سجنك في الحياة، عليك أن تقلع عنها لتستمتع بحياتك وشبابك، ولا تنسى أنها من الكبائر وقد توقعك في الزنا.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _text,
+                  fontSize: 14,
+                  height: 1.6,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Center(
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _danger,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'أستغفر الله العظيم',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _openLockedBrowser(

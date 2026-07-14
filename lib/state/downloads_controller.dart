@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:audio_session/audio_session.dart';
@@ -128,6 +129,7 @@ class DuckDownloadsController extends ChangeNotifier
   String? _vaultPin;
   bool get isVaultSetup => _vaultPin != null;
   bool isVaultLocked = true;
+  bool isAdultContentBlocked = false;
 
   DuckFlow flow = DuckFlow.idle;
   DuckTab tab = DuckTab.home;
@@ -470,6 +472,12 @@ class DuckDownloadsController extends ChangeNotifier
     lockedBrowserRequest = null;
 
     final cleanUrl = url.trim();
+    final isAdult = await _isAdultUrl(cleanUrl);
+    if (isAdult) {
+      isAdultContentBlocked = true;
+      notifyListeners();
+      throw Exception('BLOCKED_ADULT_CONTENT');
+    }
     final isPlaylist =
         cleanUrl.contains('list=') || cleanUrl.contains('/playlist');
     final lines = cleanUrl
@@ -1579,6 +1587,9 @@ class DuckDownloadsController extends ChangeNotifier
         .trim();
 
     final lower = cleaned.toLowerCase();
+    if (lower.contains('blocked_adult_content')) {
+      return 'Blocked: Adult Content is not allowed.';
+    }
 
     // 1. YouTube specific bot/sign-in errors
     if (lower.contains('sign in') || lower.contains('bot') || lower.contains('captcha') || lower.contains('confirm you are not')) {
@@ -1609,6 +1620,59 @@ class DuckDownloadsController extends ChangeNotifier
       return 'Download failed. Please try again.';
     }
     return cleaned;
+  }
+
+  Future<bool> _isAdultUrl(String url) async {
+    try {
+      final uri = Uri.parse(url.trim());
+      final host = uri.host;
+      if (host.isEmpty) return false;
+
+      // 1. Quick local keyword check for fast block
+      final lowerHost = host.toLowerCase();
+      final localKeywords = [
+        'porn', 'xxx', 'sex', 'nude', 'adult', 'camgirl', 'livecam', 
+        'hentai', 'xvideo', 'pornhub', 'xnxx', 'xhamster', 'redtube',
+        'youporn', 'chaturbate', 'rule34', 'onlyfans'
+      ];
+      for (final kw in localKeywords) {
+        if (lowerHost.contains(kw)) return true;
+      }
+
+      // 2. Query Cloudflare Families DoH API to dynamically check any adult domain
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 3);
+      final request = await client.getUrl(Uri.parse(
+        'https://family.cloudflare-dns.com/dns-query?name=${Uri.encodeComponent(host)}&type=A'
+      ));
+      request.headers.set('Accept', 'application/dns-json');
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final bodyText = await response.transform(utf8.decoder).join();
+        final data = jsonDecode(bodyText);
+        if (data is Map) {
+          final answers = data['Answer'];
+          if (answers is List) {
+            for (final answer in answers) {
+              if (answer is Map && answer['data'] == '0.0.0.0') {
+                return true; // Blocked by Cloudflare Families filter
+              }
+            }
+          }
+          final comment = data['Comment'];
+          if (comment is List) {
+            for (final c in comment) {
+              if (c.toString().toLowerCase().contains('filtered')) {
+                return true; // Filtered/Blocked
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Fallback to local check if DNS lookup fails
+    }
+    return false;
   }
 
   @override
