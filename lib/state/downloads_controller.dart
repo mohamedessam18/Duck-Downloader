@@ -711,6 +711,10 @@ class DuckDownloadsController extends ChangeNotifier
     } catch (error) {
       flow = DuckFlow.error;
       status = _cleanError(error);
+      if (_isLoginRequiredError(error.toString()) && !_justReturnedFromLockedBrowser) {
+        _requestLockedBrowser(media.url, _browserPlatformFor(media.url));
+        return;
+      }
     } finally {
       busy = false;
       notifyListeners();
@@ -1151,9 +1155,21 @@ class DuckDownloadsController extends ChangeNotifier
             }
 
             if (update.status == DownloadStatus.failed) {
+              final errText = update.error ?? '';
+              final isLoginRequired = _isLoginRequiredError(errText);
+
               await _saveItem(next.copyWith(status: DownloadStatus.failed));
               flow = DuckFlow.error;
-              status = _cleanError(update.error ?? 'Download failed.');
+              status = _cleanError(errText.isNotEmpty ? errText : 'Download failed.');
+
+              if (isLoginRequired && !_justReturnedFromLockedBrowser) {
+                _requestLockedBrowser(
+                  baseItem.url,
+                  _browserPlatformFor(baseItem.url),
+                );
+                return;
+              }
+
               unawaited(
                 _notifications.showDownloadFailed(
                   id: next.id.hashCode,
@@ -1662,12 +1678,28 @@ class DuckDownloadsController extends ChangeNotifier
     ).hasMatch(value.trim());
   }
 
+  bool _isLoginRequiredError(String error) {
+    final lower = error.toLowerCase();
+    return lower.contains('login') ||
+        lower.contains('sign in') ||
+        lower.contains('sign-in') ||
+        lower.contains('confirm you are not a bot') ||
+        lower.contains('captcha') ||
+        lower.contains('cookies') ||
+        lower.contains('private video') ||
+        lower.contains('requires authentication') ||
+        lower.contains('members-only') ||
+        lower.contains('membership') ||
+        lower.contains('joined');
+  }
+
   bool _shouldUseLockedBrowserFallback(String url, Object error) {
     // If we already tried the locked browser once, do NOT loop back into it.
     // Show an error instead so the user understands the server limitation.
     if (_justReturnedFromLockedBrowser) return false;
     final lowerUrl = url.toLowerCase();
-    return lowerUrl.contains('instagram.com') ||
+    
+    final isBrowserPlatform = lowerUrl.contains('instagram.com') ||
         lowerUrl.contains('threads.net') ||
         lowerUrl.contains('threads.com') ||
         lowerUrl.contains('x.com') ||
@@ -1676,6 +1708,11 @@ class DuckDownloadsController extends ChangeNotifier
         lowerUrl.contains('youtu.be') ||
         lowerUrl.contains('facebook.com') ||
         lowerUrl.contains('fb.watch');
+
+    if (isBrowserPlatform) return true;
+
+    // Check if error explicitly demands login or captcha for any platform
+    return _isLoginRequiredError(error.toString());
   }
 
   String _browserPlatformFor(String url) {
