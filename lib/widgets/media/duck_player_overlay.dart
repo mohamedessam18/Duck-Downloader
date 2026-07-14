@@ -299,23 +299,29 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
   /// Called when app lifecycle changes (foreground ↔ background / screen lock).
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
     super.didChangeAppLifecycleState(state);
 
     // Only applies to video playback
     if (!widget.item.isVideo) return;
 
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
-      // Delay slightly to check if we are entering Picture-in-Picture (PiP) mode
-      Future.delayed(const Duration(milliseconds: 250), () {
-        if (!mounted) return;
-        if (_isInPiP) {
-          debugPrint("App is in PiP mode, bypassing background audio handoff");
+    if (state == AppLifecycleState.paused) {
+      // Synchronously check from Android/iOS native side if we are currently in PiP mode
+      try {
+        final bool inPiP = await _channel.invokeMethod<bool>('isInPiP') ?? false;
+        if (inPiP) {
+          debugPrint("App is natively in PiP mode, bypassing background audio handoff");
           return;
         }
-        _handoffVideoAudioToBackground();
-      });
+      } catch (e) {
+        debugPrint("Error checking PiP mode: $e");
+      }
+
+      if (_isInPiP) {
+        debugPrint("App is in PiP mode, bypassing background audio handoff");
+        return;
+      }
+      _handoffVideoAudioToBackground();
     } else if (state == AppLifecycleState.resumed) {
       _resumeVideoFromBackground();
     }
@@ -343,18 +349,21 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     );
   }
 
-  /// Resumes the video player from the saved position after returning from background.
+  /// Resumes the video player from the current background audio position.
   Future<void> _resumeVideoFromBackground() async {
     if (!_backgroundHandoffActive) return;
     _backgroundHandoffActive = false;
 
+    // Get the current position from the background audio player
+    final currentPos = widget.controller.audioPlayer.position;
+
     // Stop background audio
     await widget.controller.stopBackgroundVideoAudio();
 
-    // Re-init video at saved position
+    // Re-init video at the current audio position
     final video = _video;
     if (video == null || !mounted) return;
-    await video.seekTo(_savedPositionForHandoff);
+    await video.seekTo(currentPos);
     await video.play();
     if (mounted) setState(() {});
   }

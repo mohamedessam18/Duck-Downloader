@@ -89,6 +89,14 @@ class MainActivity : AudioServiceActivity() {
                             result.error("pip_not_supported", "Android version does not support PiP.", null)
                         }
                     }
+                    "isInPiP" -> {
+                        val inPiP = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            isInPictureInPictureMode
+                        } else {
+                            false
+                        }
+                        result.success(inPiP)
+                    }
                     "setVideoPlaying" -> {
                         isVideoPlaying = call.argument<Boolean>("playing") ?: false
                         result.success(null)
