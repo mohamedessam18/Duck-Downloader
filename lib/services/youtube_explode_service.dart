@@ -174,56 +174,6 @@ class YouTubeExplodeService {
 
     final m4aPath = p.join(folder.path, _sanitizeFilename('$title.m4a'));
 
-    // ── Attempt 1: Native audio-only stream ──────────────────────────────────
-    if (manifest.audioOnly.isNotEmpty) {
-      final streamInfo = manifest.audioOnly.withHighestBitrate();
-      final tempExt = streamInfo.container.name;
-      final tempPath = p.join(folder.path, _sanitizeFilename('$title.temp.$tempExt'));
-
-      try {
-        final stream = _yt.videos.streamsClient.get(streamInfo).timeout(
-          const Duration(seconds: 6),
-          onTimeout: (sink) {
-            sink.addError(TimeoutException('Audio stream timed out. Switching to fallback.'));
-            sink.close();
-          },
-        );
-
-        final totalBytes = streamInfo.size.totalBytes;
-        int received = 0;
-
-        final sink = File(tempPath).openWrite();
-        try {
-          await for (final chunk in stream) {
-            sink.add(chunk);
-            received += chunk.length;
-            onProgress?.call(received, totalBytes);
-          }
-          await sink.flush();
-        } finally {
-          await sink.close();
-        }
-
-        // Transcode WebM/Opus or remux MP4 to M4A
-        onTranscoding?.call();
-        await transcodeToM4a(tempPath, m4aPath);
-
-        try {
-          await File(tempPath).delete();
-        } catch (_) {}
-
-        return m4aPath;
-      } catch (e) {
-        // Clean up temp file on failure
-        try {
-          if (File(tempPath).existsSync()) await File(tempPath).delete();
-        } catch (_) {}
-        // Fall through to Attempt 2
-        print('Native audio download failed/timed out: $e. Using muxed fallback...');
-      }
-    }
-
-    // ── Attempt 2: Muxed fallback (bulletproof) ──────────────────────────────
     if (manifest.muxed.isEmpty) {
       throw Exception('No streams found to extract audio.');
     }
