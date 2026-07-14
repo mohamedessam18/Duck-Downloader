@@ -506,13 +506,15 @@ void _showSettingToast(BuildContext context, String message, bool enabled) {
                 size: 22,
               ),
               const SizedBox(width: 12),
-              Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  letterSpacing: 0.3,
+              Flexible(
+                child: Text(
+                  message,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    letterSpacing: 0.3,
+                  ),
                 ),
               ),
             ],
