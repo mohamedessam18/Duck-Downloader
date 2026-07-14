@@ -2069,79 +2069,89 @@ class _LibraryViewState extends State<_LibraryView> {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                onPressed: () => widget.controller.popTabHistory(),
-                icon: Icon(
-                  Icons.arrow_back_ios_new,
-                  color: _gold,
-                  size: 24,
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  widget.title,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _text,
-                    fontSize: 24,
-                    letterSpacing: 6,
-                    fontWeight: FontWeight.w300,
-                  ),
-                ),
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_isImagesTab && _subTab != _LibrarySubTab.playlists)
+          SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: MediaQuery.sizeOf(context).width - 32,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
                     IconButton(
+                      onPressed: () => widget.controller.popTabHistory(),
                       icon: Icon(
-                        _useGridLayout ? Icons.view_list : Icons.grid_view,
+                        Icons.arrow_back_ios_new,
                         color: _gold,
                         size: 24,
                       ),
-                      tooltip: _useGridLayout ? 'List view' : 'Grid view',
-                      onPressed: () =>
-                          setState(() => _useGridLayout = !_useGridLayout),
                     ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.lock_outline,
-                      color: _gold,
-                      size: 24,
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _text,
+                          fontSize: 20,
+                          letterSpacing: 3,
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
                     ),
-                    onPressed: () {
-                      _showVaultPinDialog(
-                        context,
-                        widget.controller,
-                        onSuccess: () {
-                          Navigator.push(
-                            context,
-                            CupertinoPageRoute(
-                              builder: (context) =>
-                                  _SecureVaultView(controller: widget.controller),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_isImagesTab && _subTab != _LibrarySubTab.playlists)
+                          IconButton(
+                            icon: Icon(
+                              _useGridLayout ? Icons.view_list : Icons.grid_view,
+                              color: _gold,
+                              size: 24,
                             ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _AutoSaveToggleSwitch(controller: widget.controller),
-                ],
+                            tooltip: _useGridLayout ? 'List view' : 'Grid view',
+                            onPressed: () =>
+                                setState(() => _useGridLayout = !_useGridLayout),
+                          ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.lock_outline,
+                            color: _gold,
+                            size: 24,
+                          ),
+                          onPressed: () {
+                            _showVaultPinDialog(
+                              context,
+                              widget.controller,
+                              onSuccess: () {
+                                Navigator.push(
+                                  context,
+                                  CupertinoPageRoute(
+                                    builder: (context) =>
+                                        _SecureVaultView(controller: widget.controller),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _AutoSaveToggleSwitch(controller: widget.controller),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           _buildUnifiedSubTabBar(),
-          const SizedBox(height: 22),
+          const SizedBox(height: 10),
           Expanded(
             child: _subTab == _LibrarySubTab.playlists
                 ? _buildPlaylistsTab()
@@ -2431,7 +2441,7 @@ class _DownloadRow extends StatelessWidget {
                         : Icons.play_arrow,
                     radius: 8,
                   ),
-                  const SizedBox(width: 22),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,

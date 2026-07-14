@@ -143,6 +143,13 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             _showControls = true;
           }
         });
+      } else if (call.method == 'pipAction') {
+        final int controlType = call.arguments as int;
+        if (controlType == 1) {
+          _video?.play();
+        } else if (controlType == 2) {
+          _video?.pause();
+        }
       }
     });
 
@@ -656,62 +663,68 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                       right: 16,
                       child: SafeArea(
                         bottom: false,
-                        child: DuckLiquidGlassLayer(
-                          settings: DuckLiquidGlass.button(),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: SizedBox(
+                            width: MediaQuery.sizeOf(context).width - 32,
+                            child: DuckLiquidGlassLayer(
+                              settings: DuckLiquidGlass.button(),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  _buildCircularGlassButton(
-                                    child: const Icon(Icons.close, color: Colors.white, size: 22),
-                                    onPressed: widget.controller.closePlayer,
-                                    useOwnLayer: false,
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _buildCircularGlassButton(
+                                        child: const Icon(Icons.close, color: Colors.white, size: 22),
+                                        onPressed: widget.controller.closePlayer,
+                                        useOwnLayer: false,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _buildCapsuleGlassContainer(
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 20),
+                                              onPressed: _enterPiP,
+                                            ),
+                                            const SizedBox(width: 12),
+                                            IconButton(
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              icon: Icon(
+                                                _videoFit == BoxFit.contain ? Icons.fullscreen : Icons.fullscreen_exit,
+                                                color: Colors.white,
+                                                size: 20,
+                                              ),
+                                              onPressed: _toggleFit,
+                                            ),
+                                          ],
+                                        ),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                        height: 48,
+                                        useOwnLayer: false,
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(width: 8),
-                                  _buildCapsuleGlassContainer(
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(),
-                                          icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 20),
-                                          onPressed: _enterPiP,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        IconButton(
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(),
-                                          icon: Icon(
-                                            _videoFit == BoxFit.contain ? Icons.fullscreen : Icons.fullscreen_exit,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                          onPressed: _toggleFit,
-                                        ),
-                                      ],
+                                  _buildCircularGlassButton(
+                                    child: Icon(
+                                      _muted ? Icons.volume_off : Icons.volume_up,
+                                      color: Colors.white,
+                                      size: 22,
                                     ),
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                    height: 48,
+                                    onPressed: () {
+                                      _resetHideTimer();
+                                      _toggleMute();
+                                    },
                                     useOwnLayer: false,
                                   ),
                                 ],
                               ),
-                              _buildCircularGlassButton(
-                                child: Icon(
-                                  _muted ? Icons.volume_off : Icons.volume_up,
-                                  color: Colors.white,
-                                  size: 22,
-                                ),
-                                onPressed: () {
-                                  _resetHideTimer();
-                                  _toggleMute();
-                                },
-                                useOwnLayer: false,
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
@@ -720,61 +733,67 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     // Center Playback Control Row
                     if (!_isTrimmingMode)
                       Center(
-                        child: DuckLiquidGlassLayer(
-                          settings: DuckLiquidGlass.button(),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              _buildCircularGlassButton(
-                                size: 64,
-                                child: const Icon(Icons.replay_10, color: Colors.white, size: 28),
-                                onPressed: () {
-                                  _resetHideTimer();
-                                  _seekVideo(const Duration(seconds: -10));
-                                },
-                                useOwnLayer: false,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: SizedBox(
+                            width: MediaQuery.sizeOf(context).width - 32,
+                            child: DuckLiquidGlassLayer(
+                              settings: DuckLiquidGlass.button(),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  _buildCircularGlassButton(
+                                    size: 64,
+                                    child: const Icon(Icons.replay_10, color: Colors.white, size: 28),
+                                    onPressed: () {
+                                      _resetHideTimer();
+                                      _seekVideo(const Duration(seconds: -10));
+                                    },
+                                    useOwnLayer: false,
+                                  ),
+                                  const SizedBox(width: 32),
+                                  _buildCircularGlassButton(
+                                    size: 90,
+                                    child: Icon(
+                                      isCompleted
+                                          ? Icons.replay
+                                          : value.isPlaying
+                                          ? Icons.pause
+                                          : Icons.play_arrow,
+                                      color: Colors.white,
+                                      size: 44,
+                                    ),
+                                    onPressed: () {
+                                      _resetHideTimer();
+                                      if (isCompleted) {
+                                        video.seekTo(Duration.zero);
+                                        video.play();
+                                        _triggerPlayPauseOverlay(true);
+                                      } else {
+                                        if (value.isPlaying) {
+                                          video.pause();
+                                          _triggerPlayPauseOverlay(false);
+                                        } else {
+                                          video.play();
+                                          _triggerPlayPauseOverlay(true);
+                                        }
+                                      }
+                                    },
+                                    useOwnLayer: false,
+                                  ),
+                                  const SizedBox(width: 32),
+                                  _buildCircularGlassButton(
+                                    size: 64,
+                                    child: const Icon(Icons.forward_10, color: Colors.white, size: 28),
+                                    onPressed: () {
+                                      _resetHideTimer();
+                                      _seekVideo(const Duration(seconds: 10));
+                                    },
+                                    useOwnLayer: false,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 32),
-                              _buildCircularGlassButton(
-                                size: 90,
-                                child: Icon(
-                                  isCompleted
-                                      ? Icons.replay
-                                      : value.isPlaying
-                                      ? Icons.pause
-                                      : Icons.play_arrow,
-                                  color: Colors.white,
-                                  size: 44,
-                                ),
-                                onPressed: () {
-                                  _resetHideTimer();
-                                  if (isCompleted) {
-                                    video.seekTo(Duration.zero);
-                                    video.play();
-                                    _triggerPlayPauseOverlay(true);
-                                  } else {
-                                    if (value.isPlaying) {
-                                      video.pause();
-                                      _triggerPlayPauseOverlay(false);
-                                    } else {
-                                      video.play();
-                                      _triggerPlayPauseOverlay(true);
-                                    }
-                                  }
-                                },
-                                useOwnLayer: false,
-                              ),
-                              const SizedBox(width: 32),
-                              _buildCircularGlassButton(
-                                size: 64,
-                                child: const Icon(Icons.forward_10, color: Colors.white, size: 28),
-                                onPressed: () {
-                                  _resetHideTimer();
-                                  _seekVideo(const Duration(seconds: 10));
-                                },
-                                useOwnLayer: false,
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
@@ -793,75 +812,81 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                             if (!_isTrimmingMode)
                               Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                child: DuckLiquidGlassLayer(
-                                  settings: DuckLiquidGlass.button(),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      _buildCapsuleGlassContainer(
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            if (!kIsWeb) ...[
-                                              IconButton(
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                icon: const Icon(Icons.content_cut, color: Colors.white, size: 20),
-                                                onPressed: value.duration <= Duration.zero
-                                                    ? null
-                                                    : () {
-                                                        setState(() {
-                                                          _isTrimmingMode = true;
-                                                          _trimStart = 0.0;
-                                                          _trimEnd = value.duration.inSeconds.toDouble();
-                                                        });
-                                                      },
-                                              ),
-                                              const SizedBox(width: 16),
-                                            ],
-                                            IconButton(
-                                              padding: EdgeInsets.zero,
-                                              constraints: const BoxConstraints(),
-                                              icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 20),
-                                              onPressed: () {
-                                                widget.controller.closePlayer();
-                                                widget.controller.deleteDownload(widget.item);
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                        height: 48,
-                                        useOwnLayer: false,
-                                      ),
-                                      GestureDetector(
-                                        onTap: () {
-                                          _resetHideTimer();
-                                          _showSpeedSheet(context);
-                                        },
-                                        child: _buildCapsuleGlassContainer(
-                                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                                          height: 48,
-                                          useOwnLayer: false,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              const Icon(Icons.speed_rounded, color: Colors.white, size: 18),
-                                              const SizedBox(width: 6),
-                                              Text(
-                                                '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w700,
-                                                  letterSpacing: 0.3,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: SizedBox(
+                                    width: MediaQuery.sizeOf(context).width - 32,
+                                    child: DuckLiquidGlassLayer(
+                                      settings: DuckLiquidGlass.button(),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          _buildCapsuleGlassContainer(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (!kIsWeb) ...[
+                                                  IconButton(
+                                                    padding: EdgeInsets.zero,
+                                                    constraints: const BoxConstraints(),
+                                                    icon: const Icon(Icons.content_cut, color: Colors.white, size: 20),
+                                                    onPressed: value.duration <= Duration.zero
+                                                        ? null
+                                                        : () {
+                                                            setState(() {
+                                                              _isTrimmingMode = true;
+                                                              _trimStart = 0.0;
+                                                              _trimEnd = value.duration.inSeconds.toDouble();
+                                                            });
+                                                          },
+                                                  ),
+                                                  const SizedBox(width: 16),
+                                                ],
+                                                IconButton(
+                                                  padding: EdgeInsets.zero,
+                                                  constraints: const BoxConstraints(),
+                                                  icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 20),
+                                                  onPressed: () {
+                                                    widget.controller.closePlayer();
+                                                    widget.controller.deleteDownload(widget.item);
+                                                  },
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
+                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                            height: 48,
+                                            useOwnLayer: false,
                                           ),
-                                        ),
+                                          GestureDetector(
+                                            onTap: () {
+                                              _resetHideTimer();
+                                              _showSpeedSheet(context);
+                                            },
+                                            child: _buildCapsuleGlassContainer(
+                                              padding: const EdgeInsets.symmetric(horizontal: 14),
+                                              height: 48,
+                                              useOwnLayer: false,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.speed_rounded, color: Colors.white, size: 18),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 13,
+                                                      fontWeight: FontWeight.w700,
+                                                      letterSpacing: 0.3,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   ),
                                 ),
                               ),

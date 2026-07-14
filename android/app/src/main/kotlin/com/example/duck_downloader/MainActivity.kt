@@ -15,14 +15,32 @@ import java.io.File
 import java.io.FileInputStream
 import android.content.Intent
 import android.os.Bundle
+import android.app.PendingIntent
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.graphics.drawable.Icon
+import java.util.ArrayList
 
 class MainActivity : AudioServiceActivity() {
     private val channelName = "duck_downloader/media"
     private var methodChannel: MethodChannel? = null
     private var isVideoPlaying = false
 
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent == null) return
+            val action = intent.action
+            if ("ACTION_MEDIA_CONTROL" == action) {
+                val controlType = intent.getIntExtra("CONTROL_TYPE", 0)
+                methodChannel?.invokeMethod("pipAction", controlType)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        registerReceiver(pipReceiver, IntentFilter("ACTION_MEDIA_CONTROL"))
         handleIntent(intent)
     }
 
@@ -75,6 +93,7 @@ class MainActivity : AudioServiceActivity() {
                     "enterPiP" -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             try {
+                                updatePiPParams(isVideoPlaying)
                                 val params = android.app.PictureInPictureParams.Builder().build()
                                 val success = enterPictureInPictureMode(params)
                                 result.success(success)
@@ -99,6 +118,7 @@ class MainActivity : AudioServiceActivity() {
                     }
                     "setVideoPlaying" -> {
                         isVideoPlaying = call.argument<Boolean>("playing") ?: false
+                        updatePiPParams(isVideoPlaying)
                         result.success(null)
                     }
                     else -> result.notImplemented()
@@ -109,11 +129,55 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
+    private fun updatePiPParams(playing: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val actions = ArrayList<RemoteAction>()
+            val iconId = if (playing) {
+                android.R.drawable.ic_media_pause
+            } else {
+                android.R.drawable.ic_media_play
+            }
+            val title = if (playing) "Pause" else "Play"
+            val controlType = if (playing) 2 else 1
+            
+            val intent = Intent("ACTION_MEDIA_CONTROL").putExtra("CONTROL_TYPE", controlType)
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                controlType,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            val action = RemoteAction(
+                Icon.createWithResource(this, iconId),
+                title,
+                title,
+                pendingIntent
+            )
+            actions.add(action)
+            
+            val params = android.app.PictureInPictureParams.Builder()
+                .setActions(actions)
+                .build()
+            setPictureInPictureParams(params)
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            unregisterReceiver(pipReceiver)
+        } catch (e: Exception) {
+            // Ignore
+        }
+        super.onDestroy()
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (isVideoPlaying) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 try {
+                    updatePiPParams(true)
                     val params = android.app.PictureInPictureParams.Builder().build()
                     enterPictureInPictureMode(params)
                 } catch (e: Exception) {
