@@ -2110,6 +2110,11 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void _initSharingListener() {
+    // Skip sharing listener initialization in unit test environment to avoid MissingPluginException
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return;
+    }
+
     // For sharing while app is running/backgrounded
     _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen((value) {
       if (value.isNotEmpty) {
