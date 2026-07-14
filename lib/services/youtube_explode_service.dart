@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -12,9 +13,12 @@ import '../models/download_models.dart';
 /// Extracts YouTube video metadata and downloads streams **directly on the
 /// client device**, bypassing the backend server entirely.
 ///
-/// Audio downloads use [YoutubeExplode.videos.streamsClient.get()] which
-/// handles YouTube auth, headers and cookies internally — far more reliable
-/// than raw HTTP requests to the signed stream URL.
+/// Audio downloads use a robust hybrid strategy:
+/// 1. Attempt native audio-only stream download.
+/// 2. If it hangs (no chunks received within 6s) or gets 403 Forbidden, it
+///    automatically falls back to downloading the lowest-resolution muxed MP4
+///    stream (which is browser-friendly and never blocked) and extracts the
+///    audio track instantly using FFmpeg.
 class YouTubeExplodeService {
   YouTubeExplodeService() : _yt = YoutubeExplode(), _dio = Dio();
 
@@ -148,13 +152,12 @@ class YouTubeExplodeService {
     );
   }
 
-  // ── Audio download (native) ─────────────────────────────────────────────────
+  // ── Audio download (robust hybrid) ──────────────────────────────────────────
 
-  /// Downloads the best YouTube audio stream using youtube_explode_dart's
-  /// **native streaming client** — not raw HTTP — and transcodes to M4A.
-  ///
-  /// Re-fetches a fresh stream manifest at download time so URLs are never
-  /// stale. Progress is reported in bytes.
+  /// Downloads a YouTube audio track with an automatic fallback mechanism:
+  /// 1. Try downloading the native audio-only stream.
+  /// 2. If it hangs or gets a 403, download the lowest quality muxed stream (fast & unblocked)
+  ///    and extract the audio via FFmpeg.
   Future<String> downloadAudioNative({
     required String videoUrl,
     required String title,
@@ -164,46 +167,93 @@ class YouTubeExplodeService {
     final videoId = VideoId.parseVideoId(videoUrl);
     if (videoId == null) throw Exception('Invalid YouTube video URL');
 
-    // Re-fetch fresh manifest so signed URLs are not expired
     final manifest = await _yt.videos.streamsClient.getManifest(videoId);
-    final streamInfo = manifest.audioOnly.withHighestBitrate();
-
     final root = await getApplicationDocumentsDirectory();
     final folder = Directory(p.join(root.path, 'Duck Downloader', 'Audios'));
     await folder.create(recursive: true);
 
-    final tempExt = streamInfo.container.name; // 'webm' or 'mp4'
-    final tempPath =
-        p.join(folder.path, _sanitizeFilename('$title.$tempExt'));
+    final m4aPath = p.join(folder.path, _sanitizeFilename('$title.m4a'));
 
-    // ── Write stream chunks to file ──────────────────────────────────────────
-    // Uses youtube_explode_dart's internal HTTP client which handles all
-    // YouTube auth headers, cookies and redirects correctly.
-    final stream = _yt.videos.streamsClient.get(streamInfo);
-    final totalBytes = streamInfo.size.totalBytes;
-    int received = 0;
+    // ── Attempt 1: Native audio-only stream ──────────────────────────────────
+    if (manifest.audioOnly.isNotEmpty) {
+      final streamInfo = manifest.audioOnly.withHighestBitrate();
+      final tempExt = streamInfo.container.name;
+      final tempPath = p.join(folder.path, _sanitizeFilename('$title.temp.$tempExt'));
 
-    final sink = File(tempPath).openWrite();
-    try {
-      await for (final chunk in stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(received, totalBytes);
+      try {
+        final stream = _yt.videos.streamsClient.get(streamInfo).timeout(
+          const Duration(seconds: 6),
+          onTimeout: (sink) {
+            sink.addError(TimeoutException('Audio stream timed out. Switching to fallback.'));
+            sink.close();
+          },
+        );
+
+        final totalBytes = streamInfo.size.totalBytes;
+        int received = 0;
+
+        final sink = File(tempPath).openWrite();
+        try {
+          await for (final chunk in stream) {
+            sink.add(chunk);
+            received += chunk.length;
+            onProgress?.call(received, totalBytes);
+          }
+          await sink.flush();
+        } finally {
+          await sink.close();
+        }
+
+        // Transcode WebM/Opus or remux MP4 to M4A
+        onTranscoding?.call();
+        await transcodeToM4a(tempPath, m4aPath);
+
+        try {
+          await File(tempPath).delete();
+        } catch (_) {}
+
+        return m4aPath;
+      } catch (e) {
+        // Clean up temp file on failure
+        try {
+          if (File(tempPath).existsSync()) await File(tempPath).delete();
+        } catch (_) {}
+        // Fall through to Attempt 2
+        print('Native audio download failed/timed out: $e. Using muxed fallback...');
       }
-      await sink.flush();
-    } finally {
-      await sink.close();
     }
 
-    // ── Transcode to M4A ─────────────────────────────────────────────────────
-    onTranscoding?.call();
-    final m4aPath =
-        p.join(folder.path, _sanitizeFilename('$title.m4a'));
-    await transcodeToM4a(tempPath, m4aPath);
+    // ── Attempt 2: Muxed fallback (bulletproof) ──────────────────────────────
+    if (manifest.muxed.isEmpty) {
+      throw Exception('No streams found to extract audio.');
+    }
 
-    // Clean up temp file
+    // Pick the lowest resolution muxed stream to minimize download size
+    final muxedInfo = manifest.muxed.sortByVideoQuality().first;
+    final tempMuxedPath = p.join(folder.path, _sanitizeFilename('$title.temp.mp4'));
+
+    await _dio.download(
+      muxedInfo.url.toString(),
+      tempMuxedPath,
+      onReceiveProgress: onProgress,
+      options: Options(
+        headers: {
+          'Referer': 'https://www.youtube.com/',
+          'Origin': 'https://www.youtube.com',
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      ),
+    );
+
+    // Extract audio track from temp video file
+    onTranscoding?.call();
+    await transcodeToM4a(tempMuxedPath, m4aPath);
+
+    // Clean up temp video file
     try {
-      await File(tempPath).delete();
+      await File(tempMuxedPath).delete();
     } catch (_) {}
 
     return m4aPath;
@@ -213,8 +263,6 @@ class YouTubeExplodeService {
 
   /// Downloads a video stream URL directly to local storage using Dio.
   /// For audio, prefer [downloadAudioNative] instead.
-  ///
-  /// Returns the local file path.
   Future<String> downloadStream({
     required String streamUrl,
     required String title,
