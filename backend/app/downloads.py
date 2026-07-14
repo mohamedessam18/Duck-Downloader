@@ -881,26 +881,26 @@ class DownloadManager:
             return "bestaudio/best"
 
         has_ffmpeg = shutil.which("ffmpeg") is not None
-        if not has_ffmpeg:
-            if quality:
-                numeric = "".join(ch for ch in quality if ch.isdigit())
-                if numeric:
+        if quality:
+            numeric = "".join(ch for ch in quality if ch.isdigit())
+            if numeric:
+                if has_ffmpeg:
+                    return (
+                        f"bestvideo[height<={numeric}]+bestaudio/"
+                        f"best[height<={numeric}]/"
+                        f"best"
+                    )
+                else:
                     return (
                         f"best[height<={numeric}][ext=mp4]/"
                         f"best[height<={numeric}]/"
                         f"best"
                     )
-            return "best[ext=mp4]/best"
 
-        if quality:
-            numeric = "".join(ch for ch in quality if ch.isdigit())
-            if numeric:
-                return (
-                    f"bestvideo[height<={numeric}][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
-                    f"best[height<={numeric}][ext=mp4]/"
-                    f"bestvideo[height<={numeric}]+bestaudio/best[height<={numeric}]/best"
-                )
-        return "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best"
+        if has_ffmpeg:
+            return "bestvideo+bestaudio/best"
+        return "best[ext=mp4]/best"
+
 
     async def _handle_ytdlp_line(self, state: DownloadState, line: str) -> None:
         if state.cancel_requested or state.pause_requested:
