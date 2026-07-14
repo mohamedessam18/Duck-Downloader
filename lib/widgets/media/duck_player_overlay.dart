@@ -307,7 +307,15 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      _handoffVideoAudioToBackground();
+      // Delay slightly to check if we are entering Picture-in-Picture (PiP) mode
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (!mounted) return;
+        if (_isInPiP) {
+          debugPrint("App is in PiP mode, bypassing background audio handoff");
+          return;
+        }
+        _handoffVideoAudioToBackground();
+      });
     } else if (state == AppLifecycleState.resumed) {
       _resumeVideoFromBackground();
     }
@@ -316,6 +324,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   /// Saves the current video position and hands audio off to just_audio_background
   /// so the sound continues while the screen is locked.
   void _handoffVideoAudioToBackground() {
+    if (_isInPiP) return;
     final video = _video;
     if (video == null || !video.value.isInitialized) return;
     if (!video.value.isPlaying) return; // only if actually playing
