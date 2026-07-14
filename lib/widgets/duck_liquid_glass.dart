@@ -116,27 +116,34 @@ class DuckFrostedSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clipper = clipOval
-        ? ClipOval(child: _buildFiltered())
+        ? ClipOval(child: _buildFiltered(context))
         : ClipRRect(
             borderRadius: BorderRadius.circular(borderRadius),
-            child: _buildFiltered(),
+            child: _buildFiltered(context),
           );
     return clipper;
   }
 
-  Widget _buildFiltered() {
+  Widget _buildFiltered(BuildContext context) {
+    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+    final content = DecoratedBox(
+      decoration: BoxDecoration(
+        color: color,
+        gradient: gradient,
+        shape: clipOval ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: clipOval ? null : BorderRadius.circular(borderRadius),
+        border: borderColor != null ? Border.all(color: borderColor!) : null,
+      ),
+      child: child,
+    );
+
+    if (isAndroid) {
+      return content;
+    }
+
     return BackdropFilter(
       filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: color,
-          gradient: gradient,
-          shape: clipOval ? BoxShape.circle : BoxShape.rectangle,
-          borderRadius: clipOval ? null : BorderRadius.circular(borderRadius),
-          border: borderColor != null ? Border.all(color: borderColor!) : null,
-        ),
-        child: child,
-      ),
+      child: content,
     );
   }
 }
