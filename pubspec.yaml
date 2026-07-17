@@ -27,11 +27,15 @@ dependencies:
   permission_handler: ^11.3.1
   photo_view: ^0.15.0
   just_audio_background: ^0.0.1-beta.17
-  ffmpeg_kit_flutter_new_min: ^3.3.2
+  ffmpeg_kit_flutter_new: ^4.5.1
   liquid_glass_plus: ^0.3.2
   google_mobile_ads: ^5.1.0
   youtube_explode_dart: ^3.1.0
   receive_sharing_intent: 1.8.1
+  local_auth: ^2.2.0
+  file_picker: ^8.0.0
+  camera: ^0.10.5+9
+  wakelock_plus: ^1.5.2
 
 dev_dependencies:
   flutter_test:

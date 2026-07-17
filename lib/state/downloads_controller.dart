@@ -22,6 +22,12 @@ import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
 import '../services/trim_service.dart';
 import '../services/youtube_explode_service.dart';
+import '../services/vault_encryption_service.dart';
+import '../services/camera_service.dart';
+import '../services/conversion_service.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class DuckDownloadsController extends ChangeNotifier
     with WidgetsBindingObserver {
@@ -52,6 +58,8 @@ class DuckDownloadsController extends ChangeNotifier
     enableClipboardDetection = _store.readEnableClipboardDetection();
     _playlists = _store.readPlaylists();
     _vaultPin = _store.readVaultPin();
+    _decoyVaultPin = _store.readDecoyVaultPin();
+    _biometricEnabled = _store.readBiometricEnabled();
     premium.addListener(_premiumChanged);
     if (initializePremium) {
       unawaited(premium.initialize());
@@ -132,8 +140,16 @@ class DuckDownloadsController extends ChangeNotifier
   List<DownloadItem> _downloads = [];
   List<Playlist> _playlists = [];
   String? _vaultPin;
+  String? _decoyVaultPin;
+  bool _biometricEnabled = false;
   bool get isVaultSetup => _vaultPin != null;
+  bool get isDecoyVaultSetup => _decoyVaultPin != null;
+  bool get biometricEnabled => _biometricEnabled;
   bool isVaultLocked = true;
+  bool isDecoySession = false;
+  int _failedPinAttempts = 0;
+  DownloadItem? lastDownloadedItem;
+  bool downloadDirectToVault = false;
   bool isAdultContentBlocked = false;
 
   DuckFlow flow = DuckFlow.idle;
@@ -242,13 +258,18 @@ class DuckDownloadsController extends ChangeNotifier
   List<DownloadItem> get videos => _completed(DownloadType.video);
   List<DownloadItem> get audios => _completed(DownloadType.audio);
   List<DownloadItem> get images => _completed(DownloadType.image);
-  List<DownloadItem> get privateDownloads =>
-      _downloads
-          .where(
-            (item) => item.isPrivate && item.status == DownloadStatus.completed,
-          )
-          .toList()
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  List<DownloadItem> get privateDownloads {
+    if (isVaultLocked || isDecoySession) {
+      return [];
+    }
+    final list = _downloads
+        .where(
+          (item) => item.isPrivate && item.status == DownloadStatus.completed,
+        )
+        .toList();
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
 
   List<DownloadItem> get activeDownloads {
     final items =
@@ -312,8 +333,21 @@ class DuckDownloadsController extends ChangeNotifier
   bool checkVaultPin(String pin) {
     if (pin == _vaultPin) {
       isVaultLocked = false;
+      isDecoySession = false;
+      _failedPinAttempts = 0;
       notifyListeners();
       return true;
+    } else if (pin == _decoyVaultPin) {
+      isVaultLocked = false;
+      isDecoySession = true;
+      _failedPinAttempts = 0;
+      notifyListeners();
+      return true;
+    }
+    _failedPinAttempts++;
+    if (_failedPinAttempts >= 3) {
+      _failedPinAttempts = 0;
+      unawaited(VaultCameraService.captureIntruderSelfie());
     }
     return false;
   }
@@ -324,8 +358,21 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
+  Future<void> setDecoyVaultPin(String pin) async {
+    _decoyVaultPin = pin;
+    await _store.writeDecoyVaultPin(pin);
+    notifyListeners();
+  }
+
+  Future<void> toggleBiometricEnabled(bool enabled) async {
+    _biometricEnabled = enabled;
+    await _store.writeBiometricEnabled(enabled);
+    notifyListeners();
+  }
+
   void lockVault() {
     isVaultLocked = true;
+    isDecoySession = false;
     notifyListeners();
   }
 
@@ -343,9 +390,10 @@ class DuckDownloadsController extends ChangeNotifier
     final filename = item.title.toLowerCase().endsWith('.$ext')
         ? item.title
         : '${item.title}.$ext';
-    final vaultPath = await _files.moveFileToVault(
+    
+    final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
       currentPath: path,
-      filename: filename,
+      originalFilename: filename,
     );
     final next = item.copyWith(isPrivate: true, filePath: vaultPath);
     await _saveItem(next);
@@ -362,15 +410,221 @@ class DuckDownloadsController extends ChangeNotifier
     final filename = item.title.toLowerCase().endsWith('.$ext')
         ? item.title
         : '${item.title}.$ext';
-    final destPath = await _files.moveFileFromVault(
+    
+    final destPath = await VaultEncryptionService.decryptAndMoveFromVault(
       currentPath: path,
-      filename: filename,
+      originalFilename: filename,
       type: item.type,
     );
     final next = item.copyWith(isPrivate: false, filePath: destPath);
     await _saveItem(next);
     status = 'Restored from Secure Vault';
     notifyListeners();
+  }
+
+  Future<void> importLocalFileToVault(String localPath, DownloadType type) async {
+    final file = File(localPath);
+    if (!await file.exists()) throw Exception('File does not exist');
+    final filename = p.basename(localPath);
+    final title = p.basenameWithoutExtension(localPath);
+
+    final root = await getTemporaryDirectory();
+    final tempPath = p.join(root.path, filename);
+    await file.copy(tempPath);
+
+    final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+      currentPath: tempPath,
+      originalFilename: filename,
+    );
+
+    final item = DownloadItem(
+      id: 'local_${DateTime.now().millisecondsSinceEpoch}',
+      title: title,
+      url: 'file://$localPath',
+      platform: 'Local Storage',
+      type: type,
+      status: DownloadStatus.completed,
+      progress: 100,
+      isPrivate: true,
+      filePath: vaultPath,
+      createdAt: DateTime.now(),
+      favorite: false,
+    );
+
+    await _saveItem(item);
+
+    try {
+      await file.delete();
+    } catch (_) {}
+
+    notifyListeners();
+  }
+
+  Future<String> _getEffectiveInputPath(DownloadItem item) async {
+    final path = item.filePath;
+    if (path == null) throw Exception('File path is null.');
+    if (item.isPrivate) {
+      String ext = 'mp4';
+      if (item.title.toLowerCase().contains('.m4a')) {
+        ext = 'm4a';
+      } else if (item.title.toLowerCase().contains('.mp3')) {
+        ext = 'mp3';
+      }
+      return await VaultEncryptionService.getDecryptedTempPath(
+        vaultPath: path,
+        originalFilename: 'temp_input.$ext',
+      );
+    }
+    return path;
+  }
+
+  Future<void> convertVideoToAudio(DownloadItem item, String format, int bitrate) async {
+    final originalPath = item.filePath;
+    if (originalPath == null) throw Exception('Video file path is empty.');
+
+    busy = true;
+    flow = DuckFlow.extracting;
+    status = 'Converting video to audio...';
+    notifyListeners();
+
+    String? tempDecryptedPath;
+    try {
+      final inputPath = await _getEffectiveInputPath(item);
+      if (item.isPrivate) {
+        tempDecryptedPath = inputPath;
+      }
+
+      final audioPath = await ConversionService.convertVideoToAudio(
+        inputPath: inputPath,
+        format: format,
+        bitrate: bitrate,
+      );
+
+      final audioItem = DownloadItem(
+        id: 'conv_${DateTime.now().millisecondsSinceEpoch}',
+        title: '${item.title} (Audio)',
+        url: item.url,
+        platform: item.platform,
+        thumbnail: item.thumbnail,
+        quality: '${bitrate}kbps',
+        type: DownloadType.audio,
+        status: DownloadStatus.completed,
+        progress: 100,
+        createdAt: DateTime.now(),
+        filePath: audioPath,
+        isPrivate: item.isPrivate,
+        favorite: false,
+      );
+
+      if (item.isPrivate) {
+        final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+          currentPath: audioPath,
+          originalFilename: p.basename(audioPath),
+        );
+        final finalAudioItem = audioItem.copyWith(filePath: vaultPath);
+        await _saveItem(finalAudioItem);
+      } else {
+        await _saveItem(audioItem);
+      }
+
+      flow = DuckFlow.success;
+      status = 'Conversion complete!';
+      unawaited(_notifications.showDownloadComplete(
+        id: audioItem.id.hashCode,
+        title: audioItem.title,
+        type: 'Audio',
+        downloadId: audioItem.id,
+      ));
+    } catch (e) {
+      flow = DuckFlow.error;
+      status = e.toString().replaceAll('Exception: ', '');
+    } finally {
+      if (tempDecryptedPath != null) {
+        try {
+          await File(tempDecryptedPath).delete();
+        } catch (_) {}
+      }
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> createGifFromVideo(DownloadItem item, double startTime, double duration, int width) async {
+    final originalPath = item.filePath;
+    if (originalPath == null) throw Exception('Video file path is empty.');
+
+    busy = true;
+    flow = DuckFlow.extracting;
+    status = 'Creating GIF clip...';
+    notifyListeners();
+
+    String? tempDecryptedPath;
+    try {
+      final inputPath = await _getEffectiveInputPath(item);
+      if (item.isPrivate) {
+        tempDecryptedPath = inputPath;
+      }
+
+      final gifPath = await ConversionService.createGifFromVideo(
+        inputPath: inputPath,
+        startTime: startTime,
+        duration: duration,
+        width: width,
+      );
+
+      final gifItem = DownloadItem(
+        id: 'gif_${DateTime.now().millisecondsSinceEpoch}',
+        title: '${item.title} (Clip)',
+        url: item.url,
+        platform: item.platform,
+        thumbnail: item.thumbnail,
+        quality: '${width}px',
+        type: DownloadType.image,
+        status: DownloadStatus.completed,
+        progress: 100,
+        createdAt: DateTime.now(),
+        filePath: gifPath,
+        isPrivate: item.isPrivate,
+        favorite: false,
+      );
+
+      if (item.isPrivate) {
+        final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+          currentPath: gifPath,
+          originalFilename: p.basename(gifPath),
+        );
+        final finalGifItem = gifItem.copyWith(filePath: vaultPath);
+        await _saveItem(finalGifItem);
+      } else {
+        await _saveItem(gifItem);
+      }
+
+      flow = DuckFlow.success;
+      status = 'GIF created successfully!';
+      unawaited(_notifications.showDownloadComplete(
+        id: gifItem.id.hashCode,
+        title: gifItem.title,
+        type: 'Image',
+        downloadId: gifItem.id,
+      ));
+    } catch (e) {
+      flow = DuckFlow.error;
+      status = e.toString().replaceAll('Exception: ', '');
+    } finally {
+      if (tempDecryptedPath != null) {
+        try {
+          await File(tempDecryptedPath).delete();
+        } catch (_) {}
+      }
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  void shareLastDownloadedItem() {
+    if (lastDownloadedItem != null && lastDownloadedItem!.filePath != null) {
+      _files.shareFile(lastDownloadedItem!.filePath);
+    }
   }
 
   Future<void> createPlaylist(String name) async {
@@ -475,6 +729,7 @@ class DuckDownloadsController extends ChangeNotifier
     batchTitle = null;
     batchPlatform = null;
     lockedBrowserRequest = null;
+    lastDownloadedItem = null;
 
     final cleanUrl = url.trim();
     final isAdult = await _isAdultUrl(cleanUrl);
@@ -729,6 +984,7 @@ class DuckDownloadsController extends ChangeNotifier
         status: DownloadStatus.queued,
         progress: 0,
         favorite: false,
+        isPrivate: downloadDirectToVault,
       );
       await _saveItem(item);
       activeId = id;
@@ -790,6 +1046,7 @@ class DuckDownloadsController extends ChangeNotifier
       status: DownloadStatus.downloading,
       progress: 0,
       favorite: false,
+      isPrivate: downloadDirectToVault,
     );
     await _saveItem(item);
     activeId = itemId;
@@ -846,20 +1103,34 @@ class DuckDownloadsController extends ChangeNotifier
         );
       }
 
-      item = item.copyWith(
-        filePath: filePath,
-        progress: 100,
-        status: DownloadStatus.completed,
-      );
-      await _saveItem(item);
+      if (item.isPrivate) {
+        final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+          currentPath: filePath,
+          originalFilename: p.basename(filePath),
+        );
+        item = item.copyWith(
+          filePath: vaultPath,
+          progress: 100,
+          status: DownloadStatus.completed,
+        );
+        await _saveItem(item);
+      } else {
+        item = item.copyWith(
+          filePath: filePath,
+          progress: 100,
+          status: DownloadStatus.completed,
+        );
+        await _saveItem(item);
 
-      if (item.isVideo && autoSaveVideos) {
-        item = await _trySaveVideoAfterDownload(item);
+        if (autoSaveVideos) {
+          item = await _trySaveMediaAfterDownload(item);
+        }
       }
 
+      lastDownloadedItem = item;
       flow = DuckFlow.success;
-      status = item.isVideo && item.savedToGallery
-          ? 'Download complete and saved to gallery'
+      status = ((item.isVideo && item.savedToGallery) || (item.isAudio && item.savedToMusic))
+          ? 'Download complete and saved externally'
           : 'Download complete';
 
       unawaited(_notifications.showDownloadComplete(
@@ -971,8 +1242,8 @@ class DuckDownloadsController extends ChangeNotifier
         );
         await _saveItem(item);
 
-        if (item.isVideo && autoSaveVideos) {
-          item = await _trySaveVideoAfterDownload(item);
+        if (autoSaveVideos) {
+          item = await _trySaveMediaAfterDownload(item);
         }
 
         unawaited(_notifications.showDownloadComplete(
@@ -1136,18 +1407,30 @@ class DuckDownloadsController extends ChangeNotifier
                             : 'mp4'}',
                     type: baseItem.type,
                   );
-                  next = next.copyWith(
-                    filePath: filePath,
-                    progress: 100,
-                    status: DownloadStatus.completed,
-                  );
-                  await _saveItem(next);
-                  if (next.isVideo && autoSaveVideos) {
-                    next = await _trySaveVideoAfterDownload(next);
+                  if (next.isPrivate) {
+                    final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+                      currentPath: filePath,
+                      originalFilename: p.basename(filePath),
+                    );
+                    next = next.copyWith(
+                      filePath: vaultPath,
+                      progress: 100,
+                      status: DownloadStatus.completed,
+                    );
+                    await _saveItem(next);
+                  } else {
+                    next = next.copyWith(
+                      filePath: filePath,
+                      progress: 100,
+                      status: DownloadStatus.completed,
+                    );
+                    await _saveItem(next);
+                    if (autoSaveVideos) {
+                      next = await _trySaveMediaAfterDownload(next);
+                    }
                   }
-                  if (next.type == DownloadType.image) {
-                    next = await _trySaveImageAfterDownload(next);
-                  }
+
+                  lastDownloadedItem = next;
                   metadata = null;
                   flow = DuckFlow.success;
                   status = next.externalSaveError == null
@@ -1237,25 +1520,20 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
-  Future<DownloadItem> _trySaveVideoAfterDownload(DownloadItem item) async {
+  Future<DownloadItem> _trySaveMediaAfterDownload(DownloadItem item) async {
     try {
-      return await _saveVideoItem(item);
+      if (item.isVideo) {
+        return await _saveVideoItem(item);
+      } else if (item.isAudio) {
+        return await _saveAudioItem(item);
+      } else if (item.type == DownloadType.image) {
+        return await _saveImageItem(item);
+      }
+      return item;
     } catch (error) {
       final next = item.copyWith(
         savedToGallery: false,
-        externalSaveError: _cleanError(error),
-      );
-      await _saveItem(next);
-      return next;
-    }
-  }
-
-  Future<DownloadItem> _trySaveImageAfterDownload(DownloadItem item) async {
-    try {
-      return await _saveImageItem(item);
-    } catch (error) {
-      final next = item.copyWith(
-        savedToGallery: false,
+        savedToMusic: false,
         externalSaveError: _cleanError(error),
       );
       await _saveItem(next);
@@ -1299,51 +1577,108 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  Future<DownloadItem> _saveVideoItem(DownloadItem item) async {
+  Future<Map<String, String>> _getEffectivePathAndFileName(DownloadItem item) async {
     final path = item.filePath;
-    if (path == null) throw Exception('Video file is not available locally.');
-    await _mediaSaver.saveVideo(path: path, filename: _fileNameFor(item));
+    if (path == null) throw Exception('File is not available.');
+
+    String fileName = _fileNameFor(item);
+    String effectivePath = path;
+
+    if (item.isPrivate) {
+      effectivePath = await VaultEncryptionService.getDecryptedTempPath(
+        vaultPath: path,
+        originalFilename: fileName,
+      );
+    }
+    return {
+      'path': effectivePath,
+      'filename': fileName,
+    };
+  }
+
+  Future<DownloadItem> _saveVideoItem(DownloadItem item) async {
+    final info = await _getEffectivePathAndFileName(item);
+    final path = info['path']!;
+    final filename = info['filename']!;
+    try {
+      await _mediaSaver.saveVideo(path: path, filename: filename);
+    } finally {
+      if (item.isPrivate) {
+        try {
+          await File(path).delete();
+        } catch (_) {}
+      }
+    }
     final next = item.copyWith(savedToGallery: true, externalSaveError: null);
     await _saveItem(next);
     return next;
   }
 
   Future<DownloadItem> _saveAudioItem(DownloadItem item) async {
-    final path = item.filePath;
-    if (path == null) throw Exception('Audio file is not available locally.');
-    await _mediaSaver.saveAudio(
-      path: path,
-      filename: _fileNameFor(item),
-      type: item.type,
-    );
+    final info = await _getEffectivePathAndFileName(item);
+    final path = info['path']!;
+    final filename = info['filename']!;
+    try {
+      await _mediaSaver.saveAudio(
+        path: path,
+        filename: filename,
+        type: item.type,
+      );
+    } finally {
+      if (item.isPrivate) {
+        try {
+          await File(path).delete();
+        } catch (_) {}
+      }
+    }
     final next = item.copyWith(savedToMusic: true, externalSaveError: null);
     await _saveItem(next);
     return next;
   }
 
   Future<DownloadItem> _saveImageItem(DownloadItem item) async {
-    final path = item.filePath;
-    if (path == null) throw Exception('Image file is not available locally.');
+    final info = await _getEffectivePathAndFileName(item);
+    final path = info['path']!;
+    final filename = info['filename']!;
 
-    final hasPerm = await _permissions.hasMediaImagesPermission();
-    if (!hasPerm) {
-      final granted = await _permissions.requestMediaImagesPermission();
-      if (!granted) {
-        throw Exception('Storage permission is required to save images.');
-      }
-    }
-
-    final ext = item.filePath!.split('.').last.toLowerCase();
+    final ext = filename.split('.').last.toLowerCase();
     final mimeType = ext == 'png'
         ? 'image/png'
         : ext == 'webp'
         ? 'image/webp'
+        : ext == 'gif'
+        ? 'image/gif'
         : 'image/jpeg';
-    await _mediaSaver.saveImage(
-      path: path,
-      filename: _fileNameFor(item),
-      mimeType: mimeType,
-    );
+
+    try {
+      try {
+        await _mediaSaver.saveImage(
+          path: path,
+          filename: filename,
+          mimeType: mimeType,
+        );
+      } catch (e) {
+        // Fallback for older Android devices or strict security policies: request permission and retry
+        final hasPerm = await _permissions.hasMediaImagesPermission();
+        if (!hasPerm) {
+          final granted = await _permissions.requestMediaImagesPermission();
+          if (!granted) {
+            throw Exception('Storage permission is required to save images: $e');
+          }
+        }
+        await _mediaSaver.saveImage(
+          path: path,
+          filename: filename,
+          mimeType: mimeType,
+        );
+      }
+    } finally {
+      if (item.isPrivate) {
+        try {
+          await File(path).delete();
+        } catch (_) {}
+      }
+    }
     final next = item.copyWith(savedToGallery: true, externalSaveError: null);
     await _saveItem(next);
     return next;
@@ -1351,15 +1686,44 @@ class DuckDownloadsController extends ChangeNotifier
 
   String _fileNameFor(DownloadItem item) {
     if (item.type == DownloadType.image) {
-      final ext = item.filePath?.split('.').last ?? 'jpg';
-      return item.title.toLowerCase().endsWith('.$ext')
-          ? item.title
-          : '${item.title}.$ext';
+      String ext = 'jpg';
+      if (item.title.toLowerCase().contains('.png')) {
+        ext = 'png';
+      } else if (item.title.toLowerCase().contains('.webp')) {
+        ext = 'webp';
+      } else if (item.title.toLowerCase().contains('.gif')) {
+        ext = 'gif';
+      } else if (!item.isPrivate) {
+        final pathExt = item.filePath?.split('.').last ?? 'jpg';
+        if (pathExt != 'enc') ext = pathExt;
+      }
+      
+      final cleanTitle = item.title
+          .replaceAll(RegExp(r'\.(jpg|jpeg|png|webp|gif)$', caseSensitive: false), '');
+      return '$cleanTitle.$ext';
     }
-    final ext = item.isAudio ? 'mp3' : 'mp4';
-    return item.title.toLowerCase().endsWith('.$ext')
-        ? item.title
-        : '${item.title}.$ext';
+    
+    if (item.isAudio) {
+      String ext = 'mp3';
+      if (item.title.toLowerCase().contains('.m4a')) {
+        ext = 'm4a';
+      } else if (!item.isPrivate) {
+        final pathExt = item.filePath?.split('.').last ?? 'mp3';
+        if (pathExt != 'enc') ext = pathExt;
+      }
+      final cleanTitle = item.title
+          .replaceAll(RegExp(r'\.(mp3|m4a)$', caseSensitive: false), '');
+      return '$cleanTitle.$ext';
+    }
+
+    String ext = 'mp4';
+    if (!item.isPrivate) {
+      final pathExt = item.filePath?.split('.').last ?? 'mp4';
+      if (pathExt != 'enc') ext = pathExt;
+    }
+    final cleanTitle = item.title
+        .replaceAll(RegExp(r'\.mp4$', caseSensitive: false), '');
+    return '$cleanTitle.$ext';
   }
 
   Future<void> markAudioBackgroundReady() async {
@@ -1799,18 +2163,39 @@ class DuckDownloadsController extends ChangeNotifier
       final host = uri.host;
       if (host.isEmpty) return false;
 
-      // 1. Quick local keyword check for fast block
+      // 1. Quick local keyword check for instant block (covering porn, hentai, and AI content)
       final lowerHost = host.toLowerCase();
       final localKeywords = [
         'porn', 'xxx', 'sex', 'nude', 'adult', 'camgirl', 'livecam', 
         'hentai', 'xvideo', 'pornhub', 'xnxx', 'xhamster', 'redtube',
-        'youporn', 'chaturbate', 'rule34', 'onlyfans'
+        'youporn', 'chaturbate', 'rule34', 'onlyfans', 'stripchat',
+        'bongacams', 'camsoda', 'adultfriendfinder', 'cam4', 'imlive',
+        'livejasmin', 'doujin', 'nhentai', 'gelbooru', 'danbooru',
+        'e621', 'sankakucomplex', 'yande.re', 'rule34.xxx', 'e-hentai',
+        'luscious', 'spankbang', 'eporner', 'hqporn', 'motherless',
+        'heavyr', 'tube8', 'pornai', 'aiporn', 'nudify', 'undressai',
+        'pornpen', 'soulgen', 'candyai', 'dreamgf', 'nsfwai', 'spicychat',
+        'janitorai'
       ];
       for (final kw in localKeywords) {
         if (lowerHost.contains(kw)) return true;
       }
 
-      // 2. Query Cloudflare Families DoH API to dynamically check any adult domain
+      // 2. Query both Cloudflare Families and AdGuard Family DNS in parallel (DoH)
+      final results = await Future.wait([
+        _queryCloudflareFamilies(host),
+        _queryAdGuardFamily(host),
+      ]).timeout(const Duration(seconds: 4), onTimeout: () => [false, false]);
+
+      return results[0] || results[1];
+    } catch (_) {
+      // Fallback: safe to proceed or block on error? Typically false, as we don't want false blocks on random connectivity issues.
+    }
+    return false;
+  }
+
+  Future<bool> _queryCloudflareFamilies(String host) async {
+    try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 3);
       final request = await client.getUrl(Uri.parse(
@@ -1825,7 +2210,7 @@ class DuckDownloadsController extends ChangeNotifier
           final answers = data['Answer'];
           if (answers is List) {
             for (final answer in answers) {
-              if (answer is Map && answer['data'] == '0.0.0.0') {
+              if (answer is Map && (answer['data'] == '0.0.0.0' || answer['data'] == '::')) {
                 return true; // Blocked by Cloudflare Families filter
               }
             }
@@ -1840,9 +2225,38 @@ class DuckDownloadsController extends ChangeNotifier
           }
         }
       }
-    } catch (_) {
-      // Fallback to local check if DNS lookup fails
-    }
+    } catch (_) {}
+    return false;
+  }
+
+  Future<bool> _queryAdGuardFamily(String host) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 3);
+      final request = await client.getUrl(Uri.parse(
+        'https://dns-family.adguard.com/dns-query?name=${Uri.encodeComponent(host)}&type=A'
+      ));
+      request.headers.set('Accept', 'application/dns-json');
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final bodyText = await response.transform(utf8.decoder).join();
+        final data = jsonDecode(bodyText);
+        if (data is Map) {
+          final answers = data['Answer'];
+          if (answers is List) {
+            for (final answer in answers) {
+              if (answer is Map) {
+                final ip = answer['data'].toString();
+                // AdGuard Family DNS blocks adult sites by returning 0.0.0.0, 127.0.0.1, or a block page IP (starts with 94.140)
+                if (ip == '0.0.0.0' || ip == '127.0.0.1' || ip.startsWith('94.140.')) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
     return false;
   }
 
@@ -2312,6 +2726,7 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> autoExtractAndDownload(String url) async {
     if (busy) return;
     busy = true;
+    lastDownloadedItem = null;
     flow = DuckFlow.extracting;
     status = 'Auto-downloading shared link...';
     notifyListeners();

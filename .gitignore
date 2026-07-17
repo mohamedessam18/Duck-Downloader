@@ -63,3 +63,9 @@ desktop/release/
 # Windows artifacts
 nul
 *.msi
+
+*.apk
+
+
+*.apk
+

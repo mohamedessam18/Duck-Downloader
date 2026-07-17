@@ -14,8 +14,10 @@ class PermissionService {
       final status = await Permission.photos.request();
       return status.isGranted;
     }
-    final status = await Permission.storage.request();
-    return status.isGranted;
+    final photosStatus = await Permission.photos.request();
+    if (photosStatus.isGranted) return true;
+    final storageStatus = await Permission.storage.request();
+    return storageStatus.isGranted;
   }
 
   Future<bool> requestNotificationPermission() async {
@@ -24,26 +26,30 @@ class PermissionService {
   }
 
   Future<void> requestAllRequiredPermissions() async {
-    // 1. Request Notification permission
     await Permission.notification.request();
-
-    // 2. Request Storage / Photo Library permissions
     if (Platform.isIOS) {
       await Permission.photos.request();
     } else {
-      await Permission.storage.request();
+      final photosStatus = await Permission.photos.request();
+      if (!photosStatus.isGranted) {
+        await Permission.storage.request();
+      }
     }
   }
 
   Future<bool> hasStoragePermission() async {
     if (Platform.isIOS) return true;
-    return await Permission.storage.isGranted;
+    final storageGranted = await Permission.storage.isGranted;
+    final photosGranted = await Permission.photos.isGranted;
+    return storageGranted || photosGranted;
   }
 
   Future<bool> hasMediaImagesPermission() async {
     if (Platform.isIOS) {
       return await Permission.photos.isGranted;
     }
-    return await Permission.storage.isGranted;
+    final photosGranted = await Permission.photos.isGranted;
+    final storageGranted = await Permission.storage.isGranted;
+    return photosGranted || storageGranted;
   }
 }

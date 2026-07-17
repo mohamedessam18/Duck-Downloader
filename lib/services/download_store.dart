@@ -93,6 +93,25 @@ class DownloadStore {
     return _box.put('vaultPin', pin);
   }
 
+  String? readDecoyVaultPin() {
+    return _box.get('decoyVaultPin') as String?;
+  }
+
+  Future<void> writeDecoyVaultPin(String? pin) {
+    if (pin == null) {
+      return _box.delete('decoyVaultPin');
+    }
+    return _box.put('decoyVaultPin', pin);
+  }
+
+  bool readBiometricEnabled() {
+    return _box.get('biometricEnabled', defaultValue: false) as bool;
+  }
+
+  Future<void> writeBiometricEnabled(bool enabled) {
+    return _box.put('biometricEnabled', enabled);
+  }
+
   Map<String, int> readVideoResumePositions() {
     final raw = _box.get('videoResumePositions', defaultValue: <dynamic>{});
     if (raw is! Map) return {};

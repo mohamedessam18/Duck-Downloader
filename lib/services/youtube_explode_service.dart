@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -172,7 +172,7 @@ class YouTubeExplodeService {
     final folder = Directory(p.join(root.path, 'Duck Downloader', 'Audios'));
     await folder.create(recursive: true);
 
-    final m4aPath = p.join(folder.path, _sanitizeFilename('$title.m4a'));
+    final m4aPath = await _getUniqueFilePath(folder.path, '$title.m4a');
 
     if (manifest.muxed.isEmpty) {
       throw Exception('No streams found to extract audio.');
@@ -180,7 +180,7 @@ class YouTubeExplodeService {
 
     // Pick the lowest resolution muxed stream to minimize download size
     final muxedInfo = manifest.muxed.sortByVideoQuality().first;
-    final tempMuxedPath = p.join(folder.path, _sanitizeFilename('$title.temp.mp4'));
+    final tempMuxedPath = p.join(folder.path, _sanitizeFilename('temp_mux_${DateTime.now().millisecondsSinceEpoch}.mp4'));
 
     await _dio.download(
       muxedInfo.url.toString(),
@@ -229,8 +229,7 @@ class YouTubeExplodeService {
     final folder = Directory(p.join(root.path, 'Duck Downloader', subfolder));
     await folder.create(recursive: true);
 
-    final safe = _sanitizeFilename('$title.$ext');
-    final filePath = p.join(folder.path, safe);
+    final filePath = await _getUniqueFilePath(folder.path, '$title.$ext');
 
     await _dio.download(
       streamUrl,
@@ -301,5 +300,20 @@ class YouTubeExplodeService {
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
         .trim()
         .replaceAll(RegExp(r'_{2,}'), '_');
+  }
+
+  Future<String> _getUniqueFilePath(String folderPath, String filename) async {
+    final safeName = _sanitizeFilename(filename);
+    var filePath = p.join(folderPath, safeName);
+    if (await File(filePath).exists()) {
+      final ext = p.extension(safeName);
+      final base = p.basenameWithoutExtension(safeName);
+      var counter = 1;
+      while (await File(filePath).exists()) {
+        filePath = p.join(folderPath, '${base}_$counter$ext');
+        counter++;
+      }
+    }
+    return filePath;
   }
 }

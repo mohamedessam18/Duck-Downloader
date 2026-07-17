@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/app_navigator.dart';
 import '../../models/download_models.dart';
@@ -73,6 +74,25 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   double _trimStart = 0.0;
   double _trimEnd = 1.0;
   bool _isSavingTrim = false;
+
+  // VLC Gesture Control State
+  double _brightness = 1.0;
+  double _swipeStartVolume = 1.0;
+  double _swipeStartBrightness = 1.0;
+  Duration _swipeStartDuration = Duration.zero;
+  bool _isSwiping = false;
+  String _swipeType = ''; // 'volume' | 'brightness' | 'seek'
+  double _swipeDisplayValue = 0.0; // percentage or duration seconds
+  Timer? _swipeFeedbackTimer;
+  Offset _panStartOffset = Offset.zero;
+  String _panDirection = ''; // 'horizontal' | 'vertical' | ''
+
+  // GIF Panel State
+  bool _showGifPanel = false;
+  double _gifStartTime = 0.0;
+  double _gifDuration = 5.0;
+  int _gifWidth = 320;
+  bool _isSavingGif = false;
 
   Duration get _mediaDuration {
     if (widget.item.isVideo) {
@@ -156,15 +176,27 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     final filePath = widget.item.filePath;
     if (filePath == null) return;
     if (widget.item.isVideo) {
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
       _video = VideoPlayerController.file(File(filePath))
         ..initialize()
             .then((_) async {
               if (!mounted) return;
+              
+              // Keep screen awake
+              WakelockPlus.enable();
+
+              // Dynamic orientation based on video aspect ratio
+              final aspect = _video?.value.aspectRatio ?? 1.0;
+              if (aspect > 1.1) {
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.landscapeLeft,
+                  DeviceOrientation.landscapeRight,
+                ]);
+              } else {
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.portraitUp,
+                ]);
+              }
+
               _video?.setPlaybackSpeed(_speed);
               _video?.addListener(_videoListener);
               final resume = widget.controller.videoResumePosition(widget.item.id);
@@ -288,7 +320,13 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     widget.controller.removeListener(_syncDiscRotation);
     _discRotationController.dispose();
     if (widget.item.isVideo) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      WakelockPlus.disable();
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
     }
     _hideTimer?.cancel();
     _leftSeekTimer?.cancel();
@@ -499,6 +537,79 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     _triggerRightSeek();
                   }
                 },
+                onPanStart: (details) {
+                  if (video == null) return;
+                  _isSwiping = true;
+                  _swipeFeedbackTimer?.cancel();
+                  _panStartOffset = details.localPosition;
+                  _swipeStartVolume = video.value.volume;
+                  _swipeStartBrightness = _brightness;
+                  _swipeStartDuration = video.value.position;
+                  _panDirection = '';
+                  _swipeType = '';
+                  setState(() {});
+                },
+                onPanUpdate: (details) {
+                  if (!_isSwiping || video == null) return;
+                  final screenWidth = MediaQuery.sizeOf(context).width;
+                  final screenHeight = MediaQuery.sizeOf(context).height;
+                  final dx = details.localPosition.dx - _panStartOffset.dx;
+                  final dy = details.localPosition.dy - _panStartOffset.dy;
+
+                  if (_panDirection.isEmpty) {
+                    if (dx.abs() > 15) {
+                      _panDirection = 'horizontal';
+                      _swipeType = 'seek';
+                    } else if (dy.abs() > 15) {
+                      _panDirection = 'vertical';
+                      if (_panStartOffset.dx < screenWidth / 2) {
+                        _swipeType = 'brightness';
+                      } else {
+                        _swipeType = 'volume';
+                      }
+                    }
+                  }
+
+                  if (_panDirection == 'vertical') {
+                    final double deltaY = -dy / screenHeight;
+                    if (_swipeType == 'volume') {
+                      final nextVolume = (_swipeStartVolume + deltaY * 1.5).clamp(0.0, 1.0);
+                      video.setVolume(nextVolume);
+                      setState(() {
+                        _swipeDisplayValue = nextVolume;
+                      });
+                    } else if (_swipeType == 'brightness') {
+                      final nextBrightness = (_swipeStartBrightness + deltaY * 1.5).clamp(0.0, 1.0);
+                      setState(() {
+                        _brightness = nextBrightness;
+                        _swipeDisplayValue = nextBrightness;
+                      });
+                    }
+                  } else if (_panDirection == 'horizontal') {
+                    final double deltaX = dx / screenWidth;
+                    final seekDelta = Duration(seconds: (deltaX * 120).toInt());
+                    final targetPosition = _swipeStartDuration + seekDelta;
+                    final duration = video.value.duration;
+                    final finalPosition = targetPosition < Duration.zero
+                        ? Duration.zero
+                        : (targetPosition > duration ? duration : targetPosition);
+                    setState(() {
+                      _swipeDisplayValue = finalPosition.inSeconds.toDouble();
+                    });
+                  }
+                },
+                onPanEnd: (_) {
+                  if (_swipeType == 'seek' && video != null) {
+                    video.seekTo(Duration(seconds: _swipeDisplayValue.toInt()));
+                  }
+                  _isSwiping = false;
+                  _swipeFeedbackTimer?.cancel();
+                  _swipeFeedbackTimer = Timer(const Duration(milliseconds: 800), () {
+                    setState(() {
+                      _swipeType = '';
+                    });
+                  });
+                },
                 behavior: HitTestBehavior.opaque,
                 child: ClipRect(
                   child: SizedBox.expand(
@@ -514,6 +625,55 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                 ),
               ),
             ),
+
+            // Simulated Brightness Layer
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: Colors.black.withOpacity((1.0 - _brightness).clamp(0.0, 0.95)),
+                ),
+              ),
+            ),
+
+            // Swipe Gestures HUD
+            if (_swipeType.isNotEmpty)
+              Center(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.75),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _swipeType == 'volume'
+                            ? (_swipeDisplayValue == 0.0 ? Icons.volume_mute : Icons.volume_up)
+                            : _swipeType == 'brightness'
+                                ? Icons.brightness_5
+                                : Icons.fast_forward,
+                        color: mediaGold,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _swipeType == 'volume'
+                            ? 'Volume: ${(_swipeDisplayValue * 100).toInt()}%'
+                            : _swipeType == 'brightness'
+                                ? 'Brightness: ${(_swipeDisplayValue * 100).toInt()}%'
+                                : 'Seek: ${formatMediaDuration(Duration(seconds: _swipeDisplayValue.toInt()))}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
             // Buffering Indicator
             if (value.isBuffering)
@@ -840,7 +1000,44 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                             });
                                                           },
                                                   ),
-                                                  const SizedBox(width: 16),
+                                                  const SizedBox(width: 12),
+                                                  if (widget.item.isVideo) ...[
+                                                    IconButton(
+                                                      padding: EdgeInsets.zero,
+                                                      constraints: const BoxConstraints(),
+                                                      icon: const Icon(Icons.gif, color: Colors.white, size: 24),
+                                                      onPressed: value.duration <= Duration.zero
+                                                          ? null
+                                                          : () => _showGifMakerSheet(context),
+                                                    ),
+                                                    const SizedBox(width: 12),
+                                                    IconButton(
+                                                      padding: EdgeInsets.zero,
+                                                      constraints: const BoxConstraints(),
+                                                      icon: Icon(
+                                                        MediaQuery.orientationOf(context) == Orientation.landscape
+                                                            ? Icons.screen_lock_landscape
+                                                            : Icons.screen_lock_portrait,
+                                                        color: Colors.white,
+                                                        size: 20,
+                                                      ),
+                                                      onPressed: () {
+                                                        _resetHideTimer();
+                                                        final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
+                                                        if (isLandscape) {
+                                                          SystemChrome.setPreferredOrientations([
+                                                            DeviceOrientation.portraitUp,
+                                                          ]);
+                                                        } else {
+                                                          SystemChrome.setPreferredOrientations([
+                                                            DeviceOrientation.landscapeLeft,
+                                                            DeviceOrientation.landscapeRight,
+                                                          ]);
+                                                        }
+                                                      },
+                                                    ),
+                                                    const SizedBox(width: 12),
+                                                  ],
                                                 ],
                                                 IconButton(
                                                   padding: EdgeInsets.zero,
@@ -853,7 +1050,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                 ),
                                               ],
                                             ),
-                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                             height: 48,
                                             useOwnLayer: false,
                                           ),
@@ -994,6 +1191,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               ),
             ),
             _buildSpeedOverlay(),
+            _buildGifOverlay(),
           ],
         ),
       ),
@@ -1484,6 +1682,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             ),
           ),
           _buildSpeedOverlay(),
+          _buildGifOverlay(),
         ],
       ),
     );
@@ -1929,6 +2128,232 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                           ),
                           child: const Text('Reset to Normal (1x)'),
                         ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showGifMakerSheet(BuildContext context) {
+    if (_video == null) return;
+    _resetHideTimer();
+    _video?.pause();
+
+    final double maxSec = _video!.value.duration.inSeconds.toDouble();
+    double currentSec = _video!.value.position.inSeconds.toDouble();
+    if (currentSec > maxSec - 1) {
+      currentSec = (maxSec - 5).clamp(0.0, maxSec);
+    }
+    
+    setState(() {
+      _gifStartTime = currentSec;
+      _gifDuration = 5.0;
+      _gifWidth = 320;
+      _showGifPanel = true;
+    });
+  }
+
+  Widget _buildGifOverlay() {
+    if (!_showGifPanel || _video == null) return const SizedBox.shrink();
+
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final maxSec = _video!.value.duration.inSeconds.toDouble();
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showGifPanel = false;
+                });
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                color: Colors.black.withOpacity(0.4),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: DuckLiquidGlassSurface(
+                borderRadius: 28,
+                variant: DuckLiquidGlassVariant.panel,
+                isLight: isLight,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    20,
+                    24,
+                    28 + MediaQuery.paddingOf(context).bottom,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 20),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Icon(Icons.gif, color: mediaGold, size: 28),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Smart GIF Maker',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Start Time', style: TextStyle(color: Colors.white70)),
+                          Text('${_gifStartTime.toStringAsFixed(1)}s / ${maxSec.toStringAsFixed(1)}s', style: TextStyle(color: mediaGold, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      Slider(
+                        value: _gifStartTime,
+                        min: 0.0,
+                        max: maxSec,
+                        activeColor: mediaGold,
+                        inactiveColor: Colors.white10,
+                        onChanged: _isSavingGif ? null : (val) {
+                          setState(() {
+                            _gifStartTime = val;
+                          });
+                        },
+                      ),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Duration', style: TextStyle(color: Colors.white70)),
+                          Text('${_gifDuration.toStringAsFixed(1)}s', style: TextStyle(color: mediaGold, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      Slider(
+                        value: _gifDuration,
+                        min: 1.0,
+                        max: (maxSec - _gifStartTime).clamp(1.0, 15.0),
+                        activeColor: mediaGold,
+                        inactiveColor: Colors.white10,
+                        onChanged: _isSavingGif ? null : (val) {
+                          setState(() {
+                            _gifDuration = val;
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 12),
+                      const Text('GIF Resolution (Width)', style: TextStyle(color: Colors.white70)),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: _gifWidth == 320 ? mediaGold : Colors.white24),
+                                backgroundColor: _gifWidth == 320 ? mediaGold.withOpacity(0.1) : Colors.transparent,
+                              ),
+                              onPressed: _isSavingGif ? null : () => setState(() => _gifWidth = 320),
+                              child: Text('320px (Compact)', style: TextStyle(color: _gifWidth == 320 ? mediaGold : Colors.white70)),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: _gifWidth == 480 ? mediaGold : Colors.white24),
+                                backgroundColor: _gifWidth == 480 ? mediaGold.withOpacity(0.1) : Colors.transparent,
+                              ),
+                              onPressed: _isSavingGif ? null : () => setState(() => _gifWidth = 480),
+                              child: Text('480px (HQ)', style: TextStyle(color: _gifWidth == 480 ? mediaGold : Colors.white70)),
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      const SizedBox(height: 28),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: mediaGold,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: _isSavingGif
+                            ? null
+                            : () async {
+                                setState(() {
+                                  _isSavingGif = true;
+                                });
+                                try {
+                                  await widget.controller.createGifFromVideo(
+                                    widget.item,
+                                    _gifStartTime,
+                                    _gifDuration,
+                                    _gifWidth,
+                                  );
+                                  setState(() {
+                                    _showGifPanel = false;
+                                  });
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('GIF created successfully! Check Images vault.'),
+                                        backgroundColor: mediaGold,
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Failed to create GIF: $e'),
+                                        backgroundColor: Colors.redAccent,
+                                      ),
+                                    );
+                                  }
+                                } finally {
+                                  if (mounted) {
+                                    setState(() {
+                                      _isSavingGif = false;
+                                    });
+                                  }
+                                }
+                              },
+                        child: _isSavingGif
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2),
+                              )
+                            : const Text('Create GIF', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
                     ],
                   ),
                 ),

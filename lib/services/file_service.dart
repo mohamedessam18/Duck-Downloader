@@ -31,7 +31,18 @@ class DuckFileService {
     );
     await folder.create(recursive: true);
     final safeName = _sanitizeFilename(filename);
-    final filePath = p.join(folder.path, safeName);
+    
+    var filePath = p.join(folder.path, safeName);
+    if (await File(filePath).exists()) {
+      final ext = p.extension(safeName);
+      final base = p.basenameWithoutExtension(safeName);
+      var counter = 1;
+      while (await File(filePath).exists()) {
+        filePath = p.join(folder.path, '${base}_$counter$ext');
+        counter++;
+      }
+    }
+    
     await _dio.download(url, filePath);
     return filePath;
   }

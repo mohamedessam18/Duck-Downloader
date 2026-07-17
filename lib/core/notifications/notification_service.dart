@@ -15,9 +15,9 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   // Channel IDs — bump suffix to force re-creation with correct sound
-  static const _successChannelId = 'duck_downloads_success_v4';
-  static const _failChannelId = 'duck_downloads_fail_v4';
-  static const _clipboardChannelId = 'duck_clipboard_v4';
+  static const _successChannelId = 'duck_downloads_success_v6';
+  static const _failChannelId = 'duck_downloads_fail_v6';
+  static const _clipboardChannelId = 'duck_clipboard_v6';
 
   Future<void> _tryInitialize() async {
     if (kIsWeb) return;
@@ -50,8 +50,8 @@ class NotificationService {
       if (!kIsWeb && Platform.isAndroid) {
         await _createAndroidChannels();
       }
-    } catch (_) {
-      // Notifications are best-effort; fail silently in test/CLI envs.
+    } catch (e, s) {
+      debugPrint('NOTIFICATION SERVICE INITIALIZATION ERROR: $e\n$s');
     }
   }
 

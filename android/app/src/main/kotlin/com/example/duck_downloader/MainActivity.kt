@@ -7,7 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import com.ryanheise.audioservice.AudioServiceActivity
+import com.ryanheise.audioservice.AudioServiceFragmentActivity
 import com.ryanheise.audioservice.AudioServicePlugin
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -21,8 +21,9 @@ import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.graphics.drawable.Icon
 import java.util.ArrayList
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : AudioServiceActivity() {
+class MainActivity : AudioServiceFragmentActivity() {
     private val channelName = "duck_downloader/media"
     private var methodChannel: MethodChannel? = null
     private var isVideoPlaying = false
@@ -190,7 +191,7 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration?) {
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         methodChannel?.invokeMethod("pipModeChanged", isInPictureInPictureMode)
     }

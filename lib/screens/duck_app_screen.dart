@@ -2,6 +2,12 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
 import 'dart:async';
+import 'package:local_auth/local_auth.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:camera/camera.dart';
+import '../services/camera_service.dart';
+import '../services/vault_encryption_service.dart';
+import 'package:path/path.dart' as p;
 
 
 import 'package:flutter/material.dart';
@@ -12,6 +18,7 @@ import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/premium_entitlement.dart';
 import '../state/downloads_controller.dart';
+import '../core/permissions/permission_service.dart';
 import '../widgets/ambient_background.dart';
 import '../widgets/animated_duck.dart';
 import '../widgets/duck_liquid_glass.dart';
@@ -394,10 +401,10 @@ class _HomeView extends StatelessWidget {
                   scale: scale,
                   onTap: controller.pasteAndExtract,
                 ),
-                if (controller.flow == DuckFlow.idle || controller.flow == DuckFlow.ready) ...[
+                if (controller.lastDownloadedItem != null) ...[
                   const SizedBox(height: 12),
                   IconButton(
-                    onPressed: controller.pasteAndExtract,
+                    onPressed: controller.shareLastDownloadedItem,
                     icon: Icon(
                       Icons.ios_share,
                       color: _gold,
@@ -2125,6 +2132,10 @@ class _LibraryViewState extends State<_LibraryView> {
                             size: 24,
                           ),
                           onPressed: () {
+                            final title = widget.title.toUpperCase();
+                            final mediaType = title == 'VIDEOS'
+                                ? 'video'
+                                : (title == 'AUDIOS' ? 'audio' : 'image');
                             _showVaultPinDialog(
                               context,
                               widget.controller,
@@ -2132,8 +2143,10 @@ class _LibraryViewState extends State<_LibraryView> {
                                 Navigator.push(
                                   context,
                                   CupertinoPageRoute(
-                                    builder: (context) =>
-                                        _SecureVaultView(controller: widget.controller),
+                                    builder: (context) => _SecureVaultView(
+                                      controller: widget.controller,
+                                      mediaType: mediaType,
+                                    ),
                                   ),
                                 );
                               },
@@ -2497,13 +2510,7 @@ class _DownloadRow extends StatelessWidget {
                 case 'rename':
                   _showRenameDialog(context, item, controller);
                 case 'save':
-                  if (item.isImage) {
-                    controller.saveImageExternally(item);
-                  } else if (item.isVideo) {
-                    controller.saveVideoExternally(item);
-                  } else {
-                    controller.saveAudioExternally(item);
-                  }
+                  _handleSaveAction(context, item, controller);
                 case 'delete':
                   controller.deleteDownload(item);
                 case 'favorite':
@@ -2514,6 +2521,8 @@ class _DownloadRow extends StatelessWidget {
                   controller.moveItemToVault(item);
                 case 'edit_tag':
                   _showMetadataEditDialog(context, item, controller);
+                case 'convert_audio':
+                  _showVideoToAudioDialog(context, item, controller);
               }
             },
             itemBuilder: (context) => [
@@ -2599,6 +2608,20 @@ class _DownloadRow extends StatelessWidget {
                   ],
                 ),
               ),
+              if (item.isVideo)
+                PopupMenuItem(
+                  value: 'convert_audio',
+                  child: Row(
+                    children: [
+                      Icon(Icons.audiotrack, color: _gold, size: 20),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Convert to Audio',
+                        style: TextStyle(color: _text, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ),
               if (item.isAudio)
                 PopupMenuItem(
                   value: 'edit_tag',
@@ -2860,6 +2883,36 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
     _message = widget.controller.isVaultSetup
         ? 'Enter your 4-digit passcode'
         : 'Create a 4-digit vault passcode';
+    if (widget.controller.isVaultSetup && widget.controller.biometricEnabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _authenticateWithBiometrics();
+      });
+    }
+  }
+
+  Future<void> _authenticateWithBiometrics() async {
+    final auth = LocalAuthentication();
+    try {
+      final bool canAuthenticateWithBiometrics = await auth.canCheckBiometrics;
+      final bool canAuthenticate = canAuthenticateWithBiometrics || await auth.isDeviceSupported();
+      if (!canAuthenticate) return;
+
+      final bool didAuthenticate = await auth.authenticate(
+        localizedReason: 'Authenticate to access the Secure Vault',
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+          stickyAuth: true,
+        ),
+      );
+      if (didAuthenticate) {
+        if (!mounted) return;
+        widget.controller.isVaultLocked = false;
+        widget.controller.isDecoySession = false;
+        widget.controller.notifyListeners();
+        Navigator.pop(context);
+        widget.onSuccess();
+      }
+    } catch (_) {}
   }
 
   void _onKeyPress(String val) {
@@ -3031,6 +3084,13 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
                   );
                 }),
               ),
+              if (widget.controller.isVaultSetup && widget.controller.biometricEnabled) ...[
+                const SizedBox(height: 12),
+                IconButton(
+                  icon: Icon(Icons.fingerprint, color: _gold, size: 40),
+                  onPressed: _authenticateWithBiometrics,
+                ),
+              ],
               const SizedBox(height: 32),
               _buildKeypad(),
               const SizedBox(height: 20),
@@ -3099,9 +3159,10 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
 }
 
 class _SecureVaultView extends StatelessWidget {
-  const _SecureVaultView({required this.controller});
+  const _SecureVaultView({required this.controller, required this.mediaType});
 
   final DuckDownloadsController controller;
+  final String mediaType; // 'audio' | 'video' | 'image'
 
   Future<void> _onBackRequested(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -3166,6 +3227,141 @@ class _SecureVaultView extends StatelessWidget {
     }
   }
 
+  void _showVaultSettings(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: BoxDecoration(
+            color: _dark,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border.all(color: _border),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: _border,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Vault Settings',
+                style: TextStyle(
+                  color: _text,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              StatefulBuilder(
+                builder: (context, setModalState) => SwitchListTile(
+                  title: Text('Biometric Unlock', style: TextStyle(color: _text)),
+                  subtitle: Text('Unlock the vault using fingerprint / Face ID', style: TextStyle(color: _muted)),
+                  value: controller.biometricEnabled,
+                  activeColor: _gold,
+                  onChanged: (val) async {
+                    await controller.toggleBiometricEnabled(val);
+                    setModalState(() {});
+                  },
+                ),
+              ),
+              const Divider(color: Colors.white10),
+              ListTile(
+                leading: const Icon(Icons.security, color: _danger),
+                title: Text('Set Decoy Passcode', style: TextStyle(color: _text)),
+                subtitle: Text('Shows a decoy empty vault when entered', style: TextStyle(color: _muted)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showSetDecoyPinDialog(context);
+                },
+              ),
+              const Divider(color: Colors.white10),
+              ListTile(
+                leading: Icon(Icons.photo_camera, color: _warmGold),
+                title: Text('View Intruder Logs', style: TextStyle(color: _text)),
+                subtitle: Text('Photos captured on failed passcode attempts', style: TextStyle(color: _muted)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    CupertinoPageRoute(builder: (context) => const _IntruderLogsScreen()),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSetDecoyPinDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return _DecoyPinSetupSheet(controller: controller);
+      },
+    );
+  }
+
+  Future<void> _importLocalMedia(BuildContext context) async {
+    try {
+      FileType fileType;
+      DownloadType downloadType;
+
+      if (mediaType == 'audio') {
+        fileType = FileType.audio;
+        downloadType = DownloadType.audio;
+      } else if (mediaType == 'video') {
+        fileType = FileType.video;
+        downloadType = DownloadType.video;
+      } else {
+        fileType = FileType.image;
+        downloadType = DownloadType.image;
+      }
+
+      final result = await FilePicker.platform.pickFiles(
+        type: fileType,
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.single.path != null) {
+        final path = result.files.single.path!;
+
+        if (context.mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => Center(
+              child: CircularProgressIndicator(color: _gold),
+            ),
+          );
+        }
+
+        await controller.importLocalFileToVault(path, downloadType);
+
+        if (context.mounted) {
+          Navigator.pop(context); // Close loading indicator
+          _showSettingToast(context, 'Media added to vault and removed from gallery!', true);
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context); // Close loading indicator if open
+        _showSettingToast(context, 'Import failed: $e', false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -3179,7 +3375,11 @@ class _SecureVaultView extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: _nav,
           title: Text(
-            'SECURE VAULT',
+            mediaType == 'audio'
+                ? 'AUDIO VAULT'
+                : mediaType == 'video'
+                    ? 'VIDEO VAULT'
+                    : 'IMAGE VAULT',
             style: TextStyle(
               color: _gold,
               fontWeight: FontWeight.w900,
@@ -3192,11 +3392,29 @@ class _SecureVaultView extends StatelessWidget {
             icon: Icon(Icons.arrow_back_ios_new, color: _text),
             onPressed: () => _onBackRequested(context),
           ),
+          actions: [
+            if (!controller.isDecoySession)
+              IconButton(
+                icon: Icon(Icons.settings, color: _text),
+                onPressed: () => _showVaultSettings(context),
+              ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          backgroundColor: _gold,
+          onPressed: () => _importLocalMedia(context),
+          child: const Icon(Icons.add, color: Colors.black, size: 28),
         ),
         body: AnimatedBuilder(
           animation: controller,
           builder: (context, _) {
-            final items = controller.privateDownloads;
+            final items = controller.privateDownloads.where((item) {
+              if (mediaType == 'audio') return item.isAudio;
+              if (mediaType == 'video') return item.isVideo;
+              if (mediaType == 'image') return item.isImage;
+              return false;
+            }).toList();
+
             if (items.isEmpty) {
               return Center(
                 child: Text(
@@ -3217,6 +3435,333 @@ class _SecureVaultView extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+class _DecoyPinSetupSheet extends StatefulWidget {
+  const _DecoyPinSetupSheet({required this.controller});
+
+  final DuckDownloadsController controller;
+
+  @override
+  State<_DecoyPinSetupSheet> createState() => _DecoyPinSetupSheetState();
+}
+
+class _DecoyPinSetupSheetState extends State<_DecoyPinSetupSheet> {
+  String _pin = '';
+  String _firstPin = '';
+  bool _confirmMode = false;
+  String _message = 'Create a 4-digit decoy passcode';
+
+  void _onKeyPress(String val) {
+    if (_pin.length >= 4) return;
+    setState(() {
+      _pin += val;
+      if (_pin.length == 4) {
+        _handlePinComplete();
+      }
+    });
+  }
+
+  void _onBackspace() {
+    if (_pin.isEmpty) return;
+    setState(() {
+      _pin = _pin.substring(0, _pin.length - 1);
+    });
+  }
+
+  void _handlePinComplete() {
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+
+      if (!_confirmMode) {
+        setState(() {
+          _firstPin = _pin;
+          _pin = '';
+          _confirmMode = true;
+          _message = 'Confirm decoy passcode';
+        });
+      } else {
+        if (_pin == _firstPin) {
+          widget.controller.setDecoyVaultPin(_pin);
+          Navigator.pop(context);
+          _showSettingToast(context, 'Decoy passcode configured successfully!', true);
+        } else {
+          setState(() {
+            _pin = '';
+            _confirmMode = false;
+            _message = 'Passcodes do not match. Try again.';
+          });
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _dark,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        border: Border.all(color: _border),
+      ),
+      padding: const EdgeInsets.all(24),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 5,
+              decoration: BoxDecoration(
+                color: _border,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            const SizedBox(height: 28),
+            const Icon(Icons.security, color: _danger, size: 40),
+            const SizedBox(height: 16),
+            Text(
+              'Set Decoy Passcode',
+              style: TextStyle(
+                color: _text,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(_message, style: TextStyle(color: _muted, fontSize: 14)),
+            const SizedBox(height: 32),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(4, (index) {
+                final filled = index < _pin.length;
+                return Container(
+                  width: 16,
+                  height: 16,
+                  margin: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: filled ? _danger : Colors.transparent,
+                    border: Border.all(color: _danger, width: 2),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 32),
+            _buildKeypad(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildKeypad() {
+    final keys = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['C', '0', '⌫'],
+    ];
+    return Column(
+      children: keys.map((row) {
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: row.map((val) {
+            final isAction = val == 'C' || val == '⌫';
+            return Container(
+              width: 72,
+              height: 72,
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              child: ClipOval(
+                child: Material(
+                  color: isAction ? Colors.transparent : _panel,
+                  child: InkWell(
+                    onTap: () {
+                      if (val == 'C') {
+                        setState(() => _pin = '');
+                      } else if (val == '⌫') {
+                        _onBackspace();
+                      } else {
+                        _onKeyPress(val);
+                      }
+                    },
+                    child: Center(
+                      child: val == '⌫'
+                          ? Icon(Icons.backspace_outlined, color: _text, size: 22)
+                          : Text(
+                              val,
+                              style: TextStyle(
+                                color: isAction ? _muted : _text,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _IntruderLogsScreen extends StatefulWidget {
+  const _IntruderLogsScreen();
+
+  @override
+  State<_IntruderLogsScreen> createState() => _IntruderLogsScreenState();
+}
+
+class _IntruderLogsScreenState extends State<_IntruderLogsScreen> {
+  List<File> _logs = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLogs();
+  }
+
+  Future<void> _loadLogs() async {
+    final logs = await VaultCameraService.getIntruderLogs();
+    setState(() {
+      _logs = logs;
+      _loading = false;
+    });
+  }
+
+  Future<void> _clearLogs() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _dark,
+        title: Text('Clear Logs?', style: TextStyle(color: _text, fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to delete all intruder logs?', style: TextStyle(color: _muted)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: _muted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete All', style: TextStyle(color: _danger, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await VaultCameraService.clearIntruderLogs();
+      await _loadLogs();
+      if (mounted) {
+        _showSettingToast(context, 'Intruder logs cleared!', true);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _dark,
+      appBar: AppBar(
+        backgroundColor: _nav,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new, color: _text),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'INTRUDER LOGS',
+          style: TextStyle(
+            color: _gold,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+            letterSpacing: 2,
+          ),
+        ),
+        centerTitle: true,
+        actions: [
+          if (_logs.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep, color: _danger),
+              onPressed: _clearLogs,
+            ),
+        ],
+      ),
+      body: _loading
+          ? Center(child: CircularProgressIndicator(color: _gold))
+          : _logs.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle_outline, color: _muted, size: 64),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No intrusion attempts logged.',
+                        style: TextStyle(color: _muted, fontSize: 16),
+                      ),
+                    ],
+                  ),
+                )
+              : GridView.builder(
+                  padding: const EdgeInsets.all(16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: 0.75,
+                  ),
+                  itemCount: _logs.length,
+                  itemBuilder: (context, index) {
+                    final file = _logs[index];
+                    final filename = p.basename(file.path);
+                    final timestampStr = filename
+                        .replaceAll('intruder_', '')
+                        .replaceAll('.jpg', '');
+                    final timestamp = int.tryParse(timestampStr) ?? 0;
+                    final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+                    final dateFormatted = '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: _panel,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _border),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: Image.file(
+                              file,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Center(child: Icon(Icons.broken_image)),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Text(
+                              dateFormatted,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: _text,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }
@@ -3842,6 +4387,85 @@ void _showMetadataEditDialog(
   );
 }
 
+Future<bool> _checkAndRequestStoragePermission(BuildContext context, DownloadType type) async {
+  final permissions = PermissionService();
+  bool hasPerm = false;
+  
+  if (type == DownloadType.image) {
+    hasPerm = await permissions.hasMediaImagesPermission();
+  } else {
+    // For video/audio on Android 10+, Scoped Storage/MediaStore is used which does not need storage permissions
+    if (Platform.isAndroid) {
+      return true; 
+    }
+    hasPerm = await permissions.hasStoragePermission();
+  }
+  
+  if (hasPerm) return true;
+  
+  if (context.mounted) {
+    final granted = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF18181A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.security, color: Color(0xFFFFD700), size: 24),
+              SizedBox(width: 10),
+              Text('Permission Required', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Text(
+            type == DownloadType.image
+                ? 'Duck Downloader needs Photos/Storage permission to save images directly to your gallery.'
+                : 'Duck Downloader needs Storage permission to save files directly to your device storage.',
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Grant', style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+    
+    if (granted == true) {
+      if (type == DownloadType.image) {
+        return await permissions.requestMediaImagesPermission();
+      } else {
+        return await permissions.requestStoragePermission();
+      }
+    }
+  }
+  return false;
+}
+
+void _handleSaveAction(BuildContext context, DownloadItem item, DuckDownloadsController controller) async {
+  final hasPerm = await _checkAndRequestStoragePermission(context, item.type);
+  if (!hasPerm) {
+    if (context.mounted) {
+      _showSettingToast(context, 'Permission denied. Cannot save media.', false);
+    }
+    return;
+  }
+  
+  if (item.isImage) {
+    controller.saveImageExternally(item);
+  } else if (item.isVideo) {
+    controller.saveVideoExternally(item);
+  } else {
+    controller.saveAudioExternally(item);
+  }
+}
+
 void _showRenameDialog(
   BuildContext context,
   DownloadItem item,
@@ -3892,6 +4516,121 @@ void _showRenameDialog(
             child: Text('Rename', style: TextStyle(color: _gold)),
           ),
         ],
+      );
+    },
+  );
+}
+
+void _showVideoToAudioDialog(
+  BuildContext context,
+  DownloadItem item,
+  DuckDownloadsController controller,
+) {
+  String selectedFormat = 'mp3';
+  int selectedBitrate = 192; // Default 192kbps
+
+  showDialog<void>(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            backgroundColor: _panel,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: Text(
+              'Convert Video to Audio',
+              style: TextStyle(color: _text, fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: _muted, fontSize: 13),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Format',
+                  style: TextStyle(color: _text, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: selectedFormat == 'mp3' ? _gold : Colors.white24),
+                          backgroundColor: selectedFormat == 'mp3' ? _gold.withOpacity(0.1) : Colors.transparent,
+                        ),
+                        onPressed: () => setState(() => selectedFormat = 'mp3'),
+                        child: Text('MP3 (Standard)', style: TextStyle(color: selectedFormat == 'mp3' ? _gold : _text)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: selectedFormat == 'm4a' ? _gold : Colors.white24),
+                          backgroundColor: selectedFormat == 'm4a' ? _gold.withOpacity(0.1) : Colors.transparent,
+                        ),
+                        onPressed: () => setState(() => selectedFormat = 'm4a'),
+                        child: Text('M4A (AAC)', style: TextStyle(color: selectedFormat == 'm4a' ? _gold : _text)),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Audio Bitrate (Quality)',
+                  style: TextStyle(color: _text, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<int>(
+                  value: selectedBitrate,
+                  dropdownColor: _panel,
+                  style: TextStyle(color: _text),
+                  decoration: InputDecoration(
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Colors.white24),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: _gold),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 128, child: Text('128 kbps (Low)')),
+                    DropdownMenuItem(value: 192, child: Text('192 kbps (Medium)')),
+                    DropdownMenuItem(value: 320, child: Text('320 kbps (High/HD)')),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) {
+                      setState(() => selectedBitrate = val);
+                    }
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel', style: TextStyle(color: _muted)),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _showSettingToast(context, 'Audio extraction started in background...', true);
+                  unawaited(controller.convertVideoToAudio(item, selectedFormat, selectedBitrate));
+                },
+                child: Text('Convert', style: TextStyle(color: _gold, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
       );
     },
   );
