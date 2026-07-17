@@ -41,7 +41,11 @@ class MainActivity : AudioServiceFragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        registerReceiver(pipReceiver, IntentFilter("ACTION_MEDIA_CONTROL"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pipReceiver, IntentFilter("ACTION_MEDIA_CONTROL"), RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(pipReceiver, IntentFilter("ACTION_MEDIA_CONTROL"))
+        }
         handleIntent(intent)
     }
 
