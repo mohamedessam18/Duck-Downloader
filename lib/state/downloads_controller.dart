@@ -53,6 +53,10 @@ class DuckDownloadsController extends ChangeNotifier
        _notifications = notificationService ?? NotificationService(),
        _permissions = permissionService ?? PermissionService(),
        _ytExplode = ytExplode ?? YouTubeExplodeService() {
+    final initialCookies = _store.readYoutubeCookies();
+    if (initialCookies != null) {
+      _ytExplode.updateCookies(initialCookies);
+    }
     _downloads = _store.readDownloads();
     _videoResumePositions = _store.readVideoResumePositions();
     autoSaveVideos = _store.readAutoSaveVideos();
@@ -2807,6 +2811,8 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> updateCookies(String content) async {
     try {
       backendCookies = await _api.setCookies(content);
+      await _store.writeYoutubeCookies(content);
+      _ytExplode.updateCookies(content);
       status = 'Cookies updated successfully';
       notifyListeners();
     } catch (e) {
@@ -2819,6 +2825,8 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> clearCookies() async {
     try {
       backendCookies = await _api.deleteCookies();
+      await _store.writeYoutubeCookies(null);
+      _ytExplode.updateCookies(null);
       status = 'Cookies cleared';
       notifyListeners();
     } catch (e) {

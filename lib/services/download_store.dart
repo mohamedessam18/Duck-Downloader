@@ -131,4 +131,15 @@ class DownloadStore {
     positions[id] = milliseconds;
     return _box.put('videoResumePositions', positions);
   }
+
+  String? readYoutubeCookies() {
+    return _box.get('youtubeCookies') as String?;
+  }
+
+  Future<void> writeYoutubeCookies(String? cookies) {
+    if (cookies == null) {
+      return _box.delete('youtubeCookies');
+    }
+    return _box.put('youtubeCookies', cookies);
+  }
 }
