@@ -423,6 +423,41 @@ class _HomeView extends StatelessWidget {
                   status: controller.status,
                   progress: active?.progress ?? 0,
                 ),
+                if (controller.status.toLowerCase().contains('in-app browser')) ...[
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _gold,
+                      foregroundColor: const Color(0xFF101112),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    onPressed: () {
+                      final url = controller.lastAttemptedUrl ?? 'https://www.instagram.com';
+                      final lower = url.toLowerCase();
+                      final platform = lower.contains('instagram')
+                          ? 'Instagram'
+                          : lower.contains('facebook')
+                              ? 'Facebook'
+                              : lower.contains('youtube')
+                                  ? 'YouTube'
+                                  : lower.contains('twitter') || lower.contains('x.com')
+                                      ? 'X'
+                                      : 'Social';
+                      controller.lockedBrowserRequest = LockedBrowserRequest(url: url, platform: platform);
+                    },
+                    icon: const Icon(Icons.open_in_browser),
+                    label: const Text(
+                      'Open In-App Browser',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ],
                 if (controller.metadata != null)
                   _OptionsCard(controller: controller)
                 else if (controller.batchItems != null)

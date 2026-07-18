@@ -165,6 +165,7 @@ class DuckDownloadsController extends ChangeNotifier
   DownloadType selectedType = DownloadType.video;
   BackendCookiesInfo? backendCookies;
   LockedBrowserRequest? lockedBrowserRequest;
+  String? lastAttemptedUrl;
   String quality = 'Best';
   bool busy = false;
   bool _justReturnedFromLockedBrowser = false;
@@ -732,6 +733,7 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   Future<void> _extractUrlOrBatch(String url) async {
+    lastAttemptedUrl = url;
     metadata = null;
     batchItems = null;
     batchTitle = null;
