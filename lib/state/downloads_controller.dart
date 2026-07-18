@@ -2061,6 +2061,7 @@ class DuckDownloadsController extends ChangeNotifier
   // with lock screen controls. On return, the video player resumes.
 
   bool _backgroundVideoActive = false;
+  String? _tempDecryptedBgAudioPath;
   bool get isBackgroundVideoActive => _backgroundVideoActive;
 
   /// Starts playing the audio track of a video file in the background
@@ -2073,14 +2074,25 @@ class DuckDownloadsController extends ChangeNotifier
     Duration position,
   ) async {
     if (_backgroundVideoActive) return;
-    final filePath = item.filePath;
-    if (filePath == null) return;
+    final path = item.filePath;
+    if (path == null) return;
     try {
       _backgroundVideoActive = true;
+      playingItem = item;
       await _ensureAudioBackgroundReady();
+
+      String effectivePath = path;
+      if (item.isPrivate) {
+        effectivePath = await _files.getDecryptedTempPath(
+          vaultPath: path,
+          originalFilename: 'temp_bg_audio.mp4',
+        );
+        _tempDecryptedBgAudioPath = effectivePath;
+      }
+
       await audioPlayer.setAudioSource(
         AudioSource.file(
-          filePath,
+          effectivePath,
           tag: MediaItem(
             id: '${item.id}_bg',
             title: item.title,
@@ -2094,6 +2106,16 @@ class DuckDownloadsController extends ChangeNotifier
       notifyListeners();
     } catch (_) {
       _backgroundVideoActive = false;
+      playingItem = null;
+      if (_tempDecryptedBgAudioPath != null) {
+        try {
+          final f = File(_tempDecryptedBgAudioPath!);
+          if (await f.exists()) {
+            await f.delete();
+          }
+        } catch (_) {}
+        _tempDecryptedBgAudioPath = null;
+      }
     }
   }
 
@@ -2102,7 +2124,19 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> stopBackgroundVideoAudio() async {
     if (!_backgroundVideoActive) return;
     _backgroundVideoActive = false;
+    playingItem = null;
     await audioPlayer.stop();
+
+    if (_tempDecryptedBgAudioPath != null) {
+      try {
+        final f = File(_tempDecryptedBgAudioPath!);
+        if (await f.exists()) {
+          await f.delete();
+        }
+      } catch (_) {}
+      _tempDecryptedBgAudioPath = null;
+    }
+
     notifyListeners();
   }
 
