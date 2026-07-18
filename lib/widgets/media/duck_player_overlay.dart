@@ -355,7 +355,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     // Only applies to video playback
     if (!widget.item.isVideo) return;
 
-    if (state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       // Synchronously check from Android/iOS native side if we are currently in PiP mode
       try {
         final bool inPiP = await _channel.invokeMethod<bool>('isInPiP') ?? false;
