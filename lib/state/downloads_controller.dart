@@ -820,20 +820,27 @@ class DuckDownloadsController extends ChangeNotifier
         flow = DuckFlow.extracting;
         status = 'Fetching YouTube info...';
         notifyListeners();
-        // Let any exception bubble up to the outer catch → shows error to user
-        final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
-        if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
-          metadata = ytMeta;
-          selectedType = DownloadType.video;
-          quality = _firstQuality(ytMeta, DownloadType.video);
-          flow = DuckFlow.ready;
-          status = 'Choose video or audio';
-          return;
+        try {
+          final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+          if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+            metadata = ytMeta;
+            selectedType = DownloadType.video;
+            quality = _firstQuality(ytMeta, DownloadType.video);
+            flow = DuckFlow.ready;
+            status = 'Choose video or audio';
+            return;
+          }
+          throw Exception(
+            'Could not load YouTube video. The video may be private, '
+            'age-restricted, or unavailable in your region.',
+          );
+        } catch (error) {
+          if (_shouldUseLockedBrowserFallback(cleanUrl, error)) {
+            _requestLockedBrowser(cleanUrl, _browserPlatformFor(cleanUrl));
+            return;
+          }
+          rethrow;
         }
-        throw Exception(
-          'Could not load YouTube video. The video may be private, '
-          'age-restricted, or unavailable in your region.',
-        );
       }
 
       if (cleanUrl.contains('instagram.com')) {

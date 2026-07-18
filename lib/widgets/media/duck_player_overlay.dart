@@ -349,24 +349,13 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
   /// Called when app lifecycle changes (foreground ↔ background / screen lock).
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) async {
+  void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
     // Only applies to video playback
     if (!widget.item.isVideo) return;
 
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      // Synchronously check from Android/iOS native side if we are currently in PiP mode
-      try {
-        final bool inPiP = await _channel.invokeMethod<bool>('isInPiP') ?? false;
-        if (inPiP) {
-          debugPrint("App is natively in PiP mode, bypassing background audio handoff");
-          return;
-        }
-      } catch (e) {
-        debugPrint("Error checking PiP mode: $e");
-      }
-
       if (_isInPiP) {
         debugPrint("App is in PiP mode, bypassing background audio handoff");
         return;
