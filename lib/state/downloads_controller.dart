@@ -2207,7 +2207,6 @@ class DuckDownloadsController extends ChangeNotifier
   // with lock screen controls. On return, the video player resumes.
 
   bool _backgroundVideoActive = false;
-  String? _tempDecryptedBgAudioPath;
   bool get isBackgroundVideoActive => _backgroundVideoActive;
 
   /// Starts playing the audio track of a video file in the background
@@ -2215,30 +2214,26 @@ class DuckDownloadsController extends ChangeNotifier
   ///
   /// [item] — the video DownloadItem
   /// [position] — current playback position to seek to
-  Future<void> playVideoAudioInBackground(
+  /// Starts background audio playback of a video item at the specified position.
+  /// Made synchronous to execute instantly in the lifecycle transition loop.
+  void playVideoAudioInBackground(
     DownloadItem item,
     Duration position,
-  ) async {
+  ) {
     if (_backgroundVideoActive) return;
     final path = item.filePath;
     if (path == null) return;
     try {
       _backgroundVideoActive = true;
       playingItem = item;
-      await _ensureAudioBackgroundReady();
 
-      String effectivePath = path;
-      if (item.isPrivate) {
-        effectivePath = await _files.getDecryptedTempPath(
-          vaultPath: path,
-          originalFilename: 'temp_bg_audio.mp4',
-        );
-        _tempDecryptedBgAudioPath = effectivePath;
+      if (!audioBackgroundReady) {
+        _ensureAudioBackgroundReady();
       }
 
-      await audioPlayer.setAudioSource(
+      audioPlayer.setAudioSource(
         AudioSource.file(
-          effectivePath,
+          path,
           tag: MediaItem(
             id: '${item.id}_bg',
             title: item.title,
@@ -2246,22 +2241,22 @@ class DuckDownloadsController extends ChangeNotifier
             artUri: _artUriFor(item),
           ),
         ),
-      );
-      await audioPlayer.seek(position);
-      await audioPlayer.play();
+      ).catchError((e) {
+        debugPrint('Error setting bg audio source: $e');
+        return const Duration(seconds: 0); // fallback return to satisfy type checks
+      });
+
+      audioPlayer.seek(position).catchError((e) {
+        debugPrint('Error seeking bg audio: $e');
+      });
+      audioPlayer.play().catchError((e) {
+        debugPrint('Error playing bg audio: $e');
+      });
       notifyListeners();
-    } catch (_) {
+    } catch (e) {
       _backgroundVideoActive = false;
       playingItem = null;
-      if (_tempDecryptedBgAudioPath != null) {
-        try {
-          final f = File(_tempDecryptedBgAudioPath!);
-          if (await f.exists()) {
-            await f.delete();
-          }
-        } catch (_) {}
-        _tempDecryptedBgAudioPath = null;
-      }
+      debugPrint('Failed to start background video audio: $e');
     }
   }
 
@@ -2272,17 +2267,6 @@ class DuckDownloadsController extends ChangeNotifier
     _backgroundVideoActive = false;
     playingItem = null;
     await audioPlayer.stop();
-
-    if (_tempDecryptedBgAudioPath != null) {
-      try {
-        final f = File(_tempDecryptedBgAudioPath!);
-        if (await f.exists()) {
-          await f.delete();
-        }
-      } catch (_) {}
-      _tempDecryptedBgAudioPath = null;
-    }
-
     notifyListeners();
   }
 
