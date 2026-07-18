@@ -100,6 +100,14 @@ class FakeFileService extends DuckFileService {
   }
 
   @override
+  Future<String> getDecryptedTempPath({
+    required String vaultPath,
+    required String originalFilename,
+  }) async {
+    return '/temp/$originalFilename';
+  }
+
+  @override
   Future<void> updateMp3Metadata({
     required String filePath,
     required String title,

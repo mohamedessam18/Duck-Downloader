@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/download_models.dart';
+import 'vault_encryption_service.dart';
 
 class DuckFileService {
   DuckFileService({Dio? dio}) : _dio = dio ?? Dio();
@@ -69,20 +70,10 @@ class DuckFileService {
     required String currentPath,
     required String filename,
   }) async {
-    final root = await getApplicationDocumentsDirectory();
-    final vaultFolder = Directory(
-      p.join(root.path, 'Duck Downloader', '.Vault'),
+    return VaultEncryptionService.encryptAndMoveToVault(
+      currentPath: currentPath,
+      originalFilename: filename,
     );
-    await vaultFolder.create(recursive: true);
-    final safeName = _sanitizeFilename(filename);
-    final destPath = p.join(vaultFolder.path, safeName);
-    final sourceFile = File(currentPath);
-    if (await sourceFile.exists()) {
-      await sourceFile.rename(destPath);
-    } else {
-      throw Exception('Source file does not exist at $currentPath');
-    }
-    return destPath;
   }
 
   Future<String> moveFileFromVault({
@@ -90,28 +81,21 @@ class DuckFileService {
     required String filename,
     required DownloadType type,
   }) async {
-    final root = await getApplicationDocumentsDirectory();
-    final destFolder = Directory(
-      p.join(
-        root.path,
-        'Duck Downloader',
-        type == DownloadType.audio
-            ? 'Audios'
-            : type == DownloadType.image
-            ? 'Images'
-            : 'Videos',
-      ),
+    return VaultEncryptionService.decryptAndMoveFromVault(
+      currentPath: currentPath,
+      originalFilename: filename,
+      type: type,
     );
-    await destFolder.create(recursive: true);
-    final safeName = _sanitizeFilename(filename);
-    final destPath = p.join(destFolder.path, safeName);
-    final sourceFile = File(currentPath);
-    if (await sourceFile.exists()) {
-      await sourceFile.rename(destPath);
-    } else {
-      throw Exception('Source file does not exist in vault at $currentPath');
-    }
-    return destPath;
+  }
+
+  Future<String> getDecryptedTempPath({
+    required String vaultPath,
+    required String originalFilename,
+  }) async {
+    return VaultEncryptionService.getDecryptedTempPath(
+      vaultPath: vaultPath,
+      originalFilename: originalFilename,
+    );
   }
 
   Future<void> updateMp3Metadata({

@@ -399,9 +399,9 @@ class DuckDownloadsController extends ChangeNotifier
         ? item.title
         : '${item.title}.$ext';
     
-    final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+    final vaultPath = await _files.moveFileToVault(
       currentPath: path,
-      originalFilename: filename,
+      filename: filename,
     );
     final next = item.copyWith(isPrivate: true, filePath: vaultPath);
     await _saveItem(next);
@@ -419,9 +419,9 @@ class DuckDownloadsController extends ChangeNotifier
         ? item.title
         : '${item.title}.$ext';
     
-    final destPath = await VaultEncryptionService.decryptAndMoveFromVault(
+    final destPath = await _files.moveFileFromVault(
       currentPath: path,
-      originalFilename: filename,
+      filename: filename,
       type: item.type,
     );
     final next = item.copyWith(isPrivate: false, filePath: destPath);
@@ -440,9 +440,9 @@ class DuckDownloadsController extends ChangeNotifier
     final tempPath = p.join(root.path, filename);
     await file.copy(tempPath);
 
-    final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+    final vaultPath = await _files.moveFileToVault(
       currentPath: tempPath,
-      originalFilename: filename,
+      filename: filename,
     );
 
     final item = DownloadItem(
@@ -478,7 +478,7 @@ class DuckDownloadsController extends ChangeNotifier
       } else if (item.title.toLowerCase().contains('.mp3')) {
         ext = 'mp3';
       }
-      return await VaultEncryptionService.getDecryptedTempPath(
+      return await _files.getDecryptedTempPath(
         vaultPath: path,
         originalFilename: 'temp_input.$ext',
       );
@@ -525,9 +525,9 @@ class DuckDownloadsController extends ChangeNotifier
       );
 
       if (item.isPrivate) {
-        final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+        final vaultPath = await _files.moveFileToVault(
           currentPath: audioPath,
-          originalFilename: p.basename(audioPath),
+          filename: p.basename(audioPath),
         );
         final finalAudioItem = audioItem.copyWith(filePath: vaultPath);
         await _saveItem(finalAudioItem);
@@ -597,9 +597,9 @@ class DuckDownloadsController extends ChangeNotifier
       );
 
       if (item.isPrivate) {
-        final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+        final vaultPath = await _files.moveFileToVault(
           currentPath: gifPath,
-          originalFilename: p.basename(gifPath),
+          filename: p.basename(gifPath),
         );
         final finalGifItem = gifItem.copyWith(filePath: vaultPath);
         await _saveItem(finalGifItem);
@@ -1121,9 +1121,9 @@ class DuckDownloadsController extends ChangeNotifier
       }
 
       if (item.isPrivate) {
-        final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+        final vaultPath = await _files.moveFileToVault(
           currentPath: filePath,
-          originalFilename: p.basename(filePath),
+          filename: p.basename(filePath),
         );
         item = item.copyWith(
           filePath: vaultPath,
@@ -1512,9 +1512,9 @@ class DuckDownloadsController extends ChangeNotifier
                     type: baseItem.type,
                   );
                   if (next.isPrivate) {
-                    final vaultPath = await VaultEncryptionService.encryptAndMoveToVault(
+                    final vaultPath = await _files.moveFileToVault(
                       currentPath: filePath,
-                      originalFilename: p.basename(filePath),
+                      filename: p.basename(filePath),
                     );
                     next = next.copyWith(
                       filePath: vaultPath,
@@ -1692,7 +1692,7 @@ class DuckDownloadsController extends ChangeNotifier
     String effectivePath = path;
 
     if (item.isPrivate) {
-      effectivePath = await VaultEncryptionService.getDecryptedTempPath(
+      effectivePath = await _files.getDecryptedTempPath(
         vaultPath: path,
         originalFilename: fileName,
       );
