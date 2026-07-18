@@ -182,20 +182,21 @@ class YouTubeExplodeService {
     final muxedInfo = manifest.muxed.sortByVideoQuality().first;
     final tempMuxedPath = p.join(folder.path, _sanitizeFilename('temp_mux_${DateTime.now().millisecondsSinceEpoch}.mp4'));
 
-    await _dio.download(
-      muxedInfo.url.toString(),
-      tempMuxedPath,
-      onReceiveProgress: onProgress,
-      options: Options(
-        headers: {
-          'Referer': 'https://www.youtube.com/',
-          'Origin': 'https://www.youtube.com',
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      ),
-    );
+    final stream = _yt.videos.streamsClient.get(muxedInfo);
+    final file = File(tempMuxedPath);
+    final output = file.openWrite();
+    var downloaded = 0;
+    final total = muxedInfo.size.totalBytes;
+
+    await for (final data in stream) {
+      output.add(data);
+      downloaded += data.length;
+      if (onProgress != null && total > 0) {
+        onProgress(downloaded, total);
+      }
+    }
+    await output.flush();
+    await output.close();
 
     // Extract audio track from temp video file
     onTranscoding?.call();
@@ -284,53 +285,47 @@ class YouTubeExplodeService {
       if (manifest.audioOnly.isEmpty) {
         throw Exception('No audio stream found to merge with the high-quality video.');
       }
-      final audioStream = manifest.audioOnly.sortByBitrate().last;
+      final audioStreamInfo = manifest.audioOnly.sortByBitrate().last;
 
       final tempVideoPath = p.join(folder.path, 'temp_v_${DateTime.now().millisecondsSinceEpoch}.${chosen.container.name}');
-      final tempAudioPath = p.join(folder.path, 'temp_a_${DateTime.now().millisecondsSinceEpoch}.${audioStream.container.name}');
+      final tempAudioPath = p.join(folder.path, 'temp_a_${DateTime.now().millisecondsSinceEpoch}.${audioStreamInfo.container.name}');
 
       try {
-        // 1. Download Video (80% of progress)
-        await _dio.download(
-          chosen.url.toString(),
-          tempVideoPath,
-          onReceiveProgress: (received, total) {
-            if (onProgress != null && total > 0) {
-              final videoProgress = (received / total) * 0.8;
-              onProgress((videoProgress * 100).toInt(), 100);
-            }
-          },
-          options: Options(
-            headers: {
-              'Referer': 'https://www.youtube.com/',
-              'Origin': 'https://www.youtube.com',
-              'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-          ),
-        );
+        // 1. Download Video (80% of progress) using youtube_explode_dart
+        final videoStream = _yt.videos.streamsClient.get(chosen);
+        final videoFile = File(tempVideoPath);
+        final videoOutput = videoFile.openWrite();
+        var videoDownloaded = 0;
+        final videoTotal = chosen.size.totalBytes;
 
-        // 2. Download Audio (15% of progress)
-        await _dio.download(
-          audioStream.url.toString(),
-          tempAudioPath,
-          onReceiveProgress: (received, total) {
-            if (onProgress != null && total > 0) {
-              final audioProgress = 0.8 + (received / total) * 0.15;
-              onProgress((audioProgress * 100).toInt(), 100);
-            }
-          },
-          options: Options(
-            headers: {
-              'Referer': 'https://www.youtube.com/',
-              'Origin': 'https://www.youtube.com',
-              'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-          ),
-        );
+        await for (final data in videoStream) {
+          videoOutput.add(data);
+          videoDownloaded += data.length;
+          if (onProgress != null && videoTotal > 0) {
+            final videoProgress = (videoDownloaded / videoTotal) * 0.8;
+            onProgress((videoProgress * 100).toInt(), 100);
+          }
+        }
+        await videoOutput.flush();
+        await videoOutput.close();
+
+        // 2. Download Audio (15% of progress) using youtube_explode_dart
+        final audioStream = _yt.videos.streamsClient.get(audioStreamInfo);
+        final audioFile = File(tempAudioPath);
+        final audioOutput = audioFile.openWrite();
+        var audioDownloaded = 0;
+        final audioTotal = audioStreamInfo.size.totalBytes;
+
+        await for (final data in audioStream) {
+          audioOutput.add(data);
+          audioDownloaded += data.length;
+          if (onProgress != null && audioTotal > 0) {
+            final audioProgress = 0.8 + (audioDownloaded / audioTotal) * 0.15;
+            onProgress((audioProgress * 100).toInt(), 100);
+          }
+        }
+        await audioOutput.flush();
+        await audioOutput.close();
 
         // 3. Merge video & audio via FFmpeg (5% of progress)
         if (onProgress != null) {
@@ -379,21 +374,22 @@ class YouTubeExplodeService {
         } catch (_) {}
       }
     } else {
-      // Normal muxed download
-      await _dio.download(
-        chosen.url.toString(),
-        filePath,
-        onReceiveProgress: onProgress,
-        options: Options(
-          headers: {
-            'Referer': 'https://www.youtube.com/',
-            'Origin': 'https://www.youtube.com',
-            'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          },
-        ),
-      );
+      // Normal muxed download using youtube_explode_dart
+      final stream = _yt.videos.streamsClient.get(chosen);
+      final file = File(filePath);
+      final output = file.openWrite();
+      var downloaded = 0;
+      final total = chosen.size.totalBytes;
+
+      await for (final data in stream) {
+        output.add(data);
+        downloaded += data.length;
+        if (onProgress != null && total > 0) {
+          onProgress(downloaded, total);
+        }
+      }
+      await output.flush();
+      await output.close();
     }
     return filePath;
   }
