@@ -209,10 +209,97 @@ class YouTubeExplodeService {
     return m4aPath;
   }
 
-  // ── Video / other stream download (Dio) ────────────────────────────────────
+  // ── Video download (robust – fresh manifest) ──────────────────────────────
 
-  /// Downloads a video stream URL directly to local storage using Dio.
-  /// For audio, prefer [downloadAudioNative] instead.
+  /// Downloads a YouTube video by re-fetching a fresh stream manifest at
+  /// download time so the CDN URL is guaranteed not to have expired.
+  ///
+  /// Quality matching logic:
+  /// 1. Try to find a muxed stream whose height matches [preferredHeight].
+  /// 2. If no exact match, pick the closest muxed stream.
+  /// 3. If muxed list is empty, fall back to video-only streams.
+  Future<String> downloadVideoNative({
+    required String videoUrl,
+    required String title,
+    int? preferredHeight,
+    String? preferredExt,
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final videoId = VideoId.parseVideoId(videoUrl);
+    if (videoId == null) throw Exception('Invalid YouTube video URL');
+
+    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    final root = await getApplicationDocumentsDirectory();
+    final folder = Directory(p.join(root.path, 'Duck Downloader', 'Videos'));
+    await folder.create(recursive: true);
+
+    // ── Pick the best stream from the fresh manifest ─────────────────────────
+    StreamInfo? chosen;
+
+    if (manifest.muxed.isNotEmpty) {
+      final muxed = manifest.muxed.sortByVideoQuality().reversed.toList();
+      if (preferredHeight != null) {
+        // Exact match first
+        chosen = muxed.cast<StreamInfo?>().firstWhere(
+          (s) => (s as MuxedStreamInfo).videoResolution.height == preferredHeight,
+          orElse: () => null,
+        );
+        // Closest match
+        chosen ??= muxed.reduce((a, b) {
+          final diffA = (a.videoResolution.height - preferredHeight).abs();
+          final diffB = (b.videoResolution.height - preferredHeight).abs();
+          return diffA <= diffB ? a : b;
+        });
+      } else {
+        chosen = muxed.first; // highest quality
+      }
+    }
+
+    if (chosen == null && manifest.videoOnly.isNotEmpty) {
+      final videoOnly = manifest.videoOnly.sortByVideoQuality().reversed.toList();
+      if (preferredHeight != null) {
+        chosen = videoOnly.cast<StreamInfo?>().firstWhere(
+          (s) => (s as VideoOnlyStreamInfo).videoResolution.height == preferredHeight,
+          orElse: () => null,
+        );
+        chosen ??= videoOnly.reduce((a, b) {
+          final diffA = (a.videoResolution.height - preferredHeight).abs();
+          final diffB = (b.videoResolution.height - preferredHeight).abs();
+          return diffA <= diffB ? a : b;
+        });
+      } else {
+        chosen = videoOnly.first;
+      }
+    }
+
+    if (chosen == null) {
+      throw Exception('No video streams found for this YouTube video.');
+    }
+
+    final ext = preferredExt ?? chosen.container.name;
+    final filePath = await _getUniqueFilePath(folder.path, '$title.$ext');
+
+    await _dio.download(
+      chosen.url.toString(),
+      filePath,
+      onReceiveProgress: onProgress,
+      options: Options(
+        headers: {
+          'Referer': 'https://www.youtube.com/',
+          'Origin': 'https://www.youtube.com',
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      ),
+    );
+    return filePath;
+  }
+
+  // ── Legacy stream download (Dio) ───────────────────────────────────────────
+
+  /// Downloads any stream URL directly to local storage using Dio.
+  /// Prefer [downloadVideoNative] or [downloadAudioNative] for YouTube.
   Future<String> downloadStream({
     required String streamUrl,
     required String title,
