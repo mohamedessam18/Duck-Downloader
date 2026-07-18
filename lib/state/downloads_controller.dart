@@ -2242,13 +2242,21 @@ class DuckDownloadsController extends ChangeNotifier
     if (_justReturnedFromLockedBrowser) return false;
     final lowerUrl = url.toLowerCase();
     
+    final isYouTube = lowerUrl.contains('youtube.com') || lowerUrl.contains('youtu.be');
+    if (isYouTube) {
+      final errStr = error.toString().toLowerCase();
+      return _isLoginRequiredError(errStr) || 
+             errStr.contains('unplayable') ||
+             errStr.contains('age-restricted') ||
+             errStr.contains('restricted') ||
+             errStr.contains('forbidden');
+    }
+    
     final isBrowserPlatform = lowerUrl.contains('instagram.com') ||
         lowerUrl.contains('threads.net') ||
         lowerUrl.contains('threads.com') ||
         lowerUrl.contains('x.com') ||
         lowerUrl.contains('twitter.com') ||
-        lowerUrl.contains('youtube.com') ||
-        lowerUrl.contains('youtu.be') ||
         lowerUrl.contains('facebook.com') ||
         lowerUrl.contains('fb.watch');
 

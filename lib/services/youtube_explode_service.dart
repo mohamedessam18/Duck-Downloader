@@ -7,6 +7,7 @@ import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:youtube_explode_dart/src/reverse_engineering/youtube_http_client.dart';
 
 import '../models/download_models.dart';
 
@@ -22,8 +23,33 @@ import '../models/download_models.dart';
 class YouTubeExplodeService {
   YouTubeExplodeService() : _yt = YoutubeExplode(), _dio = Dio();
 
-  final YoutubeExplode _yt;
+  YoutubeExplode _yt;
   final Dio _dio;
+  String? _currentCookieString;
+
+  void updateCookies(String? netscapeCookieContent) {
+    if (netscapeCookieContent == null || netscapeCookieContent.isEmpty) {
+      _currentCookieString = null;
+      _yt.close();
+      _yt = YoutubeExplode();
+      return;
+    }
+
+    final cookiesList = <String>[];
+    final lines = netscapeCookieContent.split('\n');
+    for (final line in lines) {
+      if (line.trim().isEmpty || line.startsWith('#')) continue;
+      final parts = line.split('\t');
+      if (parts.length >= 7) {
+        final name = parts[5].trim();
+        final value = parts[6].trim();
+        cookiesList.add('$name=$value');
+      }
+    }
+    _currentCookieString = cookiesList.join('; ');
+    _yt.close();
+    _yt = YoutubeExplode(httpClient: CookieYoutubeHttpClient(_currentCookieString!));
+  }
 
   void dispose() {
     _yt.close();
@@ -500,5 +526,20 @@ class YouTubeExplodeService {
       }
     }
     return filePath;
+  }
+}
+
+class CookieYoutubeHttpClient extends YoutubeHttpClient {
+  CookieYoutubeHttpClient(this.cookieString, [super.httpClient]);
+
+  final String cookieString;
+
+  @override
+  Map<String, String> get headers {
+    final base = Map<String, String>.from(super.headers);
+    if (cookieString.isNotEmpty) {
+      base['cookie'] = cookieString;
+    }
+    return base;
   }
 }
