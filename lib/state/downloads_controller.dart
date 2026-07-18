@@ -26,6 +26,7 @@ import '../services/youtube_explode_service.dart';
 import '../services/vault_encryption_service.dart';
 import '../services/camera_service.dart';
 import '../services/conversion_service.dart';
+import '../services/cobalt_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -989,6 +990,22 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
 
     try {
+      String? cobaltUrl;
+      try {
+        cobaltUrl = await CobaltService.getDownloadUrl(
+          url: media.url,
+          type: selectedType,
+          qualityLabel: quality,
+        );
+      } catch (e) {
+        debugPrint('Cobalt extraction failed: $e');
+      }
+
+      if (cobaltUrl != null) {
+        await _startCobaltDownload(media, cobaltUrl);
+        return;
+      }
+
       final isYouTube = media.platform.toLowerCase() == 'youtube';
       if (isYouTube) {
         await _startYouTubeExplodeDownload(media);
@@ -1029,6 +1046,124 @@ class DuckDownloadsController extends ChangeNotifier
     } finally {
       busy = false;
       notifyListeners();
+    }
+  }
+
+  /// Downloads media via Cobalt URL directly on-device.
+  Future<void> _startCobaltDownload(MediaMetadata media, String downloadUrl) async {
+    final ext = selectedType == DownloadType.audio ? 'mp3' : 'mp4';
+    final itemId = DateTime.now().millisecondsSinceEpoch.toString();
+
+    var item = DownloadItem(
+      id: itemId,
+      url: media.url,
+      title: media.title,
+      thumbnail: media.thumbnail,
+      platform: media.platform,
+      quality: quality,
+      type: selectedType,
+      createdAt: DateTime.now(),
+      status: DownloadStatus.downloading,
+      progress: 0,
+      favorite: false,
+      isPrivate: downloadDirectToVault,
+    );
+    await _saveItem(item);
+    activeId = itemId;
+
+    try {
+      final filePath = await _ytExplode.downloadStream(
+        streamUrl: downloadUrl,
+        title: media.title,
+        type: selectedType,
+        ext: ext,
+        onProgress: (received, total) async {
+          if (total <= 0) return;
+          final progress = ((received / total) * 100).clamp(0, 100).toInt();
+          final updated = item.copyWith(
+            progress: progress,
+            status: DownloadStatus.downloading,
+          );
+          await _saveItem(updated);
+          notifyListeners();
+        },
+      );
+
+      if (item.isPrivate) {
+        final vaultPath = await _files.moveFileToVault(
+          currentPath: filePath,
+          filename: p.basename(filePath),
+        );
+        item = item.copyWith(
+          filePath: vaultPath,
+          progress: 100,
+          status: DownloadStatus.completed,
+        );
+        await _saveItem(item);
+      } else {
+        item = item.copyWith(
+          filePath: filePath,
+          progress: 100,
+          status: DownloadStatus.completed,
+        );
+        await _saveItem(item);
+
+        if (autoSaveVideos) {
+          item = await _trySaveMediaAfterDownload(item);
+        }
+      }
+
+      lastDownloadedItem = item;
+      flow = DuckFlow.success;
+      status = ((item.isVideo && item.savedToGallery) || (item.isAudio && item.savedToMusic))
+          ? 'Download complete and saved externally'
+          : 'Download complete';
+
+      unawaited(_notifications.showDownloadComplete(
+        id: item.id.hashCode,
+        title: item.title,
+        type: item.isVideo ? 'Video' : 'Audio',
+        downloadId: item.id,
+      ));
+    } catch (error) {
+      item = item.copyWith(status: DownloadStatus.failed);
+      await _saveItem(item);
+      debugPrint('Cobalt download failed, falling back: $error');
+
+      // Remove the failed Cobalt item to prevent duplicates
+      await _store.delete(itemId);
+      _downloads = _store.readDownloads();
+
+      // Trigger fallback download
+      final isYouTube = media.platform.toLowerCase() == 'youtube';
+      if (isYouTube) {
+        await _startYouTubeExplodeDownload(media);
+      } else {
+        final id = await _api.startDownload(
+          url: media.url,
+          type: selectedType,
+          quality: quality,
+          removeMusic: removeMusic,
+          premiumNoWatermark: true,
+        );
+        final fallbackItem = DownloadItem(
+          id: id,
+          url: media.url,
+          title: media.title,
+          thumbnail: media.thumbnail,
+          platform: media.platform,
+          quality: quality,
+          type: selectedType,
+          createdAt: DateTime.now(),
+          status: DownloadStatus.queued,
+          progress: 0,
+          favorite: false,
+          isPrivate: downloadDirectToVault,
+        );
+        await _saveItem(fallbackItem);
+        activeId = id;
+        _watchDownload(id, fallbackItem);
+      }
     }
   }
 
