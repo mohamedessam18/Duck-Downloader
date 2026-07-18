@@ -279,20 +279,122 @@ class YouTubeExplodeService {
     final ext = preferredExt ?? chosen.container.name;
     final filePath = await _getUniqueFilePath(folder.path, '$title.$ext');
 
-    await _dio.download(
-      chosen.url.toString(),
-      filePath,
-      onReceiveProgress: onProgress,
-      options: Options(
-        headers: {
-          'Referer': 'https://www.youtube.com/',
-          'Origin': 'https://www.youtube.com',
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      ),
-    );
+    final isVideoOnly = chosen is VideoOnlyStreamInfo;
+    if (isVideoOnly) {
+      if (manifest.audioOnly.isEmpty) {
+        throw Exception('No audio stream found to merge with the high-quality video.');
+      }
+      final audioStream = manifest.audioOnly.sortByBitrate().last;
+
+      final tempVideoPath = p.join(folder.path, 'temp_v_${DateTime.now().millisecondsSinceEpoch}.${chosen.container.name}');
+      final tempAudioPath = p.join(folder.path, 'temp_a_${DateTime.now().millisecondsSinceEpoch}.${audioStream.container.name}');
+
+      try {
+        // 1. Download Video (80% of progress)
+        await _dio.download(
+          chosen.url.toString(),
+          tempVideoPath,
+          onReceiveProgress: (received, total) {
+            if (onProgress != null && total > 0) {
+              final videoProgress = (received / total) * 0.8;
+              onProgress((videoProgress * 100).toInt(), 100);
+            }
+          },
+          options: Options(
+            headers: {
+              'Referer': 'https://www.youtube.com/',
+              'Origin': 'https://www.youtube.com',
+              'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+          ),
+        );
+
+        // 2. Download Audio (15% of progress)
+        await _dio.download(
+          audioStream.url.toString(),
+          tempAudioPath,
+          onReceiveProgress: (received, total) {
+            if (onProgress != null && total > 0) {
+              final audioProgress = 0.8 + (received / total) * 0.15;
+              onProgress((audioProgress * 100).toInt(), 100);
+            }
+          },
+          options: Options(
+            headers: {
+              'Referer': 'https://www.youtube.com/',
+              'Origin': 'https://www.youtube.com',
+              'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+          ),
+        );
+
+        // 3. Merge video & audio via FFmpeg (5% of progress)
+        if (onProgress != null) {
+          onProgress(95, 100);
+        }
+
+        final mergeArgs = [
+          '-y',
+          '-i', tempVideoPath,
+          '-i', tempAudioPath,
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-map', '0:v:0',
+          '-map', '1:a:0',
+          '-shortest',
+          filePath,
+        ];
+
+        final session = await FFmpegKit.executeWithArguments(mergeArgs);
+        final returnCode = await session.getReturnCode();
+
+        if (!ReturnCode.isSuccess(returnCode)) {
+          final logs = await session.getAllLogsAsString();
+          throw Exception(
+            'FFmpeg merge failed: ${logs?.trim() ?? 'unknown error'}',
+          );
+        }
+
+        final outFile = File(filePath);
+        if (!await outFile.exists() || await outFile.length() <= 0) {
+          throw Exception('FFmpeg produced an empty merged video file.');
+        }
+
+        if (onProgress != null) {
+          onProgress(100, 100);
+        }
+      } finally {
+        // Clean up temp files
+        try {
+          final fv = File(tempVideoPath);
+          if (fv.existsSync()) fv.deleteSync();
+        } catch (_) {}
+        try {
+          final fa = File(tempAudioPath);
+          if (fa.existsSync()) fa.deleteSync();
+        } catch (_) {}
+      }
+    } else {
+      // Normal muxed download
+      await _dio.download(
+        chosen.url.toString(),
+        filePath,
+        onReceiveProgress: onProgress,
+        options: Options(
+          headers: {
+            'Referer': 'https://www.youtube.com/',
+            'Origin': 'https://www.youtube.com',
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+        ),
+      );
+    }
     return filePath;
   }
 
