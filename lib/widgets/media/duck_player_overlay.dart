@@ -199,7 +199,12 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
               _video?.setPlaybackSpeed(_speed);
               _video?.addListener(_videoListener);
-              final resume = widget.controller.videoResumePosition(widget.item.id);
+              var resume = widget.controller.videoResumePosition(widget.item.id);
+              if (widget.controller.isBackgroundVideoActive &&
+                  widget.controller.playingItem?.id == widget.item.id) {
+                resume = widget.controller.audioPlayer.position;
+                await widget.controller.stopBackgroundVideoAudio();
+              }
               if (resume > Duration.zero) {
                 await _video?.seekTo(resume);
               }
@@ -366,9 +371,18 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
         debugPrint("App is in PiP mode, bypassing background audio handoff");
         return;
       }
-      _handoffVideoAudioToBackground();
+      if (widget.controller.backgroundPlaybackEnabled) {
+        _handoffVideoAudioToBackground();
+      } else {
+        _video?.pause();
+      }
     } else if (state == AppLifecycleState.resumed) {
-      _resumeVideoFromBackground();
+      if (widget.controller.backgroundPlaybackEnabled) {
+        _resumeVideoFromBackground();
+      } else {
+        // Just make sure UI updates to reflect paused/resumed video state
+        if (mounted) setState(() {});
+      }
     }
   }
 
@@ -1002,6 +1016,24 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                   ),
                                                   const SizedBox(width: 12),
                                                   if (widget.item.isVideo) ...[
+                                                    IconButton(
+                                                      padding: EdgeInsets.zero,
+                                                      constraints: const BoxConstraints(),
+                                                      icon: const Icon(Icons.headphones, color: Colors.white, size: 20),
+                                                      onPressed: () {
+                                                        final video = _video;
+                                                        if (video == null || !video.value.isInitialized) return;
+                                                        final pos = video.value.position;
+                                                        _hideTimer?.cancel();
+                                                        video.pause();
+                                                        widget.controller.playVideoAudioInBackground(
+                                                          widget.item,
+                                                          pos,
+                                                        );
+                                                        widget.controller.closePlayer();
+                                                      },
+                                                    ),
+                                                    const SizedBox(width: 12),
                                                     IconButton(
                                                       padding: EdgeInsets.zero,
                                                       constraints: const BoxConstraints(),

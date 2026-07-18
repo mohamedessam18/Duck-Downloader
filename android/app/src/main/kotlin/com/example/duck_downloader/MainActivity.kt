@@ -126,6 +126,37 @@ class MainActivity : AudioServiceFragmentActivity() {
                         updatePiPParams(isVideoPlaying)
                         result.success(null)
                     }
+                    "canWriteSettings" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            result.success(android.provider.Settings.System.canWrite(this))
+                        } else {
+                            result.success(true)
+                        }
+                    }
+                    "requestWriteSettingsPermission" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val intent = Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
+                                data = Uri.parse("package:$packageName")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                        }
+                        result.success(true)
+                    }
+                    "setRingtone" -> {
+                        val path = call.argument<String>("path")
+                        val title = call.argument<String>("title")
+                        if (path.isNullOrBlank() || title.isNullOrBlank()) {
+                            result.error("invalid_args", "Missing path or title.", null)
+                            return@setMethodCallHandler
+                        }
+                        val file = File(path)
+                        if (!file.exists()) {
+                            result.error("file_not_found", "Audio file does not exist.", null)
+                            return@setMethodCallHandler
+                        }
+                        result.success(setSystemRingtone(file, title))
+                    }
                     else -> result.notImplemented()
                 }
             } catch (error: Exception) {
@@ -327,5 +358,42 @@ class MainActivity : AudioServiceFragmentActivity() {
             null,
         )
         return mapOf("success" to true, "uri" to Uri.fromFile(target).toString())
+    }
+
+    private fun setSystemRingtone(file: File, title: String): Boolean {
+        return try {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DATA, file.absolutePath)
+                put(MediaStore.MediaColumns.TITLE, title)
+                put(MediaStore.MediaColumns.SIZE, file.length())
+                put(MediaStore.MediaColumns.MIME_TYPE, "audio/mp3")
+                put(MediaStore.Audio.Media.IS_RINGTONE, true)
+                put(MediaStore.Audio.Media.IS_NOTIFICATION, false)
+                put(MediaStore.Audio.Media.IS_ALARM, false)
+                put(MediaStore.Audio.Media.IS_MUSIC, false)
+            }
+
+            val baseUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            try {
+                contentResolver.delete(baseUri, "${MediaStore.MediaColumns.DATA} = ?", arrayOf(file.absolutePath))
+            } catch (e: Exception) {
+                // ignore
+            }
+
+            val ringtoneUri = contentResolver.insert(baseUri, values)
+            if (ringtoneUri != null) {
+                android.media.RingtoneManager.setActualDefaultRingtoneUri(
+                    this,
+                    android.media.RingtoneManager.TYPE_RINGTONE,
+                    ringtoneUri
+                )
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 }

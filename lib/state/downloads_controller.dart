@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -56,6 +57,7 @@ class DuckDownloadsController extends ChangeNotifier
     _videoResumePositions = _store.readVideoResumePositions();
     autoSaveVideos = _store.readAutoSaveVideos();
     enableClipboardDetection = _store.readEnableClipboardDetection();
+    backgroundPlaybackEnabled = _store.readBackgroundPlaybackEnabled();
     _playlists = _store.readPlaylists();
     _vaultPin = _store.readVaultPin();
     _decoyVaultPin = _store.readDecoyVaultPin();
@@ -95,6 +97,7 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   final AudioPlayer audioPlayer = AudioPlayer();
+  static const _channel = MethodChannel('duck_downloader/media');
   final AudioPlayer _sfxPlayer = AudioPlayer();
   StreamSubscription? _intentSub;
   bool showAdOnOpen = false;
@@ -167,8 +170,13 @@ class DuckDownloadsController extends ChangeNotifier
   bool _justReturnedFromLockedBrowser = false;
   bool autoSaveVideos = true;
   bool enableClipboardDetection = true;
+  bool backgroundPlaybackEnabled = true;
   String? detectedClipboardUrl;
   String? _lastDetectedUrl;
+  
+  Completer<bool>? _playlistChoiceCompleter;
+  bool showPlaylistChoiceDialog = false;
+  String? pendingPlaylistUrl;
   bool externalSaveBusy = false;
   String? activeId;
   DownloadItem? playerItem;
@@ -731,15 +739,24 @@ class DuckDownloadsController extends ChangeNotifier
     lockedBrowserRequest = null;
     lastDownloadedItem = null;
 
-    final cleanUrl = url.trim();
+    var cleanUrl = url.trim();
     final isAdult = await _isAdultUrl(cleanUrl);
     if (isAdult) {
       isAdultContentBlocked = true;
       notifyListeners();
       throw Exception('BLOCKED_ADULT_CONTENT');
     }
-    final isPlaylist =
-        cleanUrl.contains('list=') || cleanUrl.contains('/playlist');
+
+    final hasVideoAndList = cleanUrl.contains('v=') && (cleanUrl.contains('list=') || cleanUrl.contains('/playlist'));
+    var isPlaylist = cleanUrl.contains('list=') || cleanUrl.contains('/playlist');
+
+    if (hasVideoAndList && YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+      final downloadPlaylist = await _promptPlaylistChoice(cleanUrl);
+      if (!downloadPlaylist) {
+        cleanUrl = _stripPlaylistParam(cleanUrl);
+        isPlaylist = false;
+      }
+    }
     final lines = cleanUrl
         .split(RegExp(r'\s+'))
         .where((s) => _isPublicMediaCandidate(s))
@@ -1296,10 +1313,97 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> shareDownload(DownloadItem item) =>
       _files.shareFile(item.filePath);
 
+  Future<void> cutAndSetAsRingtone(
+    DownloadItem item, {
+    required double startTime,
+    required double endTime,
+  }) async {
+    if (busy) return;
+
+    if (!Platform.isAndroid) {
+      throw Exception('Ringtones can only be set programmatically on Android devices.');
+    }
+
+    final bool canWrite = await _channel.invokeMethod<bool>('canWriteSettings') ?? false;
+    if (!canWrite) {
+      status = 'Please grant system settings modification permission.';
+      notifyListeners();
+      await _channel.invokeMethod<void>('requestWriteSettingsPermission');
+      // Wait for user to return
+      await Future<void>.delayed(const Duration(seconds: 1));
+      final bool checkAgain = await _channel.invokeMethod<bool>('canWriteSettings') ?? false;
+      if (!checkAgain) {
+        throw Exception('Write settings permission is required to set default ringtone.');
+      }
+    }
+
+    final info = await _getEffectivePathAndFileName(item);
+    final inputPath = info['path']!;
+
+    busy = true;
+    status = 'Cutting audio...';
+    notifyListeners();
+
+    String? trimmedTempPath;
+    try {
+      trimmedTempPath = await _trimService.trimLocalFile(
+        inputPath: inputPath,
+        startSec: startTime,
+        endSec: endTime,
+        type: DownloadType.audio,
+      );
+
+      final root = await getApplicationDocumentsDirectory();
+      final folder = Directory(p.join(root.path, 'Duck Downloader', 'Ringtones'));
+      await folder.create(recursive: true);
+
+      final safeName = '${item.id}_ringtone.mp3';
+      final finalPath = p.join(folder.path, safeName);
+
+      final tempFile = File(trimmedTempPath);
+      if (await tempFile.exists()) {
+        if (await File(finalPath).exists()) {
+          await File(finalPath).delete();
+        }
+        await tempFile.copy(finalPath);
+        await tempFile.delete();
+      }
+
+      status = 'Setting ringtone...';
+      notifyListeners();
+
+      final bool success = await _channel.invokeMethod<bool>('setRingtone', {
+        'path': finalPath,
+        'title': '${item.title} Ringtone',
+      }) ?? false;
+
+      if (success) {
+        status = 'Ringtone set successfully!';
+      } else {
+        throw Exception('Failed to register ringtone in system database.');
+      }
+    } finally {
+      if (item.isPrivate && inputPath != item.filePath) {
+        try {
+          await File(inputPath).delete();
+        } catch (_) {}
+      }
+      busy = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> toggleAutoSaveVideos(bool enabled) async {
     autoSaveVideos = enabled;
     await _store.writeAutoSaveVideos(enabled);
     status = enabled ? 'Auto save enabled' : 'Auto save disabled';
+    notifyListeners();
+  }
+
+  Future<void> toggleBackgroundPlayback(bool enabled) async {
+    backgroundPlaybackEnabled = enabled;
+    await _store.writeBackgroundPlaybackEnabled(enabled);
+    status = enabled ? 'Background playback enabled' : 'Background playback disabled';
     notifyListeners();
   }
 
@@ -1576,6 +1680,9 @@ class DuckDownloadsController extends ChangeNotifier
       notifyListeners();
     }
   }
+
+  Future<Map<String, String>> getEffectivePathAndFileName(DownloadItem item) =>
+      _getEffectivePathAndFileName(item);
 
   Future<Map<String, String>> _getEffectivePathAndFileName(DownloadItem item) async {
     final path = item.filePath;
@@ -2790,6 +2897,36 @@ class DuckDownloadsController extends ChangeNotifier
     } finally {
       busy = false;
       notifyListeners();
+    }
+  }
+
+  Future<bool> _promptPlaylistChoice(String url) async {
+    pendingPlaylistUrl = url;
+    showPlaylistChoiceDialog = true;
+    _playlistChoiceCompleter = Completer<bool>();
+    notifyListeners();
+    final choice = await _playlistChoiceCompleter!.future;
+    showPlaylistChoiceDialog = false;
+    pendingPlaylistUrl = null;
+    notifyListeners();
+    return choice;
+  }
+
+  void resolvePlaylistChoice(bool downloadPlaylist) {
+    if (_playlistChoiceCompleter != null && !_playlistChoiceCompleter!.isCompleted) {
+      _playlistChoiceCompleter!.complete(downloadPlaylist);
+    }
+  }
+
+  String _stripPlaylistParam(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final queryParams = Map<String, String>.from(uri.queryParameters);
+      queryParams.remove('list');
+      queryParams.remove('index');
+      return uri.replace(queryParameters: queryParams).toString();
+    } catch (_) {
+      return url;
     }
   }
 }

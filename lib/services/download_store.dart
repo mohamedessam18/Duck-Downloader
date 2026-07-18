@@ -35,6 +35,14 @@ class DownloadStore {
     return _box.put('enableClipboardDetection', enabled);
   }
 
+  bool readBackgroundPlaybackEnabled() {
+    return _box.get('backgroundPlaybackEnabled', defaultValue: true) as bool;
+  }
+
+  Future<void> writeBackgroundPlaybackEnabled(bool enabled) {
+    return _box.put('backgroundPlaybackEnabled', enabled);
+  }
+
   Future<DownloadItem> upsert(DownloadItem item) async {
     final items = readDownloads();
     final index = items.indexWhere((existing) => existing.id == item.id);

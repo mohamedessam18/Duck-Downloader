@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
+import 'package:just_audio/just_audio.dart';
 
 import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
@@ -320,6 +321,10 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
                     onDismiss: widget.controller.dismissClipboardDetection,
                     onAccept: widget.controller.acceptClipboardDetection,
                   ),
+                if (widget.controller.showPlaylistChoiceDialog)
+                  _PlaylistChoiceOverlay(
+                    controller: widget.controller,
+                  ),
                 if (widget.controller.playerItem == null && MediaQuery.viewInsetsOf(context).bottom == 0)
                   Positioned(
                     bottom: 0,
@@ -388,6 +393,7 @@ class _HomeView extends StatelessWidget {
                     children: [
                       _AutoSaveToggle(controller: controller),
                       _ClipboardToggle(controller: controller),
+                      _BackgroundPlayToggle(controller: controller),
                       _ProBadge(controller: controller),
                     ],
                   ),
@@ -577,6 +583,32 @@ class _ClipboardToggle extends StatelessWidget {
         _showSettingToast(
           context,
           newStatus ? 'Clipboard Detection Enabled' : 'Clipboard Detection Disabled',
+          newStatus,
+        );
+      },
+    );
+  }
+}
+
+class _BackgroundPlayToggle extends StatelessWidget {
+  const _BackgroundPlayToggle({required this.controller});
+
+  final DuckDownloadsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return _HeaderToggle(
+      icon: controller.backgroundPlaybackEnabled
+          ? Icons.headphones
+          : Icons.headphones_outlined,
+      label: 'BG PLAY',
+      active: controller.backgroundPlaybackEnabled,
+      onTap: () {
+        final newStatus = !controller.backgroundPlaybackEnabled;
+        controller.toggleBackgroundPlayback(newStatus);
+        _showSettingToast(
+          context,
+          newStatus ? 'Background Playback Enabled' : 'Background Playback Disabled',
           newStatus,
         );
       },
@@ -2523,6 +2555,8 @@ class _DownloadRow extends StatelessWidget {
                   _showMetadataEditDialog(context, item, controller);
                 case 'convert_audio':
                   _showVideoToAudioDialog(context, item, controller);
+                case 'ringtone':
+                  _showRingtoneCutterSheet(context, item, controller);
               }
             },
             itemBuilder: (context) => [
@@ -2631,6 +2665,20 @@ class _DownloadRow extends StatelessWidget {
                       SizedBox(width: 12),
                       Text(
                         'Edit Tag Info',
+                        style: TextStyle(color: _text, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ),
+              if (item.isAudio && Platform.isAndroid)
+                PopupMenuItem(
+                  value: 'ringtone',
+                  child: Row(
+                    children: [
+                      Icon(Icons.ring_volume, color: _gold, size: 20),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Set as Ringtone',
                         style: TextStyle(color: _text, fontSize: 14),
                       ),
                     ],
@@ -5163,6 +5211,451 @@ class _BottomNavBarState extends State<_BottomNavBar> {
             child: Text(label),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PlaylistChoiceOverlay extends StatelessWidget {
+  const _PlaylistChoiceOverlay({required this.controller});
+
+  final DuckDownloadsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final gold = isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
+    final dark = isLight ? const Color(0xFFF0F1F2) : const Color(0xFF101112);
+    final text = isLight ? const Color(0xFF101112) : Colors.white;
+    final textMuted = isLight ? const Color(0xFF707172) : const Color(0xFF888A8C);
+
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.65),
+        alignment: Alignment.center,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.4),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: DuckLiquidGlassSurface(
+              borderRadius: 20,
+              blurSigma: 25,
+              variant: DuckLiquidGlassVariant.panel,
+              fallbackGradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(0.12),
+                  Colors.white.withOpacity(0.02),
+                ],
+              ),
+              fallbackBorderColor: Colors.white.withOpacity(0.18),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.playlist_play, color: gold, size: 28),
+                            const SizedBox(width: 8),
+                            Text(
+                              'PLAYLIST DETECTED',
+                              style: TextStyle(
+                                color: text,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close, color: textMuted, size: 20),
+                          onPressed: () => controller.resolvePlaylistChoice(false),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'This link contains a single video and a full playlist. How would you like to download it?',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w300,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: dark,
+                              foregroundColor: gold,
+                              surfaceTintColor: Colors.transparent,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(color: gold.withOpacity(0.5)),
+                              ),
+                            ),
+                            onPressed: () => controller.resolvePlaylistChoice(false),
+                            child: const Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.play_circle_outline, size: 24),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Single Video',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: gold,
+                              foregroundColor: dark,
+                              surfaceTintColor: Colors.transparent,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: () => controller.resolvePlaylistChoice(true),
+                            child: const Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.playlist_add, size: 24),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Full Playlist',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+void _showRingtoneCutterSheet(
+  BuildContext context,
+  DownloadItem item,
+  DuckDownloadsController controller,
+) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (context) {
+      return _RingtoneCutterSheet(item: item, controller: controller);
+    },
+  );
+}
+
+class _RingtoneCutterSheet extends StatefulWidget {
+  const _RingtoneCutterSheet({
+    required this.item,
+    required this.controller,
+  });
+
+  final DownloadItem item;
+  final DuckDownloadsController controller;
+
+  @override
+  State<_RingtoneCutterSheet> createState() => _RingtoneCutterSheetState();
+}
+
+class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
+  late final AudioPlayer _previewPlayer;
+  double _durationSec = 0.0;
+  double _startSec = 0.0;
+  double _endSec = 0.0;
+  bool _initialized = false;
+  bool _isPlaying = false;
+  StreamSubscription? _posSub;
+  StreamSubscription? _stateSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _previewPlayer = AudioPlayer();
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    try {
+      final filePath = widget.item.filePath;
+      if (filePath == null) return;
+
+      final info = await widget.controller.getEffectivePathAndFileName(widget.item);
+      final actualPath = info['path']!;
+
+      final duration = await _previewPlayer.setFilePath(actualPath) ?? Duration.zero;
+      if (mounted) {
+        setState(() {
+          _durationSec = duration.inMilliseconds / 1000.0;
+          _endSec = _durationSec > 30.0 ? 30.0 : _durationSec;
+          _initialized = true;
+        });
+      }
+
+      _posSub = _previewPlayer.positionStream.listen((pos) {
+        final posSec = pos.inMilliseconds / 1000.0;
+        if (_isPlaying && posSec >= _endSec) {
+          _previewPlayer.pause();
+          _previewPlayer.seek(Duration(milliseconds: (_startSec * 1000).toInt()));
+        }
+      });
+
+      _stateSub = _previewPlayer.playerStateStream.listen((state) {
+        if (mounted) {
+          setState(() {
+            _isPlaying = state.playing;
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint("Error initializing ringtone preview player: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _posSub?.cancel();
+    _stateSub?.cancel();
+    _previewPlayer.dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() {
+    if (!_initialized) return;
+    if (_isPlaying) {
+      _previewPlayer.pause();
+    } else {
+      _previewPlayer.seek(Duration(milliseconds: (_startSec * 1000).toInt()));
+      _previewPlayer.play();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final gold = isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
+    final dark = isLight ? const Color(0xFFF0F1F2) : const Color(0xFF101112);
+    final text = isLight ? const Color(0xFF101112) : Colors.white;
+    final textMuted = isLight ? const Color(0xFF707172) : const Color(0xFF888A8C);
+
+    final selectedDur = _endSec - _startSec;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: dark,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.paddingOf(context).bottom),
+      child: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) {
+          final isBusy = widget.controller.busy;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: textMuted.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Icon(Icons.ring_volume, color: gold, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Ringtone Cutter',
+                      style: TextStyle(
+                        color: text,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close, color: textMuted),
+                    onPressed: isBusy ? null : () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                widget.item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 24),
+              if (!_initialized)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: CircularProgressIndicator(),
+                  ),
+                )
+              else ...[
+                Text(
+                  'Start: ${_startSec.toStringAsFixed(1)}s   |   End: ${_endSec.toStringAsFixed(1)}s',
+                  style: TextStyle(
+                    color: text,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Duration: ${selectedDur.toStringAsFixed(1)}s (Max 30s)',
+                  style: TextStyle(
+                    color: selectedDur > 30.05 ? Colors.red : gold,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                RangeSlider(
+                  values: RangeValues(_startSec, _endSec),
+                  min: 0.0,
+                  max: _durationSec,
+                  activeColor: gold,
+                  inactiveColor: textMuted.withOpacity(0.2),
+                  labels: RangeLabels(
+                    '${_startSec.toStringAsFixed(1)}s',
+                    '${_endSec.toStringAsFixed(1)}s',
+                  ),
+                  onChanged: isBusy
+                      ? null
+                      : (RangeValues values) {
+                          double newStart = values.start;
+                          double newEnd = values.end;
+                          if (newEnd - newStart > 30.0) {
+                            if (newStart != _startSec) {
+                              newEnd = newStart + 30.0;
+                            } else {
+                              newStart = newEnd - 30.0;
+                            }
+                          }
+                          setState(() {
+                            _startSec = newStart;
+                            _endSec = newEnd;
+                          });
+                          _previewPlayer.seek(Duration(milliseconds: (_startSec * 1000).toInt()));
+                        },
+                ),
+                const SizedBox(height: 20),
+                IconButton(
+                  iconSize: 48,
+                  icon: Icon(
+                    _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                    color: gold,
+                  ),
+                  onPressed: isBusy ? null : _togglePlay,
+                ),
+                const SizedBox(height: 24),
+                if (isBusy) ...[
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.controller.status ?? 'Processing...',
+                    style: TextStyle(color: text, fontSize: 13),
+                  ),
+                ] else
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: gold,
+                        foregroundColor: dark,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.ring_volume),
+                      label: const Text(
+                        'Set as Default Ringtone',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: () async {
+                        try {
+                          _previewPlayer.pause();
+                          await widget.controller.cutAndSetAsRingtone(
+                            widget.item,
+                            startTime: _startSec,
+                            endTime: _endSec,
+                          );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Ringtone updated successfully!')),
+                            );
+                            Navigator.pop(context);
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: ${e.toString()}')),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
