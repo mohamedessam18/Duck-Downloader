@@ -1011,7 +1011,9 @@ class DuckDownloadsController extends ChangeNotifier
     } catch (error) {
       flow = DuckFlow.error;
       status = _cleanError(error);
-      if (_isLoginRequiredError(error.toString()) && !_justReturnedFromLockedBrowser) {
+      if (_isLoginRequiredError(error.toString()) && 
+          !_justReturnedFromLockedBrowser && 
+          !YouTubeExplodeService.isYouTubeUrl(media.url)) {
         _requestLockedBrowser(media.url, _browserPlatformFor(media.url));
         return;
       }
@@ -1101,14 +1103,17 @@ class DuckDownloadsController extends ChangeNotifier
           },
         );
       } else {
-        // ── Video: use Dio with the stored stream URL ─────────────────────────
-        final ext =
-            format.ext ?? 'mp4';
-        filePath = await _ytExplode.downloadStream(
-          streamUrl: format.id,
+        // ── Video: re-fetch a fresh manifest to avoid expired URLs ──────────
+        // Parse the preferred height from the quality label (e.g. "720p (MP4)")
+        final heightMatch = RegExp(r'(\d+)p').firstMatch(format.label);
+        final preferredHeight = heightMatch != null
+            ? int.tryParse(heightMatch.group(1)!)
+            : null;
+        filePath = await _ytExplode.downloadVideoNative(
+          videoUrl: media.url,
           title: media.title,
-          type: selectedType,
-          ext: ext,
+          preferredHeight: preferredHeight,
+          preferredExt: format.ext,
           onProgress: (received, total) async {
             if (total <= 0) return;
             final progress = ((received / total) * 99).clamp(0, 99).toInt();
@@ -1236,12 +1241,16 @@ class DuckDownloadsController extends ChangeNotifier
             },
           );
         } else {
-          final ext = format.ext ?? 'mp4';
-          filePath = await _ytExplode.downloadStream(
-            streamUrl: format.id,
+          // Re-fetch a fresh manifest to avoid expired stream URLs
+          final heightMatch = RegExp(r'(\d+)p').firstMatch(format.label);
+          final preferredHeight = heightMatch != null
+              ? int.tryParse(heightMatch.group(1)!)
+              : null;
+          filePath = await _ytExplode.downloadVideoNative(
+            videoUrl: url,
             title: item.title,
-            type: type,
-            ext: ext,
+            preferredHeight: preferredHeight,
+            preferredExt: format.ext,
             onProgress: (received, total) async {
               if (total <= 0) return;
               final progress = ((received / total) * 99).clamp(0, 99).toInt();
@@ -1576,7 +1585,9 @@ class DuckDownloadsController extends ChangeNotifier
               flow = DuckFlow.error;
               status = _cleanError(errText.isNotEmpty ? errText : 'Download failed.');
 
-              if (isLoginRequired && !_justReturnedFromLockedBrowser) {
+              if (isLoginRequired && 
+                  !_justReturnedFromLockedBrowser && 
+                  !YouTubeExplodeService.isYouTubeUrl(baseItem.url)) {
                 _requestLockedBrowser(
                   baseItem.url,
                   _browserPlatformFor(baseItem.url),
@@ -2197,15 +2208,15 @@ class DuckDownloadsController extends ChangeNotifier
     if (_justReturnedFromLockedBrowser) return false;
     final lowerUrl = url.toLowerCase();
     
-    final isBrowserPlatform = lowerUrl.contains('instagram.com') ||
+    final isBrowserPlatform = (lowerUrl.contains('instagram.com') ||
         lowerUrl.contains('threads.net') ||
         lowerUrl.contains('threads.com') ||
         lowerUrl.contains('x.com') ||
         lowerUrl.contains('twitter.com') ||
-        lowerUrl.contains('youtube.com') ||
-        lowerUrl.contains('youtu.be') ||
         lowerUrl.contains('facebook.com') ||
-        lowerUrl.contains('fb.watch');
+        lowerUrl.contains('fb.watch')) &&
+        !lowerUrl.contains('youtube.com') &&
+        !lowerUrl.contains('youtu.be');
 
     if (isBrowserPlatform) return true;
 
@@ -2231,6 +2242,8 @@ class DuckDownloadsController extends ChangeNotifier
         .trim();
 
     final lower = cleaned.toLowerCase();
+    final isYt = lastAttemptedUrl != null && YouTubeExplodeService.isYouTubeUrl(lastAttemptedUrl!);
+
     if (lower.contains('blocked_adult_content')) {
       return 'Blocked: Adult Content is not allowed.';
     }
@@ -2240,14 +2253,18 @@ class DuckDownloadsController extends ChangeNotifier
       return 'YouTube is blocking this download. Please try again later or try another video.';
     }
 
-    // 2. Facebook/Instagram/TikTok parse/extraction errors
+    // 2. Facebook/Instagram/TikTok/YouTube parse/extraction errors
     if (lower.contains('cannot parse data') || lower.contains('extractor') || lower.contains('unable to extract')) {
-      return 'Failed to extract media. The post might be private, restricted, or requires browser login.';
+      return isYt
+          ? 'Could not load YouTube video. It might be private or age-restricted.'
+          : 'Failed to extract media. The post might be private, restricted, or requires browser login.';
     }
 
     // 3. Private/Login gated content
-    if (lower.contains('login') || lower.contains('private') || lower.contains('cookies')) {
-      return 'This post requires authentication. Please log in first using the in-app browser.';
+    if (lower.contains('login') || lower.contains('private') || lower.contains('cookies') || lower.contains('unplayable')) {
+      return isYt
+          ? 'This YouTube video requires authentication, is private, or is age-restricted.'
+          : 'This post requires authentication. Please log in first using the in-app browser.';
     }
 
     // 4. Unsupported URLs
