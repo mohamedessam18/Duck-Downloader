@@ -30,6 +30,8 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
   late int _currentIndex;
   String? _loadError;
   bool _showControls = true;
+  final Map<String, String> _decryptedPaths = {};
+  final Set<String> _tempFilesToDelete = {};
 
   @override
   void initState() {
@@ -43,6 +45,12 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
   @override
   void dispose() {
     _pageController.dispose();
+    for (final path in _tempFilesToDelete) {
+      try {
+        final f = File(path);
+        if (f.existsSync()) f.deleteSync();
+      } catch (_) {}
+    }
     super.dispose();
   }
 
@@ -56,11 +64,36 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
 
   void _toggleControls() => setState(() => _showControls = !_showControls);
 
-  ImageProvider? _providerFor(DownloadItem item) {
+  Future<ImageProvider?> _getEffectiveProvider(DownloadItem item) async {
     final filePath = item.filePath;
-    if (filePath != null && File(filePath).existsSync()) {
-      return FileImage(File(filePath));
+    if (filePath == null) {
+      final thumb = item.thumbnail;
+      if (thumb != null && thumb.startsWith('http')) {
+        return NetworkImage(thumb);
+      }
+      return null;
     }
+
+    if (item.isPrivate) {
+      if (_decryptedPaths.containsKey(item.id)) {
+        final cachedPath = _decryptedPaths[item.id]!;
+        if (File(cachedPath).existsSync()) return FileImage(File(cachedPath));
+      }
+      try {
+        final info = await widget.controller.getEffectivePathAndFileName(item);
+        final decPath = info['path']!;
+        _decryptedPaths[item.id] = decPath;
+        _tempFilesToDelete.add(decPath);
+        if (File(decPath).existsSync()) return FileImage(File(decPath));
+      } catch (e) {
+        debugPrint('Failed to decrypt vault image: $e');
+      }
+    } else {
+      if (File(filePath).existsSync()) {
+        return FileImage(File(filePath));
+      }
+    }
+
     final thumb = item.thumbnail;
     if (thumb != null && thumb.startsWith('http')) {
       return NetworkImage(thumb);
@@ -111,33 +144,43 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
               onPageChanged: (index) => setState(() => _currentIndex = index),
               itemBuilder: (context, index) {
                 final item = images[index];
-                final provider = _providerFor(item);
-                if (provider == null) {
-                  return const Center(
-                    child: Text(
-                      'Image file is not available.',
-                      style: TextStyle(color: Color(0xFFD9D9D9)),
-                    ),
-                  );
-                }
-                return GestureDetector(
-                  onTap: _toggleControls,
-                  child: PhotoView(
-                    imageProvider: provider,
-                    minScale: PhotoViewComputedScale.contained * 0.5,
-                    maxScale: PhotoViewComputedScale.covered * 4,
-                    backgroundDecoration: const BoxDecoration(
-                      color: Colors.black,
-                    ),
-                    errorBuilder: (_, _, _) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) {
-                          setState(() => _loadError = 'Could not load image.');
-                        }
-                      });
-                      return const SizedBox.shrink();
-                    },
-                  ),
+                return FutureBuilder<ImageProvider?>(
+                  future: _getEffectiveProvider(item),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(
+                        child: CircularProgressIndicator(color: mediaGold),
+                      );
+                    }
+                    final provider = snapshot.data;
+                    if (provider == null) {
+                      return const Center(
+                        child: Text(
+                          'Image file is not available.',
+                          style: TextStyle(color: Color(0xFFD9D9D9)),
+                        ),
+                      );
+                    }
+                    return GestureDetector(
+                      onTap: _toggleControls,
+                      child: PhotoView(
+                        imageProvider: provider,
+                        minScale: PhotoViewComputedScale.contained * 0.5,
+                        maxScale: PhotoViewComputedScale.covered * 4,
+                        backgroundDecoration: const BoxDecoration(
+                          color: Colors.black,
+                        ),
+                        errorBuilder: (_, _, _) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted && _loadError == null) {
+                              setState(() => _loadError = 'Could not load image.');
+                            }
+                          });
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    );
+                  },
                 );
               },
             ),

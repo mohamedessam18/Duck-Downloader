@@ -63,6 +63,7 @@ class CobaltService {
       'url': url,
       'downloadMode': type == DownloadType.audio ? 'audio' : 'auto',
       'videoQuality': cobaltQuality,
+      'youtubeVideoCodec': 'h264',
       'audioFormat': 'mp3',
       'filenameStyle': 'basic',
     };
