@@ -170,7 +170,26 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
                         backgroundDecoration: const BoxDecoration(
                           color: Colors.black,
                         ),
-                        errorBuilder: (_, _, _) {
+                        errorBuilder: (context, error, stackTrace) {
+                          final thumb = item.thumbnail ?? (item.url.startsWith('http') ? item.url : null);
+                          if (thumb != null && provider is! NetworkImage) {
+                            return PhotoView(
+                              imageProvider: NetworkImage(thumb),
+                              minScale: PhotoViewComputedScale.contained * 0.5,
+                              maxScale: PhotoViewComputedScale.covered * 4,
+                              backgroundDecoration: const BoxDecoration(
+                                color: Colors.black,
+                              ),
+                              errorBuilder: (_, _, _) {
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (mounted && _loadError == null) {
+                                    setState(() => _loadError = 'Could not load image.');
+                                  }
+                                });
+                                return const SizedBox.shrink();
+                              },
+                            );
+                          }
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted && _loadError == null) {
                               setState(() => _loadError = 'Could not load image.');

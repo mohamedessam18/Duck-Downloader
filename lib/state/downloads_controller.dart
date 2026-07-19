@@ -1051,7 +1051,9 @@ class DuckDownloadsController extends ChangeNotifier
 
   /// Downloads media via Cobalt URL directly on-device.
   Future<void> _startCobaltDownload(MediaMetadata media, String downloadUrl) async {
-    final ext = selectedType == DownloadType.audio ? 'mp3' : 'mp4';
+    final ext = selectedType == DownloadType.audio
+        ? 'mp3'
+        : (selectedType == DownloadType.image ? 'jpg' : 'mp4');
     final itemId = DateTime.now().millisecondsSinceEpoch.toString();
 
     var item = DownloadItem(
