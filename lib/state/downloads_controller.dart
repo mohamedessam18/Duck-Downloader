@@ -1247,14 +1247,14 @@ class DuckDownloadsController extends ChangeNotifier
           },
         );
       } else {
-        // ── Video: use Dio with the stored stream URL ─────────────────────────
-        final ext =
-            format.ext ?? 'mp4';
-        filePath = await _ytExplode.downloadStream(
-          streamUrl: format.id,
+        // ── Video: use native youtube_explode_dart download client ────────────
+        // This re-fetches a fresh manifest, decrypts signature throttling,
+        // and merges video + audio via FFmpeg if it's a high-quality video-only stream.
+        filePath = await _ytExplode.downloadVideoNative(
+          videoUrl: media.url,
           title: media.title,
-          type: selectedType,
-          ext: ext,
+          preferredHeight: format.height,
+          preferredExt: format.ext,
           onProgress: (received, total) async {
             if (total <= 0) return;
             final progress = ((received / total) * 99).clamp(0, 99).toInt();

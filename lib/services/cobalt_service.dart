@@ -4,9 +4,10 @@ import '../models/download_models.dart';
 
 class CobaltService {
   static const List<String> _instances = [
-    'https://api.cobalt.tools',
-    'https://cobalt.api.ry.ne.jp',
-    'https://api.cobalt.best',
+    'https://nuko-c.meowing.de',
+    'https://api-cobalt.eversiege.network',
+    'https://api.qwkuns.me',
+    'https://api.cobalt.liubquanti.click',
   ];
 
   /// Returns true if the URL is from a platform supported by Cobalt.
@@ -62,7 +63,7 @@ class CobaltService {
       'url': url,
       'downloadMode': type == DownloadType.audio ? 'audio' : 'auto',
       'videoQuality': cobaltQuality,
-      'audioFormat': 'best',
+      'audioFormat': 'mp3',
       'filenameStyle': 'basic',
     };
 

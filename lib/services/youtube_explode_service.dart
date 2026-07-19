@@ -367,6 +367,7 @@ class YouTubeExplodeService {
           '-map', '0:v:0',
           '-map', '1:a:0',
           '-shortest',
+          '-movflags', '+faststart',
           filePath,
         ];
 
