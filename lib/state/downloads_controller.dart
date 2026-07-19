@@ -1384,12 +1384,11 @@ class DuckDownloadsController extends ChangeNotifier
             },
           );
         } else {
-          final ext = format.ext ?? 'mp4';
-          filePath = await _ytExplode.downloadStream(
-            streamUrl: format.id,
+          filePath = await _ytExplode.downloadVideoNative(
+            videoUrl: url,
             title: item.title,
-            type: type,
-            ext: ext,
+            preferredHeight: format.height,
+            preferredExt: 'mp4',
             onProgress: (received, total) async {
               if (total <= 0) return;
               final progress = ((received / total) * 99).clamp(0, 99).toInt();

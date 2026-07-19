@@ -303,7 +303,7 @@ class YouTubeExplodeService {
       throw Exception('No video streams found for this YouTube video.');
     }
 
-    final ext = preferredExt ?? chosen.container.name;
+    final ext = 'mp4';
     final filePath = await _getUniqueFilePath(folder.path, '$title.$ext');
 
     final isVideoOnly = chosen is VideoOnlyStreamInfo;
@@ -402,8 +402,9 @@ class YouTubeExplodeService {
       }
     } else {
       // Normal muxed download using youtube_explode_dart
+      final tempMuxedPath = p.join(folder.path, 'temp_m_${DateTime.now().millisecondsSinceEpoch}.${chosen.container.name}');
       final stream = _yt.videos.streamsClient.get(chosen);
-      final file = File(filePath);
+      final file = File(tempMuxedPath);
       final output = file.openWrite();
       var downloaded = 0;
       final total = chosen.size.totalBytes;
@@ -417,6 +418,26 @@ class YouTubeExplodeService {
       }
       await output.flush();
       await output.close();
+
+      // Faststart remux to ensure clean MP4 headers and duration metadata
+      final remuxArgs = [
+        '-y',
+        '-i', tempMuxedPath,
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-movflags', '+faststart',
+        filePath,
+      ];
+      final session = await FFmpegKit.executeWithArguments(remuxArgs);
+      final returnCode = await session.getReturnCode();
+      if (!ReturnCode.isSuccess(returnCode) || !File(filePath).existsSync() || File(filePath).lengthSync() <= 0) {
+        // Fallback: move raw file if remux failed
+        File(tempMuxedPath).renameSync(filePath);
+      } else {
+        try {
+          File(tempMuxedPath).deleteSync();
+        } catch (_) {}
+      }
     }
     return filePath;
   }
