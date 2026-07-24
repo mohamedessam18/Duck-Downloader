@@ -83,7 +83,19 @@ class YouTubeExplodeService {
   Future<({String title, List<PlaylistItem> items})> extractPlaylist(
     String url,
   ) async {
-    throw Exception('YouTube downloads are not supported under Google Play policies.');
+    final playlist = await _yt.playlists.get(url);
+    final videos = await _yt.playlists.getVideos(playlist.id).toList();
+    final items = <PlaylistItem>[];
+    for (final v in videos) {
+      final videoUrl = 'https://www.youtube.com/watch?v=${v.id.value}';
+      items.add(PlaylistItem(
+        url: videoUrl,
+        title: v.title,
+        thumbnail: v.thumbnails.highResUrl,
+        isVideo: true,
+      ));
+    }
+    return (title: playlist.title, items: items);
   }
 
   // ── Metadata extraction ────────────────────────────────────────────────────
@@ -91,7 +103,55 @@ class YouTubeExplodeService {
   /// Returns null if the URL is not a recognisable YouTube video URL.
   Future<MediaMetadata?> extractMetadata(String url) async {
     if (!isYouTubeUrl(url)) return null;
-    throw Exception('YouTube downloads are not supported under Google Play policies.');
+    final videoId = VideoId.parseVideoId(url);
+    if (videoId == null) return null;
+
+    final video = await _yt.videos.get(videoId);
+    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+
+    final qualities = <FormatInfo>[];
+    final audioFormats = <FormatInfo>[];
+
+    // Muxed (video+audio) streams
+    for (final s in manifest.muxed.sortByVideoQuality()) {
+      final label = s.videoQuality.name;
+      qualities.add(FormatInfo(
+        id: label,
+        label: label,
+        ext: 'mp4',
+        height: s.videoResolution.height,
+        width: s.videoResolution.width,
+        filesize: s.size.totalBytes,
+      ));
+    }
+
+    // Audio-only stream
+    final bestAudio = manifest.audioOnly.withHighestBitrate();
+    final audioExt = bestAudio.container.name == 'webm' ? 'm4a' : bestAudio.container.name;
+    audioFormats.add(FormatInfo(
+      id: 'audio_best',
+      label: 'Audio only (M4A)',
+      ext: audioExt,
+      filesize: bestAudio.size.totalBytes,
+    ));
+
+    // Deduplicate by label (keep highest quality per label)
+    final seen = <String>{};
+    final uniqueQualities = qualities.reversed
+        .where((q) => seen.add(q.label))
+        .toList()
+        .reversed
+        .toList();
+
+    return MediaMetadata(
+      url: url,
+      title: video.title,
+      thumbnail: video.thumbnails.highResUrl,
+      platform: 'YouTube',
+      duration: _formatDuration(video.duration),
+      qualities: uniqueQualities,
+      audioFormats: audioFormats,
+    );
   }
 
   // ── Audio download (robust hybrid) ──────────────────────────────────────────
@@ -106,7 +166,56 @@ class YouTubeExplodeService {
     void Function(int received, int total)? onProgress,
     void Function()? onTranscoding,
   }) async {
-    throw Exception('YouTube downloads are not supported under Google Play policies.');
+    final videoId = VideoId.parseVideoId(videoUrl);
+    if (videoId == null) throw Exception('Invalid YouTube URL: $videoUrl');
+
+    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    final root = await getApplicationDocumentsDirectory();
+    final folder = Directory(p.join(root.path, 'Duck Downloader', 'Audios'));
+    await folder.create(recursive: true);
+
+    final safeTitle = _sanitizeFilename(title);
+
+    // Try audio-only stream first with a chunk timeout
+    try {
+      final audioStream = manifest.audioOnly.withHighestBitrate();
+      final ext = audioStream.container.name; // webm or mp4
+      final rawPath = await _getUniqueFilePath(folder.path, '$safeTitle.$ext');
+
+      await _downloadStreamWithTimeout(
+        streamUrl: audioStream.url.toString(),
+        savePath: rawPath,
+        onProgress: onProgress,
+        timeoutSeconds: 8,
+      );
+
+      // Transcode to M4A
+      onTranscoding?.call();
+      final m4aPath = rawPath.replaceAll(RegExp(r'\.\w+$'), '.m4a');
+      await transcodeToM4a(rawPath, m4aPath);
+      try {
+        await File(rawPath).delete();
+      } catch (_) {}
+      return m4aPath;
+    } catch (_) {
+      // Fallback: download lowest muxed stream and extract audio
+    }
+
+    onTranscoding?.call();
+    final lowestMuxed = manifest.muxed.sortByVideoQuality().last;
+    final muxedPath = await _getUniqueFilePath(folder.path, '${safeTitle}_muxed.mp4');
+    await _downloadStreamWithTimeout(
+      streamUrl: lowestMuxed.url.toString(),
+      savePath: muxedPath,
+      onProgress: onProgress,
+    );
+
+    final m4aPath = await _getUniqueFilePath(folder.path, '$safeTitle.m4a');
+    await transcodeToM4a(muxedPath, m4aPath);
+    try {
+      await File(muxedPath).delete();
+    } catch (_) {}
+    return m4aPath;
   }
 
   Future<String> downloadVideoNative({
@@ -116,7 +225,36 @@ class YouTubeExplodeService {
     String? preferredExt,
     void Function(int received, int total)? onProgress,
   }) async {
-    throw Exception('YouTube downloads are not supported under Google Play policies.');
+    final videoId = VideoId.parseVideoId(videoUrl);
+    if (videoId == null) throw Exception('Invalid YouTube URL: $videoUrl');
+
+    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    final root = await getApplicationDocumentsDirectory();
+    final folder = Directory(p.join(root.path, 'Duck Downloader', 'Videos'));
+    await folder.create(recursive: true);
+
+    final safeTitle = _sanitizeFilename(title);
+
+    // Pick best muxed stream matching preferred height
+    MuxedStreamInfo stream;
+    final sorted = manifest.muxed.sortByVideoQuality();
+    if (preferredHeight != null) {
+      stream = sorted.lastWhere(
+        (s) => s.videoResolution.height <= preferredHeight,
+        orElse: () => sorted.last,
+      );
+    } else {
+      stream = sorted.last; // highest quality
+    }
+
+    final ext = preferredExt ?? 'mp4';
+    final filePath = await _getUniqueFilePath(folder.path, '$safeTitle.$ext');
+    await _downloadStreamWithTimeout(
+      streamUrl: stream.url.toString(),
+      savePath: filePath,
+      onProgress: onProgress,
+    );
+    return filePath;
   }
 
   // ── Legacy stream download (Dio) ───────────────────────────────────────────
@@ -130,9 +268,6 @@ class YouTubeExplodeService {
     required String ext,
     void Function(int received, int total)? onProgress,
   }) async {
-    if (isYouTubeUrl(streamUrl) || isYouTubePlaylistUrl(streamUrl)) {
-      throw Exception('YouTube downloads are not supported under Google Play policies.');
-    }
     final root = await getApplicationDocumentsDirectory();
     final subfolder = type == DownloadType.audio
         ? 'Audios'
@@ -199,6 +334,68 @@ class YouTubeExplodeService {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
+
+  /// Downloads a stream URL to [savePath] with an optional chunk-timeout.
+  Future<void> _downloadStreamWithTimeout({
+    required String streamUrl,
+    required String savePath,
+    void Function(int received, int total)? onProgress,
+    int? timeoutSeconds,
+  }) async {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(minutes: 15),
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
+      },
+    ));
+
+    if (timeoutSeconds == null) {
+      await dio.download(
+        streamUrl,
+        savePath,
+        onReceiveProgress: onProgress,
+      );
+      return;
+    }
+
+    final completer = Completer<void>();
+    Timer? chunkTimer;
+
+    void resetTimer() {
+      chunkTimer?.cancel();
+      chunkTimer = Timer(Duration(seconds: timeoutSeconds), () {
+        if (!completer.isCompleted) {
+          completer.completeError(
+            TimeoutException('No chunks received within ${timeoutSeconds}s'),
+          );
+        }
+      });
+    }
+
+    resetTimer();
+
+    try {
+      await dio.download(
+        streamUrl,
+        savePath,
+        onReceiveProgress: (received, total) {
+          resetTimer();
+          onProgress?.call(received, total);
+        },
+      );
+      chunkTimer?.cancel();
+      if (!completer.isCompleted) completer.complete();
+    } catch (e) {
+      chunkTimer?.cancel();
+      if (!completer.isCompleted) completer.completeError(e);
+      rethrow;
+    }
+
+    await completer.future;
+  }
 
   String _formatDuration(Duration? d) {
     if (d == null) return '';

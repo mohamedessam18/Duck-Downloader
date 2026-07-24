@@ -3088,7 +3088,68 @@ class DuckDownloadsController extends ChangeNotifier
         }
       }
 
-      // 3. Other Platforms (Facebook, TikTok, Twitter, etc.)
+      // 3. TikTok (Cobalt-first — supports videos and photo slides)
+      if (CobaltService.isTikTok(cleanUrl)) {
+        // Try photo slide picker first (for multi-image posts)
+        final pickerUrls = await CobaltService.getPickerUrls(url: cleanUrl);
+        if (pickerUrls.isNotEmpty) {
+          busy = false;
+          for (final pickerUrl in pickerUrls) {
+            final fakeTitle = 'TikTok_${DateTime.now().millisecondsSinceEpoch}';
+            final fakeMeta = MediaMetadata(
+              url: pickerUrl,
+              title: fakeTitle,
+              thumbnail: null,
+              platform: 'TikTok',
+              duration: null,
+              qualities: [
+                const FormatInfo(id: 'original', label: 'Original', ext: 'jpg'),
+              ],
+              audioFormats: const [],
+            );
+            metadata = fakeMeta;
+            selectedType = DownloadType.image;
+            quality = 'Original';
+            await startDownload();
+            busy = false;
+          }
+          showAdOnOpen = true;
+          notifyListeners();
+          return;
+        }
+
+        // Single TikTok video via Cobalt
+        final cobaltUrl = await CobaltService.getDownloadUrl(
+          url: cleanUrl,
+          type: DownloadType.video,
+          qualityLabel: '1080',
+        );
+        if (cobaltUrl != null) {
+          final fakeTitle = 'TikTok_${DateTime.now().millisecondsSinceEpoch}';
+          final fakeMeta = MediaMetadata(
+            url: cleanUrl,
+            title: fakeTitle,
+            thumbnail: null,
+            platform: 'TikTok',
+            duration: null,
+            qualities: [
+              const FormatInfo(id: '1080p', label: '1080p', ext: 'mp4'),
+            ],
+            audioFormats: const [],
+          );
+          metadata = fakeMeta;
+          selectedType = DownloadType.video;
+          quality = '1080p';
+          busy = false;
+          await startDownload();
+          showAdOnOpen = true;
+          notifyListeners();
+          return;
+        }
+        // Fall through to server if Cobalt fails
+      }
+
+      // 4. Other Platforms (Facebook, Twitter, etc.)
       final media = await _api.extract(cleanUrl);
       metadata = media;
       final isImg = _isImageMetadata(media) || _looksLikeImageUrl(cleanUrl);
