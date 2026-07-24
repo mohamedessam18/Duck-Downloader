@@ -2217,10 +2217,10 @@ class DuckDownloadsController extends ChangeNotifier
   /// [position] — current playback position to seek to
   /// Starts background audio playback of a video item at the specified position.
   /// Made synchronous to execute instantly in the lifecycle transition loop.
-  void playVideoAudioInBackground(
+  Future<void> playVideoAudioInBackground(
     DownloadItem item,
     Duration position,
-  ) {
+  ) async {
     if (_backgroundVideoActive) return;
     final path = item.filePath;
     if (path == null) return;
@@ -2229,10 +2229,10 @@ class DuckDownloadsController extends ChangeNotifier
       playingItem = item;
 
       if (!audioBackgroundReady) {
-        _ensureAudioBackgroundReady();
+        await _ensureAudioBackgroundReady();
       }
 
-      audioPlayer.setAudioSource(
+      await audioPlayer.setAudioSource(
         AudioSource.file(
           path,
           tag: MediaItem(
@@ -2242,17 +2242,10 @@ class DuckDownloadsController extends ChangeNotifier
             artUri: _artUriFor(item),
           ),
         ),
-      ).catchError((e) {
-        debugPrint('Error setting bg audio source: $e');
-        return const Duration(seconds: 0); // fallback return to satisfy type checks
-      });
+        initialPosition: position,
+      );
 
-      audioPlayer.seek(position).catchError((e) {
-        debugPrint('Error seeking bg audio: $e');
-      });
-      audioPlayer.play().catchError((e) {
-        debugPrint('Error playing bg audio: $e');
-      });
+      await audioPlayer.play();
       notifyListeners();
     } catch (e) {
       _backgroundVideoActive = false;

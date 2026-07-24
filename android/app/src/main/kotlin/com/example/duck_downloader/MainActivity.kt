@@ -192,10 +192,14 @@ class MainActivity : AudioServiceFragmentActivity() {
             )
             actions.add(action)
             
-            val params = android.app.PictureInPictureParams.Builder()
+            val builder = android.app.PictureInPictureParams.Builder()
                 .setActions(actions)
-                .build()
-            setPictureInPictureParams(params)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                builder.setAutoEnterEnabled(playing)
+            }
+
+            setPictureInPictureParams(builder.build())
         }
     }
 
@@ -213,9 +217,15 @@ class MainActivity : AudioServiceFragmentActivity() {
         if (isVideoPlaying) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 try {
-                    updatePiPParams(true)
-                    val params = android.app.PictureInPictureParams.Builder().build()
-                    enterPictureInPictureMode(params)
+                    val inPiP = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false
+                    if (!inPiP) {
+                        updatePiPParams(true)
+                        val builder = android.app.PictureInPictureParams.Builder()
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            builder.setAutoEnterEnabled(true)
+                        }
+                        enterPictureInPictureMode(builder.build())
+                    }
                 } catch (e: Exception) {
                     // Ignore
                 }
