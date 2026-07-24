@@ -354,19 +354,20 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     // Only applies to video playback
     if (!widget.item.isVideo) return;
 
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+    // ── Screen lock / background ──────────────────────────────────────────
+    // We trigger ONLY on `inactive` (first signal when lock button is pressed).
+    // `paused` arrives ~300ms later and we ignore it to avoid double-triggering.
+    if (state == AppLifecycleState.inactive) {
+      // Skip if in PiP — PiP has its own flow
       try {
         final bool inPiP = await _channel.invokeMethod<bool>('isInPiP') ?? false;
-        if (inPiP || _isInPiP) {
-          debugPrint("App is in PiP mode, bypassing background audio handoff");
-          return;
-        }
-      } catch (e) {
+        if (inPiP || _isInPiP) return;
+      } catch (_) {
         if (_isInPiP) return;
       }
 
       if (widget.controller.backgroundPlaybackEnabled) {
-        _handoffVideoAudioToBackground();
+        await _handoffVideoAudioToBackground();
       } else {
         _video?.pause();
       }
@@ -374,57 +375,77 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       if (widget.controller.backgroundPlaybackEnabled) {
         await _resumeVideoFromBackground();
       } else {
-        // Just make sure UI updates to reflect paused/resumed video state
         if (mounted) setState(() {});
       }
     }
   }
 
-  /// Saves the current video position and hands audio off to just_audio_background
-  /// so the sound continues while the screen is locked.
-  void _handoffVideoAudioToBackground() {
+  /// Hands audio off to just_audio_background BEFORE pausing the video,
+  /// so there is zero gap in the audio stream when the screen locks.
+  ///
+  /// Flow:
+  ///   1. Start background audio player at the exact current position  ← no gap
+  ///   2. Wait 80 ms for the audio decoder to produce its first frame
+  ///   3. Pause the video decoder                                       ← silent now
+  Future<void> _handoffVideoAudioToBackground() async {
     if (_isInPiP) return;
     final video = _video;
     if (video == null || !video.value.isInitialized) return;
-    if (!video.value.isPlaying) return; // only if actually playing
+    if (!video.value.isPlaying) return;
     if (_backgroundHandoffActive) return;
 
     _backgroundHandoffActive = true;
     _savedPositionForHandoff = video.value.position;
-
     widget.controller.saveVideoResumePosition(widget.item.id, _savedPositionForHandoff);
 
-    // Pause the video (releases GPU decoder, saves battery)
-    video.pause();
-
-    // Hand off audio to just_audio_background for lock screen controls
-    widget.controller.playVideoAudioInBackground(
+    // Step 1: fire-and-forget — start audio player immediately so it begins
+    // buffering/playing before we mute the video decoder.
+    unawaited(widget.controller.playVideoAudioInBackground(
       widget.item,
       _savedPositionForHandoff,
-    );
+    ));
+
+    // Step 2: give the audio player 80 ms to produce its first audio frame.
+    // This tiny overlap ensures zero perceived gap on all modern Android devices.
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    // Step 3: now it is safe to silence & pause the video decoder.
+    if (!mounted) return;
+    video.pause();
   }
 
-  /// Resumes the video player from the current background audio position.
+  /// Resumes the video player from the current background-audio position.
+  ///
+  /// Flow (mirror of handoff):
+  ///   1. Seek video to current audio position + play  ← video decoder warms up
+  ///   2. Wait 80 ms
+  ///   3. Stop background audio                        ← silent hand-back
   Future<void> _resumeVideoFromBackground() async {
     if (!_backgroundHandoffActive) return;
     _backgroundHandoffActive = false;
 
-    // Get the current position from the background audio player
+    // Use the live audio player position for an accurate hand-back point.
     var currentPos = widget.controller.audioPlayer.position;
     if (currentPos <= Duration.zero && _savedPositionForHandoff > Duration.zero) {
       currentPos = _savedPositionForHandoff;
     }
-
     widget.controller.saveVideoResumePosition(widget.item.id, currentPos);
 
-    // Stop background audio
-    await widget.controller.stopBackgroundVideoAudio();
-
-    // Re-init video at the current audio position
+    // Step 1: Seek the video decoder and start playing immediately.
     final video = _video;
-    if (video == null || !mounted || !video.value.isInitialized) return;
+    if (video == null || !mounted || !video.value.isInitialized) {
+      await widget.controller.stopBackgroundVideoAudio();
+      return;
+    }
     await video.seekTo(currentPos);
     await video.play();
+
+    // Step 2: tiny overlap so the video decoder has produced at least one frame.
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    // Step 3: stop background audio — video has taken over.
+    await widget.controller.stopBackgroundVideoAudio();
+
     if (mounted) setState(() {});
   }
 
