@@ -1475,15 +1475,10 @@ class DuckDownloadsController extends ChangeNotifier
 
     final bool canWrite = await _channel.invokeMethod<bool>('canWriteSettings') ?? false;
     if (!canWrite) {
-      status = 'Please grant system settings modification permission.';
+      status = 'Please allow modifying system settings and try again.';
       notifyListeners();
       await _channel.invokeMethod<void>('requestWriteSettingsPermission');
-      // Wait for user to return
-      await Future<void>.delayed(const Duration(seconds: 1));
-      final bool checkAgain = await _channel.invokeMethod<bool>('canWriteSettings') ?? false;
-      if (!checkAgain) {
-        throw Exception('Write settings permission is required to set default ringtone.');
-      }
+      throw Exception('Permission required: Please enable "Allow modifying system settings" for Duck Downloader, then tap "Set as Default Ringtone" again.');
     }
 
     final info = await _getEffectivePathAndFileName(item);

@@ -23,6 +23,15 @@ class VaultEncryptionService {
     return sanitized.isEmpty ? 'duck-download' : sanitized;
   }
 
+  static Future<void> _safeMoveFile(File sourceFile, String destPath) async {
+    try {
+      await sourceFile.rename(destPath);
+    } catch (_) {
+      await sourceFile.copy(destPath);
+      await sourceFile.delete();
+    }
+  }
+
   /// Moves a file to the secure vault, renaming it to a random obfuscated name with no extension
   static Future<String> encryptAndMoveToVault({
     required String currentPath,
@@ -37,7 +46,7 @@ class VaultEncryptionService {
 
     final sourceFile = File(currentPath);
     if (await sourceFile.exists()) {
-      await sourceFile.rename(destPath);
+      await _safeMoveFile(sourceFile, destPath);
     } else {
       throw Exception('Source file does not exist at $currentPath');
     }
@@ -69,7 +78,7 @@ class VaultEncryptionService {
 
     final sourceFile = File(currentPath);
     if (await sourceFile.exists()) {
-      await sourceFile.rename(destPath);
+      await _safeMoveFile(sourceFile, destPath);
     } else {
       throw Exception('Vault file does not exist at $currentPath');
     }

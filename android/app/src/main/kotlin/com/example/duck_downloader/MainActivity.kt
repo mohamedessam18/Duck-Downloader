@@ -372,35 +372,59 @@ class MainActivity : AudioServiceFragmentActivity() {
 
     private fun setSystemRingtone(file: File, title: String): Boolean {
         return try {
+            val resolver = applicationContext.contentResolver
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            } else {
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            }
+
+            try {
+                resolver.delete(collection, "${MediaStore.Audio.Media.TITLE} = ?", arrayOf(title))
+            } catch (e: Exception) {
+                // Ignore
+            }
+
             val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DATA, file.absolutePath)
-                put(MediaStore.MediaColumns.TITLE, title)
-                put(MediaStore.MediaColumns.SIZE, file.length())
-                put(MediaStore.MediaColumns.MIME_TYPE, "audio/mp3")
+                put(MediaStore.Audio.Media.TITLE, title)
+                put(MediaStore.Audio.Media.DISPLAY_NAME, "$title.mp3")
+                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp3")
                 put(MediaStore.Audio.Media.IS_RINGTONE, true)
                 put(MediaStore.Audio.Media.IS_NOTIFICATION, false)
                 put(MediaStore.Audio.Media.IS_ALARM, false)
                 put(MediaStore.Audio.Media.IS_MUSIC, false)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_RINGTONES + "/Duck Downloader")
+                    put(MediaStore.Audio.Media.IS_PENDING, 1)
+                } else {
+                    val pubDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RINGTONES)
+                        .resolve("Duck Downloader")
+                    pubDir.mkdirs()
+                    val target = pubDir.resolve("$title.mp3")
+                    file.copyTo(target, overwrite = true)
+                    put(MediaStore.MediaColumns.DATA, target.absolutePath)
+                }
             }
 
-            val baseUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-            try {
-                contentResolver.delete(baseUri, "${MediaStore.MediaColumns.DATA} = ?", arrayOf(file.absolutePath))
-            } catch (e: Exception) {
-                // ignore
+            val ringtoneUri = resolver.insert(collection, values) ?: return false
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                resolver.openOutputStream(ringtoneUri)?.use { output ->
+                    FileInputStream(file).use { input -> input.copyTo(output) }
+                } ?: return false
+
+                val updateValues = ContentValues().apply {
+                    put(MediaStore.Audio.Media.IS_PENDING, 0)
+                }
+                resolver.update(ringtoneUri, updateValues, null, null)
             }
 
-            val ringtoneUri = contentResolver.insert(baseUri, values)
-            if (ringtoneUri != null) {
-                android.media.RingtoneManager.setActualDefaultRingtoneUri(
-                    this,
-                    android.media.RingtoneManager.TYPE_RINGTONE,
-                    ringtoneUri
-                )
-                true
-            } else {
-                false
-            }
+            android.media.RingtoneManager.setActualDefaultRingtoneUri(
+                this,
+                android.media.RingtoneManager.TYPE_RINGTONE,
+                ringtoneUri
+            )
+            true
         } catch (e: Exception) {
             e.printStackTrace()
             false
