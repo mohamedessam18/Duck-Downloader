@@ -189,6 +189,12 @@ class DuckDownloadsController extends ChangeNotifier
   List<DownloadItem>? playerGalleryItems;
   List<DownloadItem>? _audioQueueSource;
   final Set<String> controlPendingIds = {};
+  final Map<String, StreamSubscription> _downloadSubscriptions = {};
+
+  void _cancelDownloadSubscription(String id) {
+    _downloadSubscriptions[id]?.cancel();
+    _downloadSubscriptions.remove(id);
+  }
 
   bool removeMusic = false;
 
@@ -386,6 +392,12 @@ class DuckDownloadsController extends ChangeNotifier
 
   void lockVault() {
     isVaultLocked = true;
+    isDecoySession = false;
+    notifyListeners();
+  }
+
+  void unlockVaultBiometric() {
+    isVaultLocked = false;
     isDecoySession = false;
     notifyListeners();
   }
@@ -747,6 +759,13 @@ class DuckDownloadsController extends ChangeNotifier
     lastDownloadedItem = null;
 
     var cleanUrl = url.trim();
+    if (YouTubeExplodeService.isYouTubeUrl(cleanUrl) || YouTubeExplodeService.isYouTubePlaylistUrl(cleanUrl)) {
+      flow = DuckFlow.error;
+      status = 'YouTube downloads are not supported under Google Play policies.';
+      notifyListeners();
+      throw Exception('YouTube downloads are not supported under Google Play policies.');
+    }
+
     final isAdult = await _isAdultUrl(cleanUrl);
     if (isAdult) {
       isAdultContentBlocked = true;
@@ -1447,11 +1466,13 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  Future<void> cancelDownload(DownloadItem item) {
-    return _controlDownload(item: item, action: 'cancel');
+  Future<void> cancelDownload(DownloadItem item) async {
+    _cancelDownloadSubscription(item.id);
+    await _controlDownload(item: item, action: 'cancel');
   }
 
   Future<void> deleteDownload(DownloadItem item) async {
+    _cancelDownloadSubscription(item.id);
     await _files.deleteFile(item.filePath);
     await _store.delete(item.id);
     _downloads = _store.readDownloads();
@@ -1551,6 +1572,15 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
+  void toggleClipboardDetection(bool value) {
+    enableClipboardDetection = value;
+    notifyListeners();
+  }
+
+  void toggleBackgroundPlaybackEnabled(bool value) {
+    toggleBackgroundPlayback(value);
+  }
+
   Future<void> saveVideoExternally(DownloadItem item) async {
     await _saveExternally(item, DownloadType.video);
   }
@@ -1596,6 +1626,7 @@ class DuckDownloadsController extends ChangeNotifier
         status = 'Download paused';
         flow = DuckFlow.downloading;
       } else {
+        _cancelDownloadSubscription(item.id);
         await _store.delete(next.id);
         _downloads = _store.readDownloads();
         if (activeId == item.id) {
@@ -1619,7 +1650,8 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void _watchDownload(String id, DownloadItem baseItem) {
-    _api
+    _cancelDownloadSubscription(id);
+    _downloadSubscriptions[id] = _api
         .watchDownload(id)
         .listen(
           (update) async {
@@ -1632,6 +1664,7 @@ class DuckDownloadsController extends ChangeNotifier
             await _saveItem(next);
 
             if (update.status == DownloadStatus.completed) {
+              _cancelDownloadSubscription(id);
               if (update.fileUrl == null) {
                 next = next.copyWith(status: DownloadStatus.failed);
                 await _saveItem(next);
@@ -1711,6 +1744,7 @@ class DuckDownloadsController extends ChangeNotifier
             }
 
             if (update.status == DownloadStatus.failed) {
+              _cancelDownloadSubscription(id);
               final errText = update.error ?? '';
               final isLoginRequired = _isLoginRequiredError(errText);
 
@@ -1742,6 +1776,7 @@ class DuckDownloadsController extends ChangeNotifier
             }
 
             if (update.status == DownloadStatus.cancelled) {
+              _cancelDownloadSubscription(id);
               await _store.delete(next.id);
               _downloads = _store.readDownloads();
               if (activeId == id) {
@@ -1754,6 +1789,7 @@ class DuckDownloadsController extends ChangeNotifier
             notifyListeners();
           },
           onError: (Object error) {
+            _cancelDownloadSubscription(id);
             flow = DuckFlow.error;
             status = _cleanError(error);
             notifyListeners();
@@ -2545,6 +2581,10 @@ class DuckDownloadsController extends ChangeNotifier
     premium.removeListener(_premiumChanged);
     _playerStateSubscription.cancel();
     _playerPositionSubscription.cancel();
+    for (final sub in _downloadSubscriptions.values) {
+      sub.cancel();
+    }
+    _downloadSubscriptions.clear();
     audioPlayer.dispose();
     super.dispose();
   }

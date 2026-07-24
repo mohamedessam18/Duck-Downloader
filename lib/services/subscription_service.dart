@@ -28,37 +28,7 @@ class SubscriptionService {
         }
       }
     } catch (_) {
-      // Ignore and fallback to mock products for testing
-    }
-
-    if (products.isEmpty) {
-      // Add EGP-localized mock products for review/testing
-      products.add(
-        SubscriptionProduct(
-          plan: SubscriptionPlan.monthly,
-          details: ProductDetails(
-            id: monthlyPremiumProductId,
-            title: 'Monthly Premium',
-            description: 'Ad-free experience & faster downloads.',
-            price: 'EGP 85.00',
-            rawPrice: 85.0,
-            currencyCode: 'EGP',
-          ),
-        ),
-      );
-      products.add(
-        SubscriptionProduct(
-          plan: SubscriptionPlan.yearly,
-          details: ProductDetails(
-            id: yearlyPremiumProductId,
-            title: 'Yearly Premium',
-            description: 'Save 10% off monthly price. Ad-free & fast downloads.',
-            price: 'EGP 918.00',
-            rawPrice: 918.0,
-            currencyCode: 'EGP',
-          ),
-        ),
-      );
+      // Ignore errors when querying product details from store
     }
 
     products.sort((a, b) => a.plan.index.compareTo(b.plan.index));

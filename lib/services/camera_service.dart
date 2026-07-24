@@ -31,8 +31,12 @@ class VaultCameraService {
       );
 
       await controller.initialize();
-      final XFile imageFile = await controller.takePicture();
-      await controller.dispose();
+      final XFile imageFile;
+      try {
+        imageFile = await controller.takePicture();
+      } finally {
+        await controller.dispose();
+      }
 
       // Save the picture to the hidden intruders folder
       final root = await getApplicationDocumentsDirectory();

@@ -271,10 +271,10 @@ void main() {
     expect(api.extractedUrl, 'https://www.tiktok.com/@user/video/abc123/');
   });
 
-  testWidgets('YouTube URLs bypass backend and use on-device extraction', (
+  testWidgets('YouTube URLs display Google Play policy rejection message', (
     tester,
   ) async {
-    // YouTube URL → must NOT call the backend API (bot-check prevention)
+    // YouTube URL → must NOT call the backend API and must show Play Store policy message
     final box = FakeBox();
     final clipboard = FakeClipboardService()
       ..clipboardText = 'https://youtube.com/watch?v=dQw4w9WgXcQ';
@@ -304,9 +304,9 @@ void main() {
     await tester.tap(find.text('Extract'));
     await tester.pump();
 
-    // Backend must NOT be called for YouTube (on-device extraction only)
+    // Backend must NOT be called for YouTube
     expect(api.extractCalled, isFalse);
-    expect(ytExplode.extractMetadataCalled, isTrue);
+    expect(controller.status, 'YouTube downloads are not supported under Google Play policies.');
   });
 
 

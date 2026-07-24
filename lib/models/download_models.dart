@@ -18,6 +18,12 @@ enum DuckTab { home, videos, audios, images }
 
 const Object _preserveExternalSaveError = Object();
 
+num? _parseNum(dynamic v) {
+  if (v is num) return v;
+  if (v is String) return num.tryParse(v);
+  return null;
+}
+
 class FormatInfo {
   const FormatInfo({
     required this.id,
@@ -40,9 +46,9 @@ class FormatInfo {
       id: json['id']?.toString() ?? json['label']?.toString() ?? 'best',
       label: json['label']?.toString() ?? 'Best',
       ext: json['ext'] as String?,
-      height: (json['height'] as num?)?.toInt(),
-      width: (json['width'] as num?)?.toInt(),
-      filesize: (json['filesize'] as num?)?.toInt(),
+      height: _parseNum(json['height'])?.toInt(),
+      width: _parseNum(json['width'])?.toInt(),
+      filesize: _parseNum(json['filesize'])?.toInt(),
     );
   }
 }
@@ -206,15 +212,19 @@ class DownloadItem {
       thumbnail: json['thumbnail'] as String?,
       platform: json['platform'] as String? ?? 'Public source',
       quality: json['quality'] as String?,
-      type: DownloadType.values.byName(json['type'] as String? ?? 'video'),
+      type: DownloadType.values.cast<DownloadType?>().firstWhere(
+        (v) => v?.name == json['type'],
+        orElse: () => DownloadType.video,
+      ) ?? DownloadType.video,
       filePath: json['filePath'] as String?,
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),
-      status: DownloadStatus.values.byName(
-        json['status'] as String? ?? 'queued',
-      ),
-      progress: (json['progress'] as num?)?.toInt() ?? 0,
+      status: DownloadStatus.values.cast<DownloadStatus?>().firstWhere(
+        (s) => s?.name == json['status'],
+        orElse: () => DownloadStatus.queued,
+      ) ?? DownloadStatus.queued,
+      progress: _parseNum(json['progress'])?.toInt() ?? 0,
       favorite: json['favorite'] as bool? ?? false,
       savedToGallery: json['savedToGallery'] as bool? ?? false,
       savedToMusic: json['savedToMusic'] as bool? ?? false,
@@ -248,7 +258,7 @@ class DownloadStatusUpdate {
   factory DownloadStatusUpdate.fromJson(Map<String, dynamic> json) {
     final statusName = json['status']?.toString() ?? 'queued';
     return DownloadStatusUpdate(
-      progress: (json['progress'] as num?)?.toInt() ?? 0,
+      progress: _parseNum(json['progress'])?.toInt() ?? 0,
       status:
           DownloadStatus.values.cast<DownloadStatus?>().firstWhere(
             (status) => status?.name == statusName,
@@ -339,8 +349,8 @@ class PlaylistItem {
       url: json['url']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       thumbnail: json['thumbnail']?.toString(),
-      width: (json['width'] as num?)?.toInt(),
-      height: (json['height'] as num?)?.toInt(),
+      width: _parseNum(json['width'])?.toInt(),
+      height: _parseNum(json['height'])?.toInt(),
       source: json['source']?.toString(),
       isPreview: json['isPreview'] as bool? ?? false,
       isVideo: json['isVideo'] as bool? ?? false,
@@ -385,7 +395,7 @@ class BackendCookiesInfo {
   factory BackendCookiesInfo.fromJson(Map<String, dynamic> json) {
     return BackendCookiesInfo(
       active: json['active'] as bool? ?? false,
-      size: json['size'] as int? ?? 0,
+      size: _parseNum(json['size'])?.toInt() ?? 0,
       filename: json['filename']?.toString(),
     );
   }

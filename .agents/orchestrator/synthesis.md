@@ -1,32 +1,48 @@
-# Synthesis of Exploration & Analysis
+# Synthesis of Exploration Findings — Iteration 2 Remediation Plan
 
-## 1. Findings from Scratch Directory
-- Files inside `C:\Users\me548/.gemini/antigravity/brain/564c265c-4e9e-46e7-91b2-a8e99038b851/scratch/` do not contain cached HTML/JSON content for the three target URLs:
-  - `https://www.threads.com/@aicreatorbase/post/DaTTBQSFXzk` (Single Image)
-  - `https://www.threads.com/@ahnmedyahya/post/DaTQ9Umjf1N` (Single Video)
-  - `https://www.threads.com/@cataessapromo/post/DaRLOr2jiRX` (Mixed Image & Video)
-- Therefore, we cannot load static HTML/JSON files of the target posts directly. We must programmatically mock/simulate their DOM and page data structures in the Python verification script.
+## 1. Overview
+All three Explorer subagents for Iteration 2 have completed their investigations and delivered detailed fix specifications:
+- **Explorer 1 (M2)**: `d:\PROJECTS\Duck Downloder\.agents\explorer_m2_1\handoff.md` (R1 IAP Transaction & Concurrency Fixes)
+- **Explorer 2 (M2)**: `d:\PROJECTS\Duck Downloder\.agents\explorer_m2_2\handoff.md` (R2 Code Quality, Stream Cleanup, ID3 Tags, Type Parsing, Staged File Operations)
+- **Explorer 3 (M2)**: `d:\PROJECTS\Duck Downloder\.agents\explorer_m2_3\handoff.md` (R3 Syntax Correction, YouTube Catch-All Interception, Cobalt Service Exclusion)
 
-## 2. Analysis of Scraper Script (`_extractScript`)
-- The scraper script is a Javascript IIFE that parses the page DOM and script blocks:
-  - Selects post article: `document.querySelector('article')`
-  - Extracts image assets via `img` tags and `srcset`.
-  - Extracts video assets via `video` and `source` tags.
-  - Parses JSON script payloads (`scanPageData` -> `walkJson`).
-  - Performs deduplication: uses a Map keyed by a clean path name (e.g. filename base). Prioritizes video files over images with the same base name, and preserves highest resolution.
-- Key requirements to run the scraper in a Python JS engine (like Node.js via subprocess or `js2py` with polyfills):
-  - Mock global variables: `location`, `document`.
-  - Polyfill global constructs if using ES5 runtimes: `Map`, `Array.from`, `URL`.
-  - Mock element selection and querying: `querySelector`, `querySelectorAll`, and `scripts`.
+---
 
-## 3. Recommended Implementation Plan
-- Implement a Python verification script `verify_threads.py` inside `C:\Users\me548/.gemini/antigravity/brain/564c265c-4e9e-46e7-91b2-a8e99038b851/scratch/`.
-- The script should:
-  1. Extract `_extractScript` dynamically from `lib/screens/locked_social_browser_screen.dart` via regex.
-  2. Implement a complete JS DOM shim that simulates the elements (images, videos, metadata, script tags) and structures for the three test URLs.
-  3. Prepend the shim to the scraper script.
-  4. Run the combined JS using a Node.js subprocess (or `js2py` fallback).
-  5. Run assertions on the returned JSON array to verify:
-     - Scenario 1 (Single Image): exactly 1 high-resolution image URL, no comments/avatars.
-     - Scenario 2 (Single Video): exactly 1 video URL with `isVideo: true`, no thumbnail image.
-     - Scenario 3 (Mixed Carousel): exactly 3 main post media (1 image, 1 video, 1 image), no duplicates, no recommendations.
+## 2. Comprehensive Implementation Roadmap for Worker 2
+
+### Track 1: Requirement R1 — Store Production In-App Purchase Setup
+1. **Target File**: `lib/services/premium_manager.dart`
+   - Add queue fields: `final List<List<PurchaseDetails>> _purchaseUpdateQueue = [];` and `bool _isProcessingPurchaseStream = false;`.
+   - Update `_handlePurchaseUpdates` to push purchase lists to `_purchaseUpdateQueue` and process them sequentially inside a `_isProcessingPurchaseStream` lock.
+   - Relocate `completePurchase(purchase)` into the `try` block immediately AFTER `verifyAndSave(purchase)` succeeds. Do NOT execute `completePurchase` in `catch` or `finally` blocks when receipt verification fails.
+   - Ensure `purchasePending = false` and `statusMessage = 'No active purchases found to restore.'` when store returns 0 restored items.
+
+### Track 2: Requirement R2 — Code Quality & Bug Fixes
+1. **WebSocket Stream Cleanup (`lib/state/downloads_controller.dart`)**:
+   - In `cancelDownload()` and inside `_controlDownload()` when `action == 'cancel'`, invoke `_cancelDownloadSubscription(item.id)` to cancel and dispose active WebSocket subscriptions.
+2. **ID3 Tag Unicode & Metadata Preservation (`lib/services/file_service.dart`)**:
+   - Add `import 'dart:convert';`.
+   - Update `_fixedLengthBytes` to use `utf8.encode(val)` so non-ASCII/Unicode strings are encoded properly without replacing characters >= 256 with `?`.
+   - Update `updateMp3Metadata`: when `hasTag == true`, read existing 128-byte ID3v1 block into `tagBytes` before updating offsets 0–92 to preserve Year, Comment, Track, and Genre metadata.
+3. **JSON String-Number Deserialization (`lib/models/download_models.dart`)**:
+   - Add `num? _parseNum(dynamic v) => v is num ? v : (v is String ? num.tryParse(v) : null);`.
+   - Update `FormatInfo.fromJson`, `DownloadItem.fromJson`, `DownloadStatusUpdate.fromJson`, `PlaylistItem.fromJson`, `BackendCookiesInfo.fromJson` to use `_parseNum(...)?.toInt()`.
+4. **Staged Replacement for Cross-Volume Operations (`lib/services/trim_service.dart`)**:
+   - Refactor `replaceOriginal()` to perform staged replacement: copy `trimmed` to temp file in target folder, verify copy, back up original via rename, swap temp to original, and delete backup/trimmed files.
+
+### Track 3: Requirement R3 — Google Play Compliance & Syntax Fixes
+1. **Dart Syntax & Service Methods (`lib/services/youtube_explode_service.dart`)**:
+   - Remove misplaced closing brace `}` at line 101. Clean up class structure so all methods (`extractMetadata`, `extractPlaylist`, `downloadAudioNative`, `downloadVideoNative`, `downloadStream`) are cleanly defined in class body and throw `Exception('YouTube downloads are not supported under Google Play policies.')`.
+2. **Catch-All YouTube Interception (`lib/services/youtube_explode_service.dart` & `lib/state/downloads_controller.dart`)**:
+   - Update `isYouTubeUrl` and `isYouTubePlaylistUrl` to return `true` for ANY URL containing `youtube.com`, `youtu.be`, `youtube-nocookie.com`, `/live/`, `/clip/`, `/shorts/`, `/watch`, `/playlist`, `v=`, or substring `youtube`.
+3. **Disable YouTube in Cobalt Service (`lib/services/cobalt_service.dart`)**:
+   - Update `CobaltService.isSupported(String url)`: explicitly reject YouTube URLs (`if (lower.contains('youtube') || lower.contains('youtu.be')) return false;`).
+4. **Update Unit Tests (`test/cobalt_service_test.dart` & `test/r3_youtube_permission_challenge_test.dart`)**:
+   - Update test assertions to verify `CobaltService.isSupported` returns `false` for YouTube URLs.
+5. **Manifest AAR Merger Safeguard (`android/app/src/main/AndroidManifest.xml`)**:
+   - Explicitly add `<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>`, `<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>`, `<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove"/>`.
+
+### Track 4: Build & Test Verification
+- Run `flutter analyze` and fix any errors or warnings.
+- Run `flutter test` via terminal command and verify that 100% of tests compile and pass.
+- Update `google_play_audit_report.md` to document all verified fixes.

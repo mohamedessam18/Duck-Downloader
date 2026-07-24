@@ -1,21 +1,18 @@
 import 'package:in_app_purchase/in_app_purchase.dart';
 
-const monthlyPremiumProductId = 'monthly_premium';
-const yearlyPremiumProductId = 'yearly_premium';
-const musicPremiumProductId = 'music_premium';
+const monthlyPremiumProductId = 'duck_pro_monthly';
+const yearlyPremiumProductId = 'duck_pro_yearly';
 const premiumProductIds = <String>{
   monthlyPremiumProductId,
   yearlyPremiumProductId,
-  musicPremiumProductId,
 };
 
-enum SubscriptionPlan { monthly, yearly, musicPremium }
+enum SubscriptionPlan { monthly, yearly }
 
 extension SubscriptionPlanStoreId on SubscriptionPlan {
   String get productId => switch (this) {
     SubscriptionPlan.monthly => monthlyPremiumProductId,
     SubscriptionPlan.yearly => yearlyPremiumProductId,
-    SubscriptionPlan.musicPremium => musicPremiumProductId,
   };
 }
 

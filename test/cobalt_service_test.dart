@@ -4,9 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('CobaltService tests', () {
-    test('isSupported returns true for supported social media platforms', () {
-      expect(CobaltService.isSupported('https://www.youtube.com/watch?v=123'), isTrue);
-      expect(CobaltService.isSupported('https://youtu.be/123'), isTrue);
+    test('isSupported returns false for YouTube URLs under Google Play policy', () {
+      expect(CobaltService.isSupported('https://www.youtube.com/watch?v=123'), isFalse);
+      expect(CobaltService.isSupported('https://youtu.be/123'), isFalse);
+    });
+
+    test('isSupported returns true for supported non-YouTube social media platforms', () {
       expect(CobaltService.isSupported('https://www.instagram.com/reel/123'), isTrue);
       expect(CobaltService.isSupported('https://facebook.com/watch?v=123'), isTrue);
       expect(CobaltService.isSupported('https://x.com/user/status/123'), isTrue);

@@ -124,10 +124,45 @@ class TrimService {
       throw TrimValidationException('Trimmed file missing.');
     }
 
-    if (await original.exists()) {
-      await original.delete();
+    final dir = p.dirname(originalPath);
+    final tempDestPath = p.join(
+      dir,
+      '.tmp_replace_${DateTime.now().microsecondsSinceEpoch}${p.extension(originalPath)}',
+    );
+
+    await trimmed.copy(tempDestPath);
+    final tempDest = File(tempDestPath);
+    if (!await tempDest.exists() || await tempDest.length() != await trimmed.length()) {
+      if (await tempDest.exists()) await tempDest.delete();
+      throw TrimValidationException('Failed to copy trimmed file to target volume.');
     }
-    await trimmed.rename(originalPath);
+
+    if (await original.exists()) {
+      final backupPath = p.join(
+        dir,
+        '.bak_${DateTime.now().microsecondsSinceEpoch}${p.extension(originalPath)}',
+      );
+      final backup = await original.rename(backupPath);
+      try {
+        await tempDest.rename(originalPath);
+        await backup.delete();
+      } catch (e) {
+        if (await backup.exists()) {
+          await backup.rename(originalPath);
+        }
+        if (await tempDest.exists()) {
+          await tempDest.delete();
+        }
+        throw TrimValidationException('Failed to replace original file: $e');
+      }
+    } else {
+      await tempDest.rename(originalPath);
+    }
+
+    if (await trimmed.exists()) {
+      await trimmed.delete();
+    }
+
     return originalPath;
   }
 }

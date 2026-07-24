@@ -123,7 +123,7 @@ class DownloadStore {
   Map<String, int> readVideoResumePositions() {
     final raw = _box.get('videoResumePositions', defaultValue: <dynamic>{});
     if (raw is! Map) return {};
-    return raw.map((key, value) => MapEntry('$key', value as int));
+    return raw.map((key, value) => MapEntry('$key', (value as num).toInt()));
   }
 
   Future<void> writeVideoResumePosition(String id, int milliseconds) {

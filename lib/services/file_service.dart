@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -128,6 +129,22 @@ class DuckFileService {
     }
 
     final tagBytes = List<int>.filled(128, 0);
+    if (hasTag) {
+      final access = await file.open(mode: FileMode.read);
+      try {
+        await access.setPosition(length - 128);
+        final existing = await access.read(128);
+        if (existing.length == 128) {
+          for (int i = 0; i < 128; i++) {
+            tagBytes[i] = existing[i];
+          }
+        }
+      } catch (_) {
+      } finally {
+        await access.close();
+      }
+    }
+
     // Write 'TAG'
     tagBytes[0] = 84;
     tagBytes[1] = 65;
@@ -152,7 +169,7 @@ class DuckFileService {
     }
 
     if (hasTag) {
-      final rwAccess = await file.open(mode: FileMode.write);
+      final rwAccess = await file.open(mode: FileMode.writeOnly);
       try {
         await rwAccess.setPosition(length - 128);
         await rwAccess.writeFrom(tagBytes);
@@ -170,10 +187,11 @@ class DuckFileService {
   }
 
   List<int> _fixedLengthBytes(String val, int length) {
+    final encoded = utf8.encode(val);
     final result = List<int>.filled(length, 0);
-    for (int i = 0; i < val.length && i < length; i++) {
-      final code = val.codeUnitAt(i);
-      result[i] = code < 256 ? code : 63; // '?' for out of bounds
+    final copyLength = encoded.length > length ? length : encoded.length;
+    for (int i = 0; i < copyLength; i++) {
+      result[i] = encoded[i];
     }
     return result;
   }

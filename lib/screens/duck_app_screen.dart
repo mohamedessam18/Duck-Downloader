@@ -4,9 +4,7 @@ import 'dart:ui';
 import 'dart:async';
 import 'package:local_auth/local_auth.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:camera/camera.dart';
 import '../services/camera_service.dart';
-import '../services/vault_encryption_service.dart';
 import 'package:path/path.dart' as p;
 
 
@@ -26,9 +24,9 @@ import '../widgets/duck_liquid_glass.dart';
 import '../widgets/glass_panel.dart';
 import '../widgets/media/media_thumb.dart';
 import '../widgets/media/mini_player.dart';
-import '../widgets/admob_banner_widget.dart';
 import '../services/ad_service.dart';
 import 'locked_social_browser_screen.dart';
+import 'settings_screen.dart';
 
 bool get _isLight {
   try {
@@ -394,6 +392,7 @@ class _HomeView extends StatelessWidget {
                       _AutoSaveToggle(controller: controller),
                       _ClipboardToggle(controller: controller),
                       _BackgroundPlayToggle(controller: controller),
+                      _SettingsButton(controller: controller),
                       _ProBadge(controller: controller),
                     ],
                   ),
@@ -645,6 +644,28 @@ class _BackgroundPlayToggle extends StatelessWidget {
           context,
           newStatus ? 'Background Playback Enabled' : 'Background Playback Disabled',
           newStatus,
+        );
+      },
+    );
+  }
+}
+
+class _SettingsButton extends StatelessWidget {
+  const _SettingsButton({required this.controller});
+
+  final DuckDownloadsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return _HeaderToggle(
+      icon: Icons.settings_outlined,
+      label: 'SETTINGS',
+      active: false,
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SettingsScreen(controller: controller),
+          ),
         );
       },
     );
@@ -2989,9 +3010,7 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
       );
       if (didAuthenticate) {
         if (!mounted) return;
-        widget.controller.isVaultLocked = false;
-        widget.controller.isDecoySession = false;
-        widget.controller.notifyListeners();
+        widget.controller.unlockVaultBiometric();
         Navigator.pop(context);
         widget.onSuccess();
       }

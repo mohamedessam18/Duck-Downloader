@@ -89,19 +89,7 @@ class PremiumManager extends ChangeNotifier {
     try {
       await _subscriptions.buy(product);
     } catch (error) {
-      debugPrint("IAP purchase failed: $error. Falling back to sandbox simulation...");
-      await Future.delayed(const Duration(milliseconds: 800));
-      final entitlement = PremiumEntitlement(
-        isActive: true,
-        productId: product.id,
-        purchaseId: 'mock_purchase_${DateTime.now().millisecondsSinceEpoch}',
-        verifiedAt: DateTime.now().toUtc(),
-        features: _purchases.featuresForMock(product.id),
-      );
-      this.entitlement = entitlement;
-      await _purchases.saveMockEntitlement(entitlement);
-      statusMessage = 'Duck Premium is active.';
-      errorMessage = null;
+      errorMessage = _cleanError(error);
     } finally {
       purchasePending = false;
       notifyListeners();
@@ -116,6 +104,11 @@ class PremiumManager extends ChangeNotifier {
     notifyListeners();
     try {
       await _subscriptions.restorePurchases();
+      if (purchasePending && statusMessage == 'Restoring purchases...') {
+        purchasePending = false;
+        statusMessage = 'No active purchases found to restore.';
+        notifyListeners();
+      }
     } catch (error) {
       purchasePending = false;
       errorMessage = _cleanError(error);
@@ -123,9 +116,35 @@ class PremiumManager extends ChangeNotifier {
     }
   }
 
+  final List<List<PurchaseDetails>> _purchaseUpdateQueue = [];
+  bool _isProcessingPurchaseStream = false;
+
   Future<void> _handlePurchaseUpdates(List<PurchaseDetails> purchases) async {
+    _purchaseUpdateQueue.add(purchases);
+    if (_isProcessingPurchaseStream) return;
+
+    _isProcessingPurchaseStream = true;
+    try {
+      while (_purchaseUpdateQueue.isNotEmpty) {
+        final currentBatch = _purchaseUpdateQueue.removeAt(0);
+        await _processPurchaseBatch(currentBatch);
+      }
+    } finally {
+      _isProcessingPurchaseStream = false;
+    }
+  }
+
+  Future<void> _processPurchaseBatch(List<PurchaseDetails> purchases) async {
+    if (purchases.isEmpty) {
+      purchasePending = false;
+      statusMessage = 'No active purchases found to restore.';
+      notifyListeners();
+      return;
+    }
+    bool handledAny = false;
     for (final purchase in purchases) {
       if (!premiumProductIds.contains(purchase.productID)) continue;
+      handledAny = true;
       if (purchase.status == PurchaseStatus.pending) {
         purchasePending = true;
         statusMessage = 'Purchase pending...';
@@ -146,6 +165,9 @@ class PremiumManager extends ChangeNotifier {
       }
       try {
         entitlement = await _purchases.verifyAndSave(purchase);
+        if (purchase.pendingCompletePurchase) {
+          await _subscriptions.completePurchase(purchase);
+        }
         statusMessage = purchase.status == PurchaseStatus.restored
             ? 'Duck Premium restored.'
             : 'Duck Premium is active.';
@@ -155,12 +177,14 @@ class PremiumManager extends ChangeNotifier {
         entitlement = const PremiumEntitlement.inactive();
         errorMessage = _cleanError(error);
       } finally {
-        if (purchase.pendingCompletePurchase) {
-          await _subscriptions.completePurchase(purchase);
-        }
         purchasePending = false;
         notifyListeners();
       }
+    }
+    if (!handledAny && purchasePending) {
+      purchasePending = false;
+      statusMessage = 'No active purchases found to restore.';
+      notifyListeners();
     }
   }
 

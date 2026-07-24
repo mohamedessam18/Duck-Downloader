@@ -11,11 +11,13 @@ class CobaltService {
   ];
 
   /// Returns true if the URL is from a platform supported by Cobalt.
+  /// YouTube URLs are strictly excluded under Google Play Store policies.
   static bool isSupported(String url) {
     final lower = url.toLowerCase();
-    return lower.contains('youtube.com') ||
-        lower.contains('youtu.be') ||
-        lower.contains('instagram.com') ||
+    if (lower.contains('youtube') || lower.contains('youtu.be')) {
+      return false;
+    }
+    return lower.contains('instagram.com') ||
         lower.contains('threads.net') ||
         lower.contains('threads.com') ||
         lower.contains('facebook.com') ||
