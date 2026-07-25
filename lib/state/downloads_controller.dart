@@ -827,6 +827,10 @@ class DuckDownloadsController extends ChangeNotifier
       quality = 'Best';
       flow = DuckFlow.ready;
       status = 'Choose videos to download';
+    } else {
+      if (!_isPublicMediaCandidate(cleanUrl)) {
+        throw Exception('Copy a public social media link first.');
+      }
 
       if (cleanUrl.contains('instagram.com')) {
         try {
