@@ -2242,21 +2242,18 @@ class DuckDownloadsController extends ChangeNotifier
   /// [item] — the video DownloadItem
   /// [position] — current playback position to seek to
   /// Starts background audio playback of a video item at the specified position.
-  /// Made synchronous to execute instantly in the lifecycle transition loop.
-  Future<void> playVideoAudioInBackground(
-    DownloadItem item,
-    Duration position,
-  ) async {
-    if (_backgroundVideoActive) return;
+  /// Pre-loads the video file into just_audio at volume 0 so that when the
+  /// screen locks we only need to unmute — no loading delay at all.
+  /// Call this right after the video player starts playing.
+  Future<void> preloadBackgroundAudio(DownloadItem item) async {
     final path = item.filePath;
     if (path == null) return;
     try {
-      _backgroundVideoActive = true;
-      playingItem = item;
-
       if (!audioBackgroundReady) {
         await _ensureAudioBackgroundReady();
       }
+
+      await audioPlayer.setVolume(0.0); // silent — video provides audio
 
       await audioPlayer.setAudioSource(
         AudioSource.file(
@@ -2268,23 +2265,53 @@ class DuckDownloadsController extends ChangeNotifier
             artUri: _artUriFor(item),
           ),
         ),
-        initialPosition: position,
       );
 
+      // Don't play yet — we'll start it in sync when the video plays.
+      _backgroundVideoPreloaded = true;
+      playingItem = item;
+    } catch (e) {
+      _backgroundVideoPreloaded = false;
+      debugPrint('Failed to preload background audio: $e');
+    }
+  }
+
+  bool _backgroundVideoPreloaded = false;
+
+  /// Activates the pre-loaded background audio player by seeking to the
+  /// video's current position, unmuting, and starting playback.
+  /// Because the audio source is already loaded, this is nearly instant.
+  Future<void> activateBackgroundAudio(Duration position) async {
+    if (!_backgroundVideoPreloaded) return;
+    if (_backgroundVideoActive) return;
+    try {
+      _backgroundVideoActive = true;
+      await audioPlayer.seek(position);
+      await audioPlayer.setVolume(1.0); // unmute — instant!
       await audioPlayer.play();
       notifyListeners();
     } catch (e) {
       _backgroundVideoActive = false;
-      playingItem = null;
-      debugPrint('Failed to start background video audio: $e');
+      debugPrint('Failed to activate background audio: $e');
     }
   }
 
-  /// Stops background video audio and releases the audio player source.
-  /// Call this when the user returns to the app and the video player resumes.
-  Future<void> stopBackgroundVideoAudio() async {
+  /// Deactivates background audio when the video player resumes.
+  /// Mutes and pauses instead of stopping, so the source stays loaded
+  /// for the next screen lock (no re-loading needed).
+  Future<void> deactivateBackgroundAudio() async {
     if (!_backgroundVideoActive) return;
     _backgroundVideoActive = false;
+    await audioPlayer.setVolume(0.0); // mute — instant
+    await audioPlayer.pause();        // pause, don't stop (keeps source loaded)
+    notifyListeners();
+  }
+
+  /// Fully stops and releases the background audio. Call this only when
+  /// the player overlay is being disposed / closed.
+  Future<void> stopBackgroundVideoAudio() async {
+    _backgroundVideoActive = false;
+    _backgroundVideoPreloaded = false;
     playingItem = null;
     await audioPlayer.stop();
     notifyListeners();

@@ -214,6 +214,13 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               });
               _video?.play();
               _startHideTimer();
+
+              // ── Pre-load background audio at volume 0 ──────────────────
+              // This way when the screen locks we only need to unmute —
+              // no loading delay, identical to YouTube Premium's behavior.
+              if (widget.controller.backgroundPlaybackEnabled) {
+                unawaited(widget.controller.preloadBackgroundAudio(widget.item));
+              }
             })
             .catchError((Object _) {
               if (mounted) {
@@ -332,6 +339,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
+      // Fully release background audio when the player closes.
+      unawaited(widget.controller.stopBackgroundVideoAudio());
     }
     _hideTimer?.cancel();
     _leftSeekTimer?.cancel();
@@ -355,8 +364,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     if (!widget.item.isVideo) return;
 
     // ── Screen lock / background ──────────────────────────────────────────
-    // We trigger ONLY on `inactive` (first signal when lock button is pressed).
-    // `paused` arrives ~300ms later and we ignore it to avoid double-triggering.
+    // Trigger ONLY on `inactive` (first signal when lock button is pressed).
     if (state == AppLifecycleState.inactive) {
       // Skip if in PiP — PiP has its own flow
       try {
@@ -380,13 +388,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     }
   }
 
-  /// Hands audio off to just_audio_background BEFORE pausing the video,
-  /// so there is zero gap in the audio stream when the screen locks.
-  ///
-  /// Flow:
-  ///   1. Start background audio player at the exact current position  ← no gap
-  ///   2. Wait 80 ms for the audio decoder to produce its first frame
-  ///   3. Pause the video decoder                                       ← silent now
+  /// Screen lock: seek pre-loaded audio to exact video position, unmute,
+  /// then pause the video. The audio is already loaded so this is ~instant.
   Future<void> _handoffVideoAudioToBackground() async {
     if (_isInPiP) return;
     final video = _video;
@@ -398,53 +401,37 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     _savedPositionForHandoff = video.value.position;
     widget.controller.saveVideoResumePosition(widget.item.id, _savedPositionForHandoff);
 
-    // Step 1: fire-and-forget — start audio player immediately so it begins
-    // buffering/playing before we mute the video decoder.
-    unawaited(widget.controller.playVideoAudioInBackground(
-      widget.item,
-      _savedPositionForHandoff,
-    ));
+    // Activate pre-loaded audio: seek + unmute + play (nearly instant)
+    await widget.controller.activateBackgroundAudio(_savedPositionForHandoff);
 
-    // Step 2: give the audio player 80 ms to produce its first audio frame.
-    // This tiny overlap ensures zero perceived gap on all modern Android devices.
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-
-    // Step 3: now it is safe to silence & pause the video decoder.
-    if (!mounted) return;
+    // Now pause the video — audio is already playing from background player
     video.pause();
   }
 
-  /// Resumes the video player from the current background-audio position.
-  ///
-  /// Flow (mirror of handoff):
-  ///   1. Seek video to current audio position + play  ← video decoder warms up
-  ///   2. Wait 80 ms
-  ///   3. Stop background audio                        ← silent hand-back
+  /// Screen unlock: resume video from background audio position, then mute
+  /// the background audio (keeps it loaded for next lock).
   Future<void> _resumeVideoFromBackground() async {
     if (!_backgroundHandoffActive) return;
     _backgroundHandoffActive = false;
 
-    // Use the live audio player position for an accurate hand-back point.
     var currentPos = widget.controller.audioPlayer.position;
     if (currentPos <= Duration.zero && _savedPositionForHandoff > Duration.zero) {
       currentPos = _savedPositionForHandoff;
     }
     widget.controller.saveVideoResumePosition(widget.item.id, currentPos);
 
-    // Step 1: Seek the video decoder and start playing immediately.
     final video = _video;
     if (video == null || !mounted || !video.value.isInitialized) {
-      await widget.controller.stopBackgroundVideoAudio();
+      await widget.controller.deactivateBackgroundAudio();
       return;
     }
+
+    // Resume video at the exact audio position
     await video.seekTo(currentPos);
     await video.play();
 
-    // Step 2: tiny overlap so the video decoder has produced at least one frame.
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-
-    // Step 3: stop background audio — video has taken over.
-    await widget.controller.stopBackgroundVideoAudio();
+    // Mute + pause background audio (stays loaded for next lock)
+    await widget.controller.deactivateBackgroundAudio();
 
     if (mounted) setState(() {});
   }
@@ -1048,16 +1035,13 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                           padding: EdgeInsets.zero,
                                                           constraints: const BoxConstraints(),
                                                           icon: const Icon(Icons.headphones, color: Colors.white, size: 20),
-                                                          onPressed: () {
+                                                          onPressed: () async {
                                                             final video = _video;
                                                             if (video == null || !video.value.isInitialized) return;
                                                             final pos = video.value.position;
                                                             _hideTimer?.cancel();
                                                             video.pause();
-                                                            widget.controller.playVideoAudioInBackground(
-                                                              widget.item,
-                                                              pos,
-                                                            );
+                                                            await widget.controller.activateBackgroundAudio(pos);
                                                             widget.controller.closePlayer();
                                                           },
                                                         ),
