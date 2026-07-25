@@ -405,6 +405,10 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> toggleFavorite(DownloadItem item) async {
     final next = item.copyWith(favorite: !item.favorite);
     await _saveItem(next);
+    if (playingItem?.id == item.id) {
+      playingItem = next;
+    }
+    notifyListeners();
   }
 
   Future<void> moveItemToVault(DownloadItem item) async {

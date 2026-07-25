@@ -300,42 +300,47 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
                         ),
                         child: SafeArea(
                           top: false,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _GalleryAction(
-                                icon: Icons.save_alt,
-                                label: 'Save',
-                                onTap: () => widget.controller
-                                    .saveImageExternally(_currentItem),
-                              ),
-                              _GalleryAction(
-                                icon: Icons.share,
-                                label: 'Share',
-                                onTap: () => widget.controller
-                                    .shareDownload(_currentItem),
-                              ),
-                              _GalleryAction(
-                                icon: _currentItem.favorite
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                                label: _currentItem.favorite
-                                    ? 'Favorited'
-                                    : 'Favorite',
-                                color: _currentItem.favorite ? mediaDanger : null,
-                                onTap: () => widget.controller
-                                    .toggleFavorite(_currentItem),
-                              ),
-                              _GalleryAction(
-                                icon: Icons.delete_outline,
-                                label: 'Delete',
-                                onTap: () {
-                                  widget.controller.closePlayer();
-                                  widget.controller
-                                      .deleteDownload(_currentItem);
-                                },
-                              ),
-                            ],
+                          child: ListenableBuilder(
+                            listenable: widget.controller,
+                            builder: (context, _) {
+                              return Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  _GalleryAction(
+                                    icon: Icons.save_alt,
+                                    label: 'Save',
+                                    onTap: () => widget.controller
+                                        .saveImageExternally(_currentItem),
+                                  ),
+                                  _GalleryAction(
+                                    icon: Icons.share,
+                                    label: 'Share',
+                                    onTap: () => widget.controller
+                                        .shareDownload(_currentItem),
+                                  ),
+                                  _GalleryAction(
+                                    icon: _currentItem.favorite
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    label: _currentItem.favorite
+                                        ? 'Favorited'
+                                        : 'Favorite',
+                                    color: _currentItem.favorite ? mediaDanger : null,
+                                    onTap: () => widget.controller
+                                        .toggleFavorite(_currentItem),
+                                  ),
+                                  _GalleryAction(
+                                    icon: Icons.delete_outline,
+                                    label: 'Delete',
+                                    onTap: () {
+                                      widget.controller.closePlayer();
+                                      widget.controller
+                                          .deleteDownload(_currentItem);
+                                    },
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ),
                       ),

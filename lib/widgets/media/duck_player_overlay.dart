@@ -22,6 +22,7 @@ import 'liquid_interactive_button.dart';
 import '../../theme/duck_theme.dart';
 import '../duck_liquid_glass.dart';
 import '../glass_panel.dart';
+import 'animated_favorite_button.dart';
 import 'player_error.dart';
 class DuckPlayerOverlay extends StatefulWidget {
   const DuckPlayerOverlay({
@@ -1311,15 +1312,18 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                             letterSpacing: 0.5,
                           ),
                         ),
-                        Builder(
-                          builder: (context) {
+                        ListenableBuilder(
+                          listenable: widget.controller,
+                          builder: (context, _) {
                             final currentItem = widget.controller.playerItem ?? widget.item;
                             final isFav = currentItem.favorite;
                             return _buildCircularGlassButton(
-                              child: Icon(
-                                isFav ? Icons.favorite : Icons.favorite_border,
-                                color: isFav ? mediaDanger : Colors.white70,
+                              child: AnimatedFavoriteButton(
+                                isFavorite: isFav,
                                 size: 20,
+                                onTap: () {
+                                  widget.controller.toggleFavorite(currentItem);
+                                },
                               ),
                               onPressed: () {
                                 widget.controller.toggleFavorite(currentItem);
