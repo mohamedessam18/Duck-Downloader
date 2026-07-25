@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -7,13 +8,19 @@ import 'services/ad_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Completely disable all logging in release builds to eliminate security risks
+  if (kReleaseMode) {
+    debugPrint = (String? message, {int? wrapWidth}) {};
+  }
+
   await AdService.instance.initialize();
   await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.duck.downloader.audio',   
+    androidNotificationChannelId: 'com.duck.downloader.audio',
     androidNotificationChannelName: 'Duck Audio Playback',
     androidNotificationOngoing: true,
   );
   await Hive.initFlutter();
   await Hive.openBox('duck-downloads');
   runApp(const DuckDownloaderApp());
-}
+}
