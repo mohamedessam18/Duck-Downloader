@@ -827,11 +827,33 @@ class DuckDownloadsController extends ChangeNotifier
       quality = 'Best';
       flow = DuckFlow.ready;
       status = 'Choose videos to download';
-    } else {
-      if (!_isPublicMediaCandidate(cleanUrl)) {
-        throw Exception('Copy a public social media link first.');
+      // ── YouTube: ALWAYS use youtube_explode_dart ──
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        flow = DuckFlow.extracting;
+        status = 'Fetching YouTube info...';
+        notifyListeners();
+        try {
+          final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+          if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+            metadata = ytMeta;
+            selectedType = DownloadType.video;
+            quality = _firstQuality(ytMeta, DownloadType.video);
+            flow = DuckFlow.ready;
+            status = 'Choose video or audio';
+            return;
+          }
+          throw Exception(
+            'Could not load YouTube video. The video may be private, '
+            'age-restricted, or unavailable in your region.',
+          );
+        } catch (error) {
+          if (_shouldUseLockedBrowserFallback(cleanUrl, error)) {
+            _requestLockedBrowser(cleanUrl, _browserPlatformFor(cleanUrl));
+            return;
+          }
+          rethrow;
+        }
       }
-
 
       if (cleanUrl.contains('instagram.com')) {
         try {
@@ -986,11 +1008,11 @@ class DuckDownloadsController extends ChangeNotifier
         debugPrint('Cobalt extraction failed: $e');
       }
 
-      if (cobaltUrl != null) {
-        await _startCobaltDownload(media, cobaltUrl);
+      final isYouTube = media.platform.toLowerCase() == 'youtube' || YouTubeExplodeService.isYouTubeUrl(media.url);
+      if (isYouTube) {
+        await _startYouTubeExplodeDownload(media);
         return;
       }
-
 
       final id = await _api.startDownload(
         url: media.url,
@@ -3042,6 +3064,20 @@ class DuckDownloadsController extends ChangeNotifier
         throw Exception('BLOCKED_ADULT_CONTENT');
       }
 
+      // 1. YouTube
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+        if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+          metadata = ytMeta;
+          selectedType = DownloadType.video;
+          quality = _firstQuality(ytMeta, DownloadType.video);
+          busy = false;
+          await startDownload();
+          showAdOnOpen = true;
+          notifyListeners();
+          return;
+        }
+      }
 
       // 2. Instagram
       if (cleanUrl.contains('instagram.com')) {

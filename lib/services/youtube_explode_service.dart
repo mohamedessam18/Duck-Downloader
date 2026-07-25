@@ -77,14 +77,25 @@ class YouTubeExplodeService {
     return isYtDomain && (lower.contains('list=') || lower.contains('/playlist'));
   }
 
+  YoutubeExplode get _freshYt {
+    try {
+      _yt.close();
+    } catch (_) {}
+    _yt = (_currentCookieString != null && _currentCookieString!.isNotEmpty)
+        ? YoutubeExplode(httpClient: CookieYoutubeHttpClient(_currentCookieString!))
+        : YoutubeExplode();
+    return _yt;
+  }
+
   // ── Playlist extraction ────────────────────────────────────────────────────
 
   /// Extracts all videos in a YouTube playlist.
   Future<({String title, List<PlaylistItem> items})> extractPlaylist(
     String url,
   ) async {
-    final playlist = await _yt.playlists.get(url);
-    final videos = await _yt.playlists.getVideos(playlist.id).toList();
+    final yt = _freshYt;
+    final playlist = await yt.playlists.get(url);
+    final videos = await yt.playlists.getVideos(playlist.id).toList();
     final items = <PlaylistItem>[];
     for (final v in videos) {
       final videoUrl = 'https://www.youtube.com/watch?v=${v.id.value}';
@@ -106,42 +117,67 @@ class YouTubeExplodeService {
     final videoId = VideoId.parseVideoId(url);
     if (videoId == null) return null;
 
-    final video = await _yt.videos.get(videoId);
-    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    final yt = _freshYt;
+    final video = await yt.videos.get(videoId);
+    final manifest = await yt.videos.streamsClient.getManifest(videoId);
 
-    final qualities = <FormatInfo>[];
-    final audioFormats = <FormatInfo>[];
+    final qualityByHeight = <int, FormatInfo>{};
 
-    // Muxed (video+audio) streams
-    for (final s in manifest.muxed.sortByVideoQuality()) {
-      final label = s.videoQuality.name;
-      qualities.add(FormatInfo(
-        id: label,
-        label: label,
-        ext: 'mp4',
-        height: s.videoResolution.height,
-        width: s.videoResolution.width,
-        filesize: s.size.totalBytes,
-      ));
+    // Extract all video streams (both videoOnly and muxed)
+    final allVideoStreams = [...manifest.videoOnly, ...manifest.muxed];
+    for (final s in allVideoStreams) {
+      final h = s.videoResolution.height;
+      if (h <= 0) continue;
+
+      String label;
+      if (h >= 2160) {
+        label = '4K (2160p)';
+      } else if (h >= 1440) {
+        label = '2K (1440p)';
+      } else if (h >= 1080) {
+        label = '1080p';
+      } else if (h >= 720) {
+        label = '720p';
+      } else if (h >= 480) {
+        label = '480p';
+      } else if (h >= 360) {
+        label = '360p';
+      } else if (h >= 240) {
+        label = '240p';
+      } else {
+        label = '${h}p';
+      }
+
+      // Store the best stream candidate for each resolution height
+      if (!qualityByHeight.containsKey(h) ||
+          (s.size.totalBytes > (qualityByHeight[h]?.filesize ?? 0))) {
+        qualityByHeight[h] = FormatInfo(
+          id: '$h',
+          label: label,
+          ext: 'mp4',
+          height: h,
+          width: s.videoResolution.width,
+          filesize: s.size.totalBytes,
+        );
+      }
     }
 
-    // Audio-only stream
-    final bestAudio = manifest.audioOnly.withHighestBitrate();
-    final audioExt = bestAudio.container.name == 'webm' ? 'm4a' : bestAudio.container.name;
-    audioFormats.add(FormatInfo(
-      id: 'audio_best',
-      label: 'Audio only (M4A)',
-      ext: audioExt,
-      filesize: bestAudio.size.totalBytes,
-    ));
+    // Sort descending by height (4K -> 2K -> 1080p -> 720p -> 480p -> 360p)
+    final sortedHeights = qualityByHeight.keys.toList()..sort((a, b) => b.compareTo(a));
+    final qualities = sortedHeights.map((h) => qualityByHeight[h]!).toList();
 
-    // Deduplicate by label (keep highest quality per label)
-    final seen = <String>{};
-    final uniqueQualities = qualities.reversed
-        .where((q) => seen.add(q.label))
-        .toList()
-        .reversed
-        .toList();
+    // Audio-only stream
+    final audioFormats = <FormatInfo>[];
+    if (manifest.audioOnly.isNotEmpty) {
+      final bestAudio = manifest.audioOnly.withHighestBitrate();
+      final audioExt = bestAudio.container.name == 'webm' ? 'm4a' : bestAudio.container.name;
+      audioFormats.add(FormatInfo(
+        id: 'audio_best',
+        label: 'Audio only (M4A)',
+        ext: audioExt,
+        filesize: bestAudio.size.totalBytes,
+      ));
+    }
 
     return MediaMetadata(
       url: url,
@@ -149,7 +185,7 @@ class YouTubeExplodeService {
       thumbnail: video.thumbnails.highResUrl,
       platform: 'YouTube',
       duration: _formatDuration(video.duration),
-      qualities: uniqueQualities,
+      qualities: qualities,
       audioFormats: audioFormats,
     );
   }
@@ -169,7 +205,8 @@ class YouTubeExplodeService {
     final videoId = VideoId.parseVideoId(videoUrl);
     if (videoId == null) throw Exception('Invalid YouTube URL: $videoUrl');
 
-    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    final yt = _freshYt;
+    final manifest = await yt.videos.streamsClient.getManifest(videoId);
     final root = await getApplicationDocumentsDirectory();
     final folder = Directory(p.join(root.path, 'Duck Downloader', 'Audios'));
     await folder.create(recursive: true);
@@ -228,33 +265,134 @@ class YouTubeExplodeService {
     final videoId = VideoId.parseVideoId(videoUrl);
     if (videoId == null) throw Exception('Invalid YouTube URL: $videoUrl');
 
-    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    final yt = _freshYt;
+    final manifest = await yt.videos.streamsClient.getManifest(videoId);
     final root = await getApplicationDocumentsDirectory();
     final folder = Directory(p.join(root.path, 'Duck Downloader', 'Videos'));
     await folder.create(recursive: true);
 
     final safeTitle = _sanitizeFilename(title);
 
-    // Pick best muxed stream matching preferred height
-    MuxedStreamInfo stream;
-    final sorted = manifest.muxed.sortByVideoQuality();
-    if (preferredHeight != null) {
-      stream = sorted.lastWhere(
-        (s) => s.videoResolution.height <= preferredHeight,
-        orElse: () => sorted.last,
-      );
-    } else {
-      stream = sorted.last; // highest quality
+    // Look for matching stream in muxed first
+    final sortedMuxed = manifest.muxed.sortByVideoQuality();
+    MuxedStreamInfo? selectedMuxed;
+    if (preferredHeight != null && sortedMuxed.isNotEmpty) {
+      final matches = sortedMuxed.where((s) => s.videoResolution.height == preferredHeight);
+      if (matches.isNotEmpty) {
+        selectedMuxed = matches.first;
+      }
     }
 
-    final ext = preferredExt ?? 'mp4';
-    final filePath = await _getUniqueFilePath(folder.path, '$safeTitle.$ext');
-    await _downloadStreamWithTimeout(
-      streamUrl: stream.url.toString(),
-      savePath: filePath,
-      onProgress: onProgress,
-    );
-    return filePath;
+    // If a muxed stream exists for this resolution (e.g. 720p or 360p), download directly!
+    if (selectedMuxed != null) {
+      final ext = preferredExt ?? 'mp4';
+      final filePath = await _getUniqueFilePath(folder.path, '$safeTitle.$ext');
+      await _downloadStreamWithTimeout(
+        streamUrl: selectedMuxed.url.toString(),
+        savePath: filePath,
+        onProgress: onProgress,
+      );
+      return filePath;
+    }
+
+    // Otherwise (e.g. 1080p, 1440p, 4K), we pick from videoOnly and merge with audioOnly via FFmpeg
+    final sortedVideoOnly = manifest.videoOnly.sortByVideoQuality();
+    VideoOnlyStreamInfo? selectedVideoOnly;
+    if (preferredHeight != null && sortedVideoOnly.isNotEmpty) {
+      final matches = sortedVideoOnly.where((s) => s.videoResolution.height <= preferredHeight);
+      if (matches.isNotEmpty) {
+        selectedVideoOnly = matches.last;
+      } else {
+        selectedVideoOnly = sortedVideoOnly.last;
+      }
+    } else if (sortedVideoOnly.isNotEmpty) {
+      selectedVideoOnly = sortedVideoOnly.last; // highest available
+    }
+
+    if (selectedVideoOnly != null) {
+      final bestAudio = manifest.audioOnly.withHighestBitrate();
+      final tempVideoPath = await _getUniqueFilePath(folder.path, '${safeTitle}_temp_v.mp4');
+      final tempAudioPath = await _getUniqueFilePath(folder.path, '${safeTitle}_temp_a.m4a');
+      final finalFilePath = await _getUniqueFilePath(folder.path, '$safeTitle.mp4');
+
+      // 1. Download Video stream (0 - 70%)
+      await _downloadStreamWithTimeout(
+        streamUrl: selectedVideoOnly.url.toString(),
+        savePath: tempVideoPath,
+        onProgress: (rx, total) {
+          if (total > 0 && onProgress != null) {
+            onProgress((rx / total * 70).toInt(), 100);
+          }
+        },
+      );
+
+      // 2. Download Audio stream (70 - 90%)
+      await _downloadStreamWithTimeout(
+        streamUrl: bestAudio.url.toString(),
+        savePath: tempAudioPath,
+        onProgress: (rx, total) {
+          if (total > 0 && onProgress != null) {
+            onProgress(70 + (rx / total * 20).toInt(), 100);
+          }
+        },
+      );
+
+      // 3. Merge Video + Audio using FFmpeg (90 - 100%)
+      onProgress?.call(95, 100);
+      await mergeVideoAndAudio(tempVideoPath, tempAudioPath, finalFilePath);
+
+      // Clean up temp files
+      try {
+        await File(tempVideoPath).delete();
+        await File(tempAudioPath).delete();
+      } catch (_) {}
+
+      return finalFilePath;
+    }
+
+    // Ultimate fallback if no videoOnly stream was found either: fallback to highest muxed
+    if (sortedMuxed.isNotEmpty) {
+      final fallbackMuxed = sortedMuxed.last;
+      final filePath = await _getUniqueFilePath(folder.path, '$safeTitle.mp4');
+      await _downloadStreamWithTimeout(
+        streamUrl: fallbackMuxed.url.toString(),
+        savePath: filePath,
+        onProgress: onProgress,
+      );
+      return filePath;
+    }
+
+    throw Exception('No playable video stream found for YouTube video.');
+  }
+
+  /// Merges a video-only file and an audio-only file into a single MP4 container using FFmpeg.
+  Future<void> mergeVideoAndAudio(
+    String videoPath,
+    String audioPath,
+    String outputPath,
+  ) async {
+    final args = [
+      '-y',
+      '-i', videoPath,
+      '-i', audioPath,
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-movflags', '+faststart',
+      outputPath,
+    ];
+
+    final session = await FFmpegKit.executeWithArguments(args);
+    final returnCode = await session.getReturnCode();
+
+    if (!ReturnCode.isSuccess(returnCode)) {
+      final logs = await session.getAllLogsAsString();
+      throw Exception('FFmpeg video/audio merge failed: ${logs?.trim() ?? 'unknown error'}');
+    }
+
+    final out = File(outputPath);
+    if (!await out.exists() || await out.length() <= 0) {
+      throw Exception('FFmpeg produced an empty merged output file.');
+    }
   }
 
   // ── Legacy stream download (Dio) ───────────────────────────────────────────
