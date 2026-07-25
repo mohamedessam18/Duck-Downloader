@@ -33,7 +33,7 @@ class MediaOverlayRouter extends StatelessWidget {
         controller: controller,
       );
     } else {
-      child = DuckPlayerOverlay(item: item, controller: controller);
+      child = DuckPlayerOverlay(key: ValueKey(item.id), item: item, controller: controller);
     }
 
     return SwipeBackWrapper(

@@ -86,6 +86,10 @@ class DuckDownloadsController extends ChangeNotifier
     _playerStateSubscription = audioPlayer.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed &&
           playingItem != null) {
+        if (sleepTimerLabel == 'End of track') {
+          cancelSleepTimer();
+          return; // Don't auto-advance
+        }
         if (_loopMode == LoopMode.one) {
           unawaited(audioPlayer.seek(Duration.zero));
           unawaited(audioPlayer.play());
@@ -111,6 +115,8 @@ class DuckDownloadsController extends ChangeNotifier
   DownloadItem? playingItem;
   List<DownloadItem> _audioQueue = [];
   int _audioQueueIndex = 0;
+  List<DownloadItem> _videoQueue = [];
+  int _videoQueueIndex = 0;
   LoopMode _loopMode = LoopMode.off;
   bool shuffleEnabled = false;
   Map<String, int> _videoResumePositions = {};
@@ -126,6 +132,43 @@ class DuckDownloadsController extends ChangeNotifier
   bool get hasPreviousTrack =>
       _audioQueue.length > 1 &&
       (_loopMode == LoopMode.all || _audioQueueIndex > 0);
+      
+  // Queue management
+  List<DownloadItem> get audioQueue => List.unmodifiable(_audioQueue);
+  int get audioQueueIndex => _audioQueueIndex;
+
+  void reorderQueue(int oldIndex, int newIndex) {
+    if (oldIndex < newIndex) newIndex -= 1;
+    final item = _audioQueue.removeAt(oldIndex);
+    _audioQueue.insert(newIndex, item);
+    // Update current index if it was affected
+    if (oldIndex == _audioQueueIndex) {
+      _audioQueueIndex = newIndex;
+    } else if (oldIndex < _audioQueueIndex && newIndex >= _audioQueueIndex) {
+      _audioQueueIndex--;
+    } else if (oldIndex > _audioQueueIndex && newIndex <= _audioQueueIndex) {
+      _audioQueueIndex++;
+    }
+    notifyListeners();
+  }
+
+  void removeFromQueue(int index) {
+    if (_audioQueue.length <= 1) return;
+    if (index == _audioQueueIndex) return; // Can't remove currently playing
+    _audioQueue.removeAt(index);
+    if (index < _audioQueueIndex) _audioQueueIndex--;
+    notifyListeners();
+  }
+
+  void playFromQueue(int index) {
+    if (index < 0 || index >= _audioQueue.length) return;
+    _audioQueueIndex = index;
+    playItem(_audioQueue[index], advanceQueue: true);
+  }
+      
+  bool get hasNextVideo => _videoQueue.length > 1 && _videoQueueIndex < _videoQueue.length - 1;
+  bool get hasPreviousVideo => _videoQueue.length > 1 && _videoQueueIndex > 0;
+  DownloadItem? get nextVideoItem => hasNextVideo ? _videoQueue[_videoQueueIndex + 1] : null;
 
   LoopMode get loopMode => _loopMode;
 
@@ -133,6 +176,40 @@ class DuckDownloadsController extends ChangeNotifier
   Duration get audioPosition => audioPlayer.position;
   Duration get audioDuration => audioPlayer.duration ?? Duration.zero;
   PlayerState get audioPlayerState => audioPlayer.playerState;
+
+  // Sleep Timer
+  Timer? _sleepTimer;
+  DateTime? sleepTimerEndTime;
+  String? sleepTimerLabel;
+
+  void setSleepTimer(Duration duration, String label) {
+    cancelSleepTimer();
+    sleepTimerLabel = label;
+    sleepTimerEndTime = DateTime.now().add(duration);
+    _sleepTimer = Timer(duration, () {
+      audioPlayer.pause();
+      cancelSleepTimer();
+    });
+    notifyListeners();
+  }
+
+  void setSleepTimerEndOfTrack() {
+    cancelSleepTimer();
+    sleepTimerLabel = 'End of track';
+    sleepTimerEndTime = null; // special marker
+    notifyListeners();
+    // The actual pause happens in the playerStateStream listener when track completes
+  }
+
+  void cancelSleepTimer() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    sleepTimerEndTime = null;
+    sleepTimerLabel = null;
+    notifyListeners();
+  }
+
+  bool get isSleepTimerActive => sleepTimerLabel != null;
 
   final DuckApiClient _api;
   final DuckClipboardService _clipboard;
@@ -2112,6 +2189,28 @@ class DuckDownloadsController extends ChangeNotifier
     await playItem(_audioQueue[_audioQueueIndex], advanceQueue: true);
   }
 
+  void buildVideoQueue(DownloadItem item) {
+    final source = playerGalleryItems ?? videos;
+    _videoQueue = source.where((entry) => entry.filePath != null && entry.isVideo).toList();
+    _videoQueueIndex = _videoQueue.indexWhere((entry) => entry.id == item.id);
+    if (_videoQueueIndex < 0) {
+      _videoQueue = [item];
+      _videoQueueIndex = 0;
+    }
+  }
+
+  void playNextVideo() {
+    if (!hasNextVideo) return;
+    _videoQueueIndex++;
+    openPlayer(_videoQueue[_videoQueueIndex], galleryItems: playerGalleryItems, queueItems: _audioQueueSource);
+  }
+
+  void playPreviousVideo() {
+    if (!hasPreviousVideo) return;
+    _videoQueueIndex--;
+    openPlayer(_videoQueue[_videoQueueIndex], galleryItems: playerGalleryItems, queueItems: _audioQueueSource);
+  }
+
   Future<void> toggleShuffle() async {
     shuffleEnabled = !shuffleEnabled;
     if (playingItem != null) {
@@ -2153,11 +2252,49 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
+  double? _preDuckVolume;
+
   Future<void> _configureAudioSession() async {
     try {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.music());
       await session.setActive(true);
+
+      // 1. Auto-pause on headphone disconnect
+      session.becomingNoisyEventStream.listen((_) {
+        audioPlayer.pause();
+        // Also pause video if playing
+        // The video player in duck_player_overlay will handle this via lifecycle
+      });
+
+      // 2. Handle phone calls and system interruptions
+      session.interruptionEventStream.listen((event) {
+        if (event.begin) {
+          switch (event.type) {
+            case AudioInterruptionType.pause:
+            case AudioInterruptionType.unknown:
+              audioPlayer.pause();
+              break;
+            case AudioInterruptionType.duck:
+              _preDuckVolume = audioPlayer.volume;
+              audioPlayer.setVolume(audioPlayer.volume * 0.2);
+              break;
+          }
+        } else {
+          // Interruption ended
+          switch (event.type) {
+            case AudioInterruptionType.pause:
+              audioPlayer.play();
+              break;
+            case AudioInterruptionType.duck:
+              audioPlayer.setVolume(_preDuckVolume ?? 1.0);
+              _preDuckVolume = null;
+              break;
+            case AudioInterruptionType.unknown:
+              break;
+          }
+        }
+      });
     } catch (_) {}
   }
 

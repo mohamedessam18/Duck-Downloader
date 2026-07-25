@@ -9,6 +9,7 @@ class MediaSlider extends StatefulWidget {
     required this.position,
     required this.duration,
     required this.onChanged,
+    this.onChangeEnd,
     this.activeColor,
     this.inactiveColor,
     this.thumbColor,
@@ -18,6 +19,7 @@ class MediaSlider extends StatefulWidget {
   final Duration position;
   final Duration duration;
   final ValueChanged<Duration> onChanged;
+  final ValueChanged<Duration>? onChangeEnd;
   final Color? activeColor;
   final Color? inactiveColor;
   final Color? thumbColor;
@@ -67,6 +69,9 @@ class _MediaSliderState extends State<MediaSlider> {
           onChanged: total <= 0
               ? null
               : (value) => widget.onChanged(Duration(milliseconds: value.round())),
+          onChangeEnd: total <= 0
+              ? null
+              : (value) => widget.onChangeEnd?.call(Duration(milliseconds: value.round())),
         ),
       );
 
@@ -142,6 +147,12 @@ class _MediaSliderState extends State<MediaSlider> {
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onTapUp: (details) {
+              if (total <= 0) return;
+              final touchX = details.localPosition.dx.clamp(trackLeft, trackRight);
+              final seekFraction = ((touchX - trackLeft) / usableWidth).clamp(0.0, 1.0);
+              widget.onChanged(Duration(milliseconds: (seekFraction * total).round()));
+            },
             onHorizontalDragStart: (details) {
               if (total <= 0) return;
               setState(() {
@@ -155,13 +166,15 @@ class _MediaSliderState extends State<MediaSlider> {
               setState(() {
                 _dragPositionX = touchX;
               });
-              final seekFraction = ((touchX - trackLeft) / usableWidth).clamp(0.0, 1.0);
-              widget.onChanged(Duration(milliseconds: (seekFraction * total).round()));
             },
             onHorizontalDragEnd: (details) {
               setState(() {
                 _isDragging = false;
               });
+              if (_dragPositionX != null) {
+                final seekFraction = ((_dragPositionX! - trackLeft) / usableWidth).clamp(0.0, 1.0);
+                widget.onChangeEnd?.call(Duration(milliseconds: (seekFraction * total).round()));
+              }
             },
             child: SizedBox(
               height: 32,

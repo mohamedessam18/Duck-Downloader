@@ -24,6 +24,7 @@ import '../duck_liquid_glass.dart';
 import '../glass_panel.dart';
 import 'animated_favorite_button.dart';
 import 'player_error.dart';
+import 'audio_queue_sheet.dart';
 class DuckPlayerOverlay extends StatefulWidget {
   const DuckPlayerOverlay({
     super.key,
@@ -81,19 +82,28 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   double _swipeStartVolume = 1.0;
   double _swipeStartBrightness = 1.0;
   Duration _swipeStartDuration = Duration.zero;
+
   bool _isSwiping = false;
   String _swipeType = ''; // 'volume' | 'brightness' | 'seek'
+  bool _isScreenLocked = false;
+  bool _showUpNext = false;
+  Timer? _upNextTimer;
+  int _upNextCountdown = 10;
+  bool _upNextCancelled = false;
+  bool _isLooping = false;
   double _swipeDisplayValue = 0.0; // percentage or duration seconds
   Timer? _swipeFeedbackTimer;
   Offset _panStartOffset = Offset.zero;
   String _panDirection = ''; // 'horizontal' | 'vertical' | ''
 
-  // GIF Panel State
   bool _showGifPanel = false;
   double _gifStartTime = 0.0;
   double _gifDuration = 5.0;
   int _gifWidth = 320;
   bool _isSavingGif = false;
+
+  Duration _cachedAudioDuration = Duration.zero;
+  Duration? _draggedAudioPosition;
 
   Duration get _mediaDuration {
     if (widget.item.isVideo) {
@@ -177,6 +187,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     final filePath = widget.item.filePath;
     if (filePath == null) return;
     if (widget.item.isVideo) {
+      widget.controller.buildVideoQueue(widget.item);
       _video = VideoPlayerController.file(File(filePath))
         ..initialize()
             .then((_) async {
@@ -278,6 +289,33 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     if (isPlaying && _speed != 1.0) {
       video.setPlaybackSpeed(_speed);
     }
+    
+    final value = video.value;
+    if (value.isInitialized && widget.controller.hasNextVideo && !_isLooping && !_upNextCancelled) {
+      final remaining = value.duration - value.position;
+      if (remaining.inSeconds <= 15 && !_showUpNext) {
+        _showUpNext = true;
+        _upNextCountdown = 10;
+        _upNextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (!mounted) {
+            timer.cancel();
+            return;
+          }
+          setState(() {
+            if (_upNextCountdown > 0) {
+              _upNextCountdown--;
+            } else {
+              timer.cancel();
+              _showUpNext = false;
+              widget.controller.playNextVideo();
+            }
+          });
+        });
+      } else if (remaining.inSeconds > 15 && _showUpNext) {
+        _showUpNext = false;
+        _upNextTimer?.cancel();
+      }
+    }
     if (mounted) setState(() {});
   }
 
@@ -348,6 +386,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     _rightSeekTimer?.cancel();
     _centerPlayPauseTimer?.cancel();
     _fitLabelTimer?.cancel();
+    _upNextTimer?.cancel();
     _video?.removeListener(_videoListener);
     try {
       _channel.invokeMethod('setVideoPlaying', {'playing': false});
@@ -367,6 +406,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     // ── Screen lock / background ──────────────────────────────────────────
     // Trigger ONLY on `inactive` (first signal when lock button is pressed).
     if (state == AppLifecycleState.inactive) {
+      // Give Android's onUserLeaveHint() time to trigger PiP before we pause
+      await Future.delayed(const Duration(milliseconds: 350));
+
       // Skip if in PiP — PiP has its own flow
       try {
         final bool inPiP = await _channel.invokeMethod<bool>('isInPiP') ?? false;
@@ -548,8 +590,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             // Video display area
             Positioned.fill(
               child: GestureDetector(
-                onTap: _toggleControls,
-                onDoubleTapDown: (details) {
+                onTap: !_isScreenLocked ? _toggleControls : null,
+                onDoubleTapDown: !_isScreenLocked ? (details) {
                   final screenWidth = MediaQuery.sizeOf(context).width;
                   final tapX = details.globalPosition.dx;
                   _resetHideTimer();
@@ -560,8 +602,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     _seekVideo(const Duration(seconds: 10));
                     _triggerRightSeek();
                   }
-                },
-                onPanStart: (details) {
+                } : null,
+                onPanStart: !_isScreenLocked ? (details) {
                   if (video == null) return;
                   _isSwiping = true;
                   _swipeFeedbackTimer?.cancel();
@@ -572,8 +614,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   _panDirection = '';
                   _swipeType = '';
                   setState(() {});
-                },
-                onPanUpdate: (details) {
+                } : null,
+                onPanUpdate: !_isScreenLocked ? (details) {
                   if (!_isSwiping || video == null) return;
                   final screenWidth = MediaQuery.sizeOf(context).width;
                   final screenHeight = MediaQuery.sizeOf(context).height;
@@ -621,8 +663,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                       _swipeDisplayValue = finalPosition.inSeconds.toDouble();
                     });
                   }
-                },
-                onPanEnd: (_) {
+                } : null,
+                onPanEnd: !_isScreenLocked ? (_) {
                   if (_swipeType == 'seek' && video != null) {
                     video.seekTo(Duration(seconds: _swipeDisplayValue.toInt()));
                   }
@@ -633,7 +675,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                       _swipeType = '';
                     });
                   });
-                },
+                } : null,
                 behavior: HitTestBehavior.opaque,
                 child: ClipRect(
                   child: SizedBox.expand(
@@ -926,6 +968,23 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: Icon(
+                                      widget.controller.hasPreviousVideo
+                                          ? Icons.skip_previous
+                                          : Icons.skip_previous_outlined,
+                                      size: 32,
+                                      color: widget.controller.hasPreviousVideo
+                                          ? Colors.white
+                                          : Colors.white24,
+                                    ),
+                                    onPressed: widget.controller.hasPreviousVideo
+                                        ? () { widget.controller.playPreviousVideo(); }
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 16),
                                   _buildCircularGlassButton(
                                     size: 64,
                                     child: const Icon(Icons.replay_10, color: Colors.white, size: 28),
@@ -974,6 +1033,23 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                       _seekVideo(const Duration(seconds: 10));
                                     },
                                     useOwnLayer: false,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: Icon(
+                                      widget.controller.hasNextVideo
+                                          ? Icons.skip_next
+                                          : Icons.skip_next_outlined,
+                                      size: 32,
+                                      color: widget.controller.hasNextVideo
+                                          ? Colors.white
+                                          : Colors.white24,
+                                    ),
+                                    onPressed: widget.controller.hasNextVideo
+                                        ? () { widget.controller.playNextVideo(); }
+                                        : null,
                                   ),
                                 ],
                               ),
@@ -1079,6 +1155,33 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                                 DeviceOrientation.landscapeRight,
                                                               ]);
                                                             }
+                                                          },
+                                                        ),
+                                                        const SizedBox(width: 12),
+                                                        IconButton(
+                                                          padding: EdgeInsets.zero,
+                                                          constraints: const BoxConstraints(),
+                                                          icon: Icon(
+                                                            _isLooping ? Icons.repeat_one : Icons.repeat,
+                                                            color: _isLooping ? mediaGold : Colors.white,
+                                                            size: 20,
+                                                          ),
+                                                          onPressed: () {
+                                                            setState(() {
+                                                              _isLooping = !_isLooping;
+                                                              _video?.setLooping(_isLooping);
+                                                            });
+                                                          },
+                                                        ),
+                                                        const SizedBox(width: 12),
+                                                        IconButton(
+                                                          padding: EdgeInsets.zero,
+                                                          constraints: const BoxConstraints(),
+                                                          icon: const Icon(Icons.lock_outline, color: Colors.white, size: 20),
+                                                          onPressed: () {
+                                                            setState(() {
+                                                              _isScreenLocked = true;
+                                                            });
                                                           },
                                                         ),
                                                         const SizedBox(width: 12),
@@ -1460,8 +1563,23 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                           return StreamBuilder<Duration?>(
                             stream: audio.durationStream,
                             builder: (context, durationSnapshot) {
-                              final position = positionSnapshot.data ?? audio.position;
-                              final totalDuration = durationSnapshot.data ?? audio.duration ?? Duration.zero;
+                              var position = positionSnapshot.data ?? audio.position;
+                              if (_draggedAudioPosition != null) {
+                                position = _draggedAudioPosition!;
+                              }
+
+                              var totalDuration = durationSnapshot.data ?? audio.duration ?? Duration.zero;
+                              if (_cachedAudioDuration == Duration.zero && totalDuration > Duration.zero) {
+                                _cachedAudioDuration = totalDuration;
+                              } else if (totalDuration > Duration.zero && totalDuration.inMilliseconds < _cachedAudioDuration.inMilliseconds * 0.5) {
+                                totalDuration = _cachedAudioDuration;
+                              } else if (totalDuration > Duration.zero) {
+                                _cachedAudioDuration = totalDuration;
+                              }
+                              if (totalDuration == Duration.zero && _cachedAudioDuration > Duration.zero) {
+                                totalDuration = _cachedAudioDuration;
+                              }
+
                               final totalMs = totalDuration.inMilliseconds;
                               final currentMs = totalMs <= 0
                                   ? 0.0
@@ -1488,6 +1606,10 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                        thumbColor: Colors.white,
                                        onChanged: (val) {
                                          _resetHideTimer();
+                                         if (mounted) setState(() => _draggedAudioPosition = val);
+                                       },
+                                       onChangeEnd: (val) {
+                                         if (mounted) setState(() => _draggedAudioPosition = null);
                                          audio.seek(val);
                                        },
                                      ),
@@ -1711,6 +1833,43 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                           IconButton(
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
+                            icon: ListenableBuilder(
+                              listenable: widget.controller,
+                              builder: (context, _) {
+                                final active = widget.controller.isSleepTimerActive;
+                                return Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Icon(
+                                      active ? Icons.mode_night : Icons.mode_night_outlined,
+                                      color: active ? mediaGold : Colors.white60,
+                                      size: 20,
+                                    ),
+                                    if (active)
+                                      Positioned(
+                                        right: -2,
+                                        top: -2,
+                                        child: Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: const BoxDecoration(
+                                            color: mediaDanger,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              }
+                            ),
+                            onPressed: () {
+                              _resetHideTimer();
+                              _showSleepTimerSheet(context);
+                            },
+                          ),
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
                             icon: Icon(
                               switch (widget.controller.loopMode) {
                                 LoopMode.one => Icons.repeat_one,
@@ -1723,6 +1882,19 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                   : mediaGold,
                             ),
                             onPressed: widget.controller.toggleLoopMode,
+                          ),
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(
+                              Icons.queue_music,
+                              size: 20,
+                              color: Colors.white60,
+                            ),
+                            onPressed: () {
+                              _resetHideTimer();
+                              _showQueueSheet(context);
+                            },
                           ),
                         ],
                       ),
@@ -2010,11 +2182,101 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
           });
   }
 
+  void _showQueueSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return FractionallySizedBox(
+          heightFactor: 0.6,
+          child: AudioQueueSheet(controller: widget.controller),
+        );
+      },
+    );
+  }
+
   // ─── Speed sheet ──────────────────────────────────────────────────────────
   void _showSpeedSheet(BuildContext context) {
     setState(() {
       _showSpeedPanel = true;
     });
+  }
+
+  void _showSleepTimerSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final isLight = Theme.of(context).brightness == Brightness.light;
+        return ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, _) {
+            return DuckLiquidGlassSurface(
+              borderRadius: 28,
+              variant: DuckLiquidGlassVariant.panel,
+              isLight: isLight,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Sleep Timer',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildSleepTimerOption('15 minutes', const Duration(minutes: 15)),
+                      _buildSleepTimerOption('30 minutes', const Duration(minutes: 30)),
+                      _buildSleepTimerOption('45 minutes', const Duration(minutes: 45)),
+                      _buildSleepTimerOption('60 minutes', const Duration(minutes: 60)),
+                      ListTile(
+                        title: const Text('End of current track', style: TextStyle(color: Colors.white70)),
+                        trailing: widget.controller.sleepTimerLabel == 'End of track' 
+                            ? Icon(Icons.check, color: mediaGold) 
+                            : null,
+                        onTap: () {
+                          widget.controller.setSleepTimerEndOfTrack();
+                          Navigator.pop(context);
+                        },
+                      ),
+                      if (widget.controller.isSleepTimerActive) ...[
+                        const Divider(color: Colors.white24),
+                        ListTile(
+                          title: Text('Cancel timer', style: TextStyle(color: mediaDanger)),
+                          onTap: () {
+                            widget.controller.cancelSleepTimer();
+                            Navigator.pop(context);
+                          },
+                        ),
+                      ]
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildSleepTimerOption(String label, Duration duration) {
+    return ListTile(
+      title: Text(label, style: const TextStyle(color: Colors.white70)),
+      trailing: widget.controller.sleepTimerLabel == label
+          ? Icon(Icons.check, color: mediaGold)
+          : null,
+      onTap: () {
+        widget.controller.setSleepTimer(duration, label);
+        Navigator.pop(context);
+      },
+    );
   }
 
   Widget _buildSpeedOverlay() {

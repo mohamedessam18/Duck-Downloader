@@ -214,25 +214,23 @@ class MainActivity : AudioServiceFragmentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (isVideoPlaying) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                try {
-                    val inPiP = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false
-                    if (!inPiP) {
-                        updatePiPParams(true)
-                        val builder = android.app.PictureInPictureParams.Builder()
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            builder.setAutoEnterEnabled(true)
-                        }
-                        enterPictureInPictureMode(builder.build())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val inPiP = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false
+                if (!inPiP) {
+                    updatePiPParams(true)
+                    val builder = android.app.PictureInPictureParams.Builder()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        builder.setAutoEnterEnabled(true)
                     }
-                } catch (e: Exception) {
-                    // Ignore
+                    enterPictureInPictureMode(builder.build())
                 }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                @Suppress("DEPRECATION")
-                enterPictureInPictureMode()
+            } catch (e: Exception) {
+                // Ignore
             }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            @Suppress("DEPRECATION")
+            enterPictureInPictureMode()
         }
     }
 
