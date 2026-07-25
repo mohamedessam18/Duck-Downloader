@@ -214,6 +214,7 @@ class MainActivity : AudioServiceFragmentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        if (!isVideoPlaying) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 val inPiP = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false

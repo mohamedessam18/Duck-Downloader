@@ -485,6 +485,9 @@ class DuckDownloadsController extends ChangeNotifier
     if (playingItem?.id == item.id) {
       playingItem = next;
     }
+    if (playerItem?.id == item.id) {
+      playerItem = next;
+    }
     notifyListeners();
   }
 
@@ -2094,6 +2097,7 @@ class DuckDownloadsController extends ChangeNotifier
       }
       await audioPlayer.stop();
       playingItem = item;
+      playerItem = item;
       notifyListeners();
       try {
         await _ensureAudioBackgroundReady();

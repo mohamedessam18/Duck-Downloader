@@ -86,6 +86,19 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   bool _isSwiping = false;
   String _swipeType = ''; // 'volume' | 'brightness' | 'seek'
   bool _isScreenLocked = false;
+  bool _showUnlockButton = false;
+  Timer? _unlockButtonTimer;
+
+  void _resetUnlockButtonTimer() {
+    _unlockButtonTimer?.cancel();
+    _unlockButtonTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) {
+        setState(() {
+          _showUnlockButton = false;
+        });
+      }
+    });
+  }
   bool _showUpNext = false;
   Timer? _upNextTimer;
   int _upNextCountdown = 10;
@@ -387,6 +400,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     _centerPlayPauseTimer?.cancel();
     _fitLabelTimer?.cancel();
     _upNextTimer?.cancel();
+    _unlockButtonTimer?.cancel();
     _video?.removeListener(_videoListener);
     try {
       _channel.invokeMethod('setVideoPlaying', {'playing': false});
@@ -590,7 +604,18 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             // Video display area
             Positioned.fill(
               child: GestureDetector(
-                onTap: !_isScreenLocked ? _toggleControls : null,
+                onTap: () {
+                  if (_isScreenLocked) {
+                    setState(() {
+                      _showUnlockButton = !_showUnlockButton;
+                    });
+                    if (_showUnlockButton) {
+                      _resetUnlockButtonTimer();
+                    }
+                  } else {
+                    _toggleControls();
+                  }
+                },
                 onDoubleTapDown: !_isScreenLocked ? (details) {
                   final screenWidth = MediaQuery.sizeOf(context).width;
                   final tapX = details.globalPosition.dx;
@@ -1179,9 +1204,13 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                           constraints: const BoxConstraints(),
                                                           icon: const Icon(Icons.lock_outline, color: Colors.white, size: 20),
                                                           onPressed: () {
+                                                            HapticFeedback.mediumImpact();
                                                             setState(() {
                                                               _isScreenLocked = true;
+                                                              _showControls = false;
+                                                              _showUnlockButton = true;
                                                             });
+                                                            _resetUnlockButtonTimer();
                                                           },
                                                         ),
                                                         const SizedBox(width: 12),
@@ -1342,6 +1371,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             ),
             _buildSpeedOverlay(),
             _buildGifOverlay(),
+            if (_isScreenLocked && _showUnlockButton) _buildScreenLockUnlockOverlay(),
           ],
         ),
       ),
@@ -1428,9 +1458,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                   widget.controller.toggleFavorite(currentItem);
                                 },
                               ),
-                              onPressed: () {
-                                widget.controller.toggleFavorite(currentItem);
-                              },
+                              onPressed: null,
                               useOwnLayer: false,
                             );
                           },
@@ -2760,6 +2788,54 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
         child: Padding(
           padding: padding ?? EdgeInsets.zero,
           child: child,
+        ),
+      ),
+    );
+  }
+  Widget _buildScreenLockUnlockOverlay() {
+    return Positioned(
+      top: 48,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: SafeArea(
+          child: GestureDetector(
+            onTap: () {
+              HapticFeedback.mediumImpact();
+              setState(() {
+                _isScreenLocked = false;
+                _showControls = true;
+                _showUnlockButton = false;
+              });
+            },
+            child: DuckLiquidGlassSurface(
+              borderRadius: 24,
+              variant: DuckLiquidGlassVariant.panel,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: mediaGold.withValues(alpha: 0.5), width: 1.5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock_open_rounded, color: mediaGold, size: 20),
+                    const SizedBox(width: 10),
+                    const Text(
+                      'Screen Locked — Tap to Unlock',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
