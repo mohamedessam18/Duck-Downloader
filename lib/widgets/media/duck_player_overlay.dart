@@ -992,104 +992,94 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                           final seekBtnSize = isLandscape ? 60.0 : 46.0;
                           final seekIconSize = isLandscape ? 26.0 : 20.0;
                           final skipIconSize = isLandscape ? 30.0 : 24.0;
-                          final spacing = isLandscape ? 20.0 : 8.0;
+                          final spacing = isLandscape ? 20.0 : 10.0;
 
                           return Center(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: const BouncingScrollPhysics(),
-                              child: DuckLiquidGlassLayer(
-                                settings: DuckLiquidGlass.button(),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      icon: Icon(
-                                        widget.controller.hasPreviousVideo
-                                            ? Icons.skip_previous
-                                            : Icons.skip_previous_outlined,
-                                        size: skipIconSize,
-                                        color: widget.controller.hasPreviousVideo
-                                            ? Colors.white
-                                            : Colors.white24,
-                                      ),
-                                      onPressed: widget.controller.hasPreviousVideo
-                                          ? () { widget.controller.playPreviousVideo(); }
-                                          : null,
-                                    ),
-                                    SizedBox(width: spacing),
-                                    _buildCircularGlassButton(
-                                      size: seekBtnSize,
-                                      child: Icon(Icons.replay_10, color: Colors.white, size: seekIconSize),
-                                      onPressed: () {
-                                        _resetHideTimer();
-                                        _seekVideo(const Duration(seconds: -10));
-                                      },
-                                      useOwnLayer: false,
-                                    ),
-                                    SizedBox(width: spacing),
-                                    _buildCircularGlassButton(
-                                      size: playBtnSize,
-                                      child: Icon(
-                                        isCompleted
-                                            ? Icons.replay
-                                            : value.isPlaying
-                                            ? Icons.pause
-                                            : Icons.play_arrow,
-                                        color: Colors.white,
-                                        size: playIconSize,
-                                      ),
-                                      onPressed: () {
-                                        _resetHideTimer();
-                                        if (isCompleted) {
-                                          video.seekTo(Duration.zero);
-                                          video.play();
-                                          _triggerPlayPauseOverlay(true);
-                                        } else {
-                                          if (value.isPlaying) {
-                                            video.pause();
-                                            _triggerPlayPauseOverlay(false);
-                                          } else {
-                                            video.play();
-                                            _triggerPlayPauseOverlay(true);
-                                          }
-                                        }
-                                      },
-                                      useOwnLayer: false,
-                                    ),
-                                    SizedBox(width: spacing),
-                                    _buildCircularGlassButton(
-                                      size: seekBtnSize,
-                                      child: Icon(Icons.forward_10, color: Colors.white, size: seekIconSize),
-                                      onPressed: () {
-                                        _resetHideTimer();
-                                        _seekVideo(const Duration(seconds: 10));
-                                      },
-                                      useOwnLayer: false,
-                                    ),
-                                    SizedBox(width: spacing),
-                                    IconButton(
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      icon: Icon(
-                                        widget.controller.hasNextVideo
-                                            ? Icons.skip_next
-                                            : Icons.skip_next_outlined,
-                                        size: skipIconSize,
-                                        color: widget.controller.hasNextVideo
-                                            ? Colors.white
-                                            : Colors.white24,
-                                      ),
-                                      onPressed: widget.controller.hasNextVideo
-                                          ? () { widget.controller.playNextVideo(); }
-                                          : null,
-                                    ),
-                                  ],
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  icon: Icon(
+                                    widget.controller.hasPreviousVideo
+                                        ? Icons.skip_previous
+                                        : Icons.skip_previous_outlined,
+                                    size: skipIconSize,
+                                    color: widget.controller.hasPreviousVideo
+                                        ? Colors.white
+                                        : Colors.white24,
+                                  ),
+                                  onPressed: widget.controller.hasPreviousVideo
+                                      ? () { widget.controller.playPreviousVideo(); }
+                                      : null,
                                 ),
-                              ),
+                                SizedBox(width: spacing),
+                                _buildCircularGlassButton(
+                                  size: seekBtnSize,
+                                  child: Icon(Icons.replay_10, color: Colors.white, size: seekIconSize),
+                                  onPressed: () {
+                                    _resetHideTimer();
+                                    _seekVideo(const Duration(seconds: -10));
+                                  },
+                                ),
+                                SizedBox(width: spacing),
+                                _buildCircularGlassButton(
+                                  size: playBtnSize,
+                                  child: Icon(
+                                    isCompleted
+                                        ? Icons.replay
+                                        : value.isPlaying
+                                        ? Icons.pause
+                                        : Icons.play_arrow,
+                                    color: Colors.white,
+                                    size: playIconSize,
+                                  ),
+                                  onPressed: () {
+                                    _resetHideTimer();
+                                    if (isCompleted) {
+                                      video.seekTo(Duration.zero);
+                                      video.play();
+                                      _triggerPlayPauseOverlay(true);
+                                    } else {
+                                      if (value.isPlaying) {
+                                        video.pause();
+                                        _triggerPlayPauseOverlay(false);
+                                      } else {
+                                        video.play();
+                                        _triggerPlayPauseOverlay(true);
+                                      }
+                                    }
+                                  },
+                                ),
+                                SizedBox(width: spacing),
+                                _buildCircularGlassButton(
+                                  size: seekBtnSize,
+                                  child: Icon(Icons.forward_10, color: Colors.white, size: seekIconSize),
+                                  onPressed: () {
+                                    _resetHideTimer();
+                                    _seekVideo(const Duration(seconds: 10));
+                                  },
+                                ),
+                                SizedBox(width: spacing),
+                                IconButton(
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  icon: Icon(
+                                    widget.controller.hasNextVideo
+                                        ? Icons.skip_next
+                                        : Icons.skip_next_outlined,
+                                    size: skipIconSize,
+                                    color: widget.controller.hasNextVideo
+                                        ? Colors.white
+                                        : Colors.white24,
+                                  ),
+                                  onPressed: widget.controller.hasNextVideo
+                                      ? () { widget.controller.playNextVideo(); }
+                                      : null,
+                                ),
+                              ],
                             ),
                           );
                         },
@@ -1792,6 +1782,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     _buildCapsuleGlassContainer(
                       height: 52,
                       padding: const EdgeInsets.symmetric(horizontal: 16),
+                      useOwnLayer: false,
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [

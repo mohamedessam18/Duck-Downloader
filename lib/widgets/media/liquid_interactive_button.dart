@@ -105,34 +105,16 @@ class _LiquidGlassInteractiveButtonState
 
   @override
   Widget build(BuildContext context) {
-    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
-
-    if (isAndroid) {
-      return InkWell(
-        onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(99),
-        child: widget.child,
-      );
-    }
-
     final useLiquidEffects = DuckLiquidGlass.shouldUseLiquidGlass(context);
-    final scale = _isPressed ? (_isDragging ? 1.08 : 0.94) : 1.0;
+    final scale = _isPressed ? 0.92 : 1.0;
     final size = widget.size ?? 48.0;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onPanStart: _onPanStart,
-      onPanUpdate: _onPanUpdate,
-      onPanEnd: _onPanEnd,
-      onPanCancel: () {
-        if (mounted) {
-          setState(() {
-            _isPressed = false;
-            _isDragging = false;
-            _dragOffset = Offset.zero;
-          });
-        }
-      },
+      onTap: widget.onTap,
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
       child: SizedBox(
         width: size,
         height: size,
