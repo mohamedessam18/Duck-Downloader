@@ -1586,14 +1586,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                               }
 
                               var totalDuration = durationSnapshot.data ?? audio.duration ?? Duration.zero;
-                              if (_cachedAudioDuration == Duration.zero && totalDuration > Duration.zero) {
+                              if (totalDuration > Duration.zero) {
                                 _cachedAudioDuration = totalDuration;
-                              } else if (totalDuration > Duration.zero && totalDuration.inMilliseconds < _cachedAudioDuration.inMilliseconds * 0.5) {
-                                totalDuration = _cachedAudioDuration;
-                              } else if (totalDuration > Duration.zero) {
-                                _cachedAudioDuration = totalDuration;
-                              }
-                              if (totalDuration == Duration.zero && _cachedAudioDuration > Duration.zero) {
+                              } else if (_cachedAudioDuration > Duration.zero) {
                                 totalDuration = _cachedAudioDuration;
                               }
 
