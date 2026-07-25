@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- This drawable is shown while the Flutter engine is loading.
+     It must match the Flutter SplashScreen background exactly so there
+     is no visible transition between the two screens. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Dark background matching DuckColors.background (#101112) -->
     <item>
         <shape android:shape="rectangle">
             <solid android:color="#101112" />
         </shape>
+    </item>
+    <!-- Centered duck logo — same asset used by Flutter SplashScreen -->
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@mipmap/ic_launcher" />
     </item>
 </layer-list>
