@@ -112,6 +112,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   String? _lastAudioItemId;
   AppLifecycleState _currentLifecycleState = AppLifecycleState.resumed;
   bool _showGifPanel = false;
+  bool _showSleepTimerPanel = false;
+  bool _showVideoMorePanel = false;
+  bool _showQueuePanel = false;
   double _gifStartTime = 0.0;
   double _gifDuration = 5.0;
   int _gifWidth = 320;
@@ -1213,7 +1216,10 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                   SizedBox(width: spacing),
                                                   GestureDetector(
                                                     behavior: HitTestBehavior.opaque,
-                                                    onTap: () => _showVideoMoreSheet(context),
+                                                    onTap: () {
+                                                      _resetHideTimer();
+                                                      setState(() => _showVideoMorePanel = true);
+                                                    },
                                                     child: Padding(
                                                       padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
                                                       child: Icon(Icons.more_vert, color: Colors.white, size: iconSize + 2),
@@ -1362,6 +1368,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               ),
             ),
             _buildSpeedOverlay(),
+            _buildVideoMoreOverlay(),
             _buildGifOverlay(),
             if (_isScreenLocked && _showUnlockButton) _buildScreenLockUnlockOverlay(),
           ],
@@ -1860,7 +1867,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                             behavior: HitTestBehavior.opaque,
                             onTap: () {
                               _resetHideTimer();
-                              _showSleepTimerSheet(context);
+                              setState(() => _showSleepTimerPanel = true);
                             },
                             child: Padding(
                               padding: const EdgeInsets.all(8.0),
@@ -1921,7 +1928,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                             ),
                             onPressed: () {
                               _resetHideTimer();
-                              _showQueueSheet(context);
+                              setState(() => _showQueuePanel = true);
                             },
                           ),
                         ],
@@ -1932,6 +1939,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             ),
           ),
           _buildSpeedOverlay(),
+          _buildSleepTimerOverlay(),
+          _buildQueueOverlay(),
           _buildGifOverlay(),
         ],
       ),
@@ -2587,6 +2596,304 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     ],
                   ),
                 ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSleepTimerOverlay() {
+    if (!_showSleepTimerPanel) return const SizedBox.shrink();
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showSleepTimerPanel = false;
+                });
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                color: Colors.black.withOpacity(0.5),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: DuckLiquidGlassSurface(
+                borderRadius: 28,
+                variant: DuckLiquidGlassVariant.panel,
+                isLight: isLight,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    16,
+                    20,
+                    20 + MediaQuery.paddingOf(context).bottom,
+                  ),
+                  child: ListenableBuilder(
+                    listenable: widget.controller,
+                    builder: (context, _) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Sleep Timer',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _buildSleepTimerPanelOption('15 minutes', const Duration(minutes: 15)),
+                          _buildSleepTimerPanelOption('30 minutes', const Duration(minutes: 30)),
+                          _buildSleepTimerPanelOption('45 minutes', const Duration(minutes: 45)),
+                          _buildSleepTimerPanelOption('60 minutes', const Duration(minutes: 60)),
+                          ListTile(
+                            title: const Text('End of current track', style: TextStyle(color: Colors.white70)),
+                            trailing: widget.controller.sleepTimerLabel == 'End of track'
+                                ? Icon(Icons.check, color: mediaGold)
+                                : null,
+                            onTap: () {
+                              widget.controller.setSleepTimerEndOfTrack();
+                              setState(() {
+                                _showSleepTimerPanel = false;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Sleep timer set: End of current track'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                          ),
+                          if (widget.controller.isSleepTimerActive) ...[
+                            const Divider(color: Colors.white24),
+                            ListTile(
+                              title: Text('Cancel timer', style: TextStyle(color: mediaDanger)),
+                              onTap: () {
+                                widget.controller.cancelSleepTimer();
+                                setState(() {
+                                  _showSleepTimerPanel = false;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Sleep timer cancelled'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSleepTimerPanelOption(String label, Duration duration) {
+    return ListTile(
+      title: Text(label, style: const TextStyle(color: Colors.white70)),
+      trailing: widget.controller.sleepTimerLabel == label
+          ? Icon(Icons.check, color: mediaGold)
+          : null,
+      onTap: () {
+        widget.controller.setSleepTimer(duration, label);
+        setState(() {
+          _showSleepTimerPanel = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sleep timer set: $label'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildVideoMoreOverlay() {
+    if (!_showVideoMorePanel) return const SizedBox.shrink();
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showVideoMorePanel = false;
+                });
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                color: Colors.black.withOpacity(0.5),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: DuckLiquidGlassSurface(
+                borderRadius: 28,
+                variant: DuckLiquidGlassVariant.panel,
+                isLight: isLight,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    16,
+                    20,
+                    20 + MediaQuery.paddingOf(context).bottom,
+                  ),
+                  child: ListenableBuilder(
+                    listenable: widget.controller,
+                    builder: (context, _) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'More Options',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          ListTile(
+                            leading: Icon(
+                              _isLooping ? Icons.repeat_one : Icons.repeat,
+                              color: _isLooping ? mediaGold : Colors.white70,
+                            ),
+                            title: Text(
+                              _isLooping ? 'Loop Video (Active)' : 'Loop Video',
+                              style: TextStyle(
+                                color: _isLooping ? mediaGold : Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            trailing: Switch(
+                              value: _isLooping,
+                              activeColor: mediaGold,
+                              onChanged: (val) {
+                                setState(() {
+                                  _isLooping = val;
+                                  _video?.setLooping(_isLooping);
+                                  _showVideoMorePanel = false;
+                                });
+                              },
+                            ),
+                            onTap: () {
+                              setState(() {
+                                _isLooping = !_isLooping;
+                                _video?.setLooping(_isLooping);
+                                _showVideoMorePanel = false;
+                              });
+                            },
+                          ),
+                          const Divider(color: Colors.white12),
+                          ListTile(
+                            leading: const Icon(Icons.delete_outline, color: mediaDanger),
+                            title: const Text(
+                              'Delete Video',
+                              style: TextStyle(
+                                color: mediaDanger,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            onTap: () {
+                              setState(() {
+                                _showVideoMorePanel = false;
+                              });
+                              widget.controller.closePlayer();
+                              widget.controller.deleteDownload(widget.item);
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQueueOverlay() {
+    if (!_showQueuePanel) return const SizedBox.shrink();
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showQueuePanel = false;
+                });
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                color: Colors.black.withOpacity(0.5),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            top: MediaQuery.sizeOf(context).height * 0.35,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: DuckLiquidGlassSurface(
+                borderRadius: 28,
+                variant: DuckLiquidGlassVariant.panel,
+                isLight: isLight,
+                child: AudioQueueSheet(controller: widget.controller),
               ),
             ),
           ),
