@@ -109,6 +109,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   Offset _panStartOffset = Offset.zero;
   String _panDirection = ''; // 'horizontal' | 'vertical' | ''
 
+  String? _lastAudioItemId;
   bool _showGifPanel = false;
   double _gifStartTime = 0.0;
   double _gifDuration = 5.0;
@@ -1387,63 +1388,69 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     final scale = (screenHeight / 820).clamp(0.5, 1.0);
     final artworkSize = (screenWidth * 0.72).clamp(180.0, 300.0);
 
-    return SizedBox.expand(
-      child: Stack(
-        children: [
-          // Blurred ambient backdrop
-          Positioned.fill(
-            child: MediaThumb(
-              url: widget.item.thumbnail,
-              preferNetworkThumbnail: true,
-              width: double.infinity,
-              height: double.infinity,
-              icon: Icons.music_note,
-            ),
-          ),
-          Positioned.fill(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 55, sigmaY: 55),
-              child: Container(
-                color: Colors.black.withOpacity(0.6),
-              ),
-            ),
-          ),
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final currentItem = widget.controller.playerItem ?? widget.item;
+        if (_lastAudioItemId != null && _lastAudioItemId != currentItem.id) {
+          _cachedAudioDuration = Duration.zero;
+          _draggedAudioPosition = null;
+        }
+        _lastAudioItemId = currentItem.id;
 
-          // Foreground UI
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Top Header Row
-                  DuckLiquidGlassLayer(
-                    settings: DuckLiquidGlass.button(),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _buildCircularGlassButton(
-                          child: const Icon(Icons.close, color: Colors.white, size: 22),
-                          onPressed: widget.controller.closePlayer,
-                          useOwnLayer: false,
-                        ),
-                        const Text(
-                          'Now Playing',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        ListenableBuilder(
-                          listenable: widget.controller,
-                          builder: (context, _) {
-                            final currentItem = widget.controller.playerItem ?? widget.item;
-                            final isFav = currentItem.favorite;
-                            return _buildCircularGlassButton(
+        return SizedBox.expand(
+          child: Stack(
+            children: [
+              // Blurred ambient backdrop
+              Positioned.fill(
+                child: MediaThumb(
+                  url: currentItem.thumbnail,
+                  filePath: currentItem.filePath,
+                  preferNetworkThumbnail: true,
+                  width: double.infinity,
+                  height: double.infinity,
+                  icon: Icons.music_note,
+                ),
+              ),
+              Positioned.fill(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 55, sigmaY: 55),
+                  child: Container(
+                    color: Colors.black.withOpacity(0.6),
+                  ),
+                ),
+              ),
+
+              // Foreground UI
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Top Header Row
+                      DuckLiquidGlassLayer(
+                        settings: DuckLiquidGlass.button(),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _buildCircularGlassButton(
+                              child: const Icon(Icons.close, color: Colors.white, size: 22),
+                              onPressed: widget.controller.closePlayer,
+                              useOwnLayer: false,
+                            ),
+                            const Text(
+                              'Now Playing',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            _buildCircularGlassButton(
                               child: AnimatedFavoriteButton(
-                                isFavorite: isFav,
+                                isFavorite: currentItem.favorite,
                                 size: 20,
                                 onTap: () {
                                   widget.controller.toggleFavorite(currentItem);
@@ -1451,86 +1458,85 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                               ),
                               onPressed: null,
                               useOwnLayer: false,
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Scaling artwork card
-                  Expanded(
-                    child: Center(
-                      child: ScaleTransition(
-                        scale: Tween<double>(begin: 0.88, end: 1.0).animate(
-                          CurvedAnimation(
-                            parent: _discRotationController,
-                            curve: Curves.easeOutBack,
-                          ),
-                        ),
-                        child: Container(
-                          width: artworkSize,
-                          height: artworkSize,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(28),
-                            border: Border.all(
-                              color: colors.glassBorder,
-                              width: 1.5,
                             ),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Colors.black45,
-                                blurRadius: 28,
-                                offset: Offset(0, 12),
+                          ],
+                        ),
+                      ),
+
+                      // Scaling artwork card
+                      Expanded(
+                        child: Center(
+                          child: ScaleTransition(
+                            scale: Tween<double>(begin: 0.88, end: 1.0).animate(
+                              CurvedAnimation(
+                                parent: _discRotationController,
+                                curve: Curves.easeOutBack,
                               ),
-                            ],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(26),
-                            child: MediaThumb(
-                              url: widget.item.thumbnail,
-                              preferNetworkThumbnail: true,
+                            ),
+                            child: Container(
                               width: artworkSize,
                               height: artworkSize,
-                              icon: Icons.music_note,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(28),
+                                border: Border.all(
+                                  color: colors.glassBorder,
+                                  width: 1.5,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black45,
+                                    blurRadius: 28,
+                                    offset: Offset(0, 12),
+                                  ),
+                                ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(26),
+                                child: MediaThumb(
+                                  url: currentItem.thumbnail,
+                                  filePath: currentItem.filePath,
+                                  preferNetworkThumbnail: true,
+                                  width: artworkSize,
+                                  height: artworkSize,
+                                  icon: Icons.music_note,
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
 
-                  // Metadata section
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 22 * scale,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: -0.5,
-                          ),
+                      // Metadata section
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              currentItem.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 22 * scale,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              currentItem.artist ?? currentItem.platform,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: mediaWarmGold,
+                                fontSize: 16 * scale,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          widget.item.artist ?? widget.item.platform,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: mediaWarmGold,
-                            fontSize: 16 * scale,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                      ),
 
                   // Seeker Slider Capsule
                   if (_isTrimmingMode)
@@ -1927,7 +1933,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
         ],
       ),
     );
-  }
+  },
+);
+}
 
   Widget _buildTrimmingSlider(Duration duration) {
     final maxSec = duration.inSeconds.toDouble();
@@ -2262,6 +2270,12 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                         onTap: () {
                           widget.controller.setSleepTimerEndOfTrack();
                           Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Sleep timer set: End of current track'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
                         },
                       ),
                       if (widget.controller.isSleepTimerActive) ...[
@@ -2271,6 +2285,12 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                           onTap: () {
                             widget.controller.cancelSleepTimer();
                             Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Sleep timer cancelled'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
                           },
                         ),
                       ]
@@ -2294,6 +2314,12 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       onTap: () {
         widget.controller.setSleepTimer(duration, label);
         Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sleep timer set: $label'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
       },
     );
   }
