@@ -1105,140 +1105,158 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                           children: [
                             // Auxiliary options row (Speed dial on right, Quick tools + 3 dots on left)
                             if (!_isTrimmingMode)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    _buildCapsuleGlassContainer(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                      height: 48,
-                                      useOwnLayer: true,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (!kIsWeb) ...[
-                                            IconButton(
-                                              padding: EdgeInsets.zero,
-                                              constraints: const BoxConstraints(),
-                                              icon: const Icon(Icons.content_cut, color: Colors.white, size: 20),
-                                              onPressed: value.duration <= Duration.zero
-                                                  ? null
-                                                  : () {
-                                                      setState(() {
-                                                        _isTrimmingMode = true;
-                                                        _trimStart = 0.0;
-                                                        _trimEnd = value.duration.inSeconds.toDouble();
-                                                      });
-                                                    },
-                                            ),
-                                            const SizedBox(width: 14),
-                                            if (widget.item.isVideo) ...[
-                                              IconButton(
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                icon: const Icon(Icons.headphones, color: Colors.white, size: 20),
-                                                onPressed: () async {
-                                                  final video = _video;
-                                                  if (video == null || !video.value.isInitialized) return;
-                                                  final pos = video.value.position;
-                                                  _hideTimer?.cancel();
-                                                  video.pause();
-                                                  await widget.controller.activateBackgroundAudio(pos);
-                                                  widget.controller.closePlayer();
-                                                },
-                                              ),
-                                              const SizedBox(width: 14),
-                                              IconButton(
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                icon: const Icon(Icons.gif, color: Colors.white, size: 24),
-                                                onPressed: value.duration <= Duration.zero
-                                                    ? null
-                                                    : () => _showGifMakerSheet(context),
-                                              ),
-                                              const SizedBox(width: 14),
-                                              IconButton(
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                icon: Icon(
-                                                  MediaQuery.orientationOf(context) == Orientation.landscape
-                                                      ? Icons.screen_lock_landscape
-                                                      : Icons.screen_lock_portrait,
-                                                  color: Colors.white,
-                                                  size: 20,
+                              Builder(
+                                builder: (context) {
+                                  final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
+                                  final iconSize = isLandscape ? 20.0 : 17.0;
+                                  final spacing = isLandscape ? 12.0 : 5.0;
+                                  final capsuleHeight = isLandscape ? 48.0 : 40.0;
+                                  final capsulePadding = isLandscape
+                                      ? const EdgeInsets.symmetric(horizontal: 12, vertical: 6)
+                                      : const EdgeInsets.symmetric(horizontal: 8, vertical: 4);
+                                  final btnConstraints = isLandscape
+                                      ? const BoxConstraints(minWidth: 32, minHeight: 32)
+                                      : const BoxConstraints(minWidth: 24, minHeight: 24);
+
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        _buildCapsuleGlassContainer(
+                                          padding: capsulePadding,
+                                          height: capsuleHeight,
+                                          useOwnLayer: true,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (!kIsWeb) ...[
+                                                IconButton(
+                                                  padding: EdgeInsets.zero,
+                                                  constraints: btnConstraints,
+                                                  icon: Icon(Icons.content_cut, color: Colors.white, size: iconSize),
+                                                  onPressed: value.duration <= Duration.zero
+                                                      ? null
+                                                      : () {
+                                                          setState(() {
+                                                            _isTrimmingMode = true;
+                                                            _trimStart = 0.0;
+                                                            _trimEnd = value.duration.inSeconds.toDouble();
+                                                          });
+                                                        },
                                                 ),
-                                                onPressed: () {
-                                                  _resetHideTimer();
-                                                  final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
-                                                  if (isLandscape) {
-                                                    SystemChrome.setPreferredOrientations([
-                                                      DeviceOrientation.portraitUp,
-                                                    ]);
-                                                  } else {
-                                                    SystemChrome.setPreferredOrientations([
-                                                      DeviceOrientation.landscapeLeft,
-                                                      DeviceOrientation.landscapeRight,
-                                                    ]);
-                                                  }
-                                                },
-                                              ),
-                                              const SizedBox(width: 14),
-                                              IconButton(
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                icon: const Icon(Icons.lock_outline, color: Colors.white, size: 20),
-                                                onPressed: () {
-                                                  HapticFeedback.mediumImpact();
-                                                  setState(() {
-                                                    _isScreenLocked = true;
-                                                    _showControls = false;
-                                                    _showUnlockButton = true;
-                                                  });
-                                                  _resetUnlockButtonTimer();
-                                                },
-                                              ),
-                                              const SizedBox(width: 14),
-                                              IconButton(
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                icon: const Icon(Icons.more_vert, color: Colors.white, size: 20),
-                                                onPressed: () => _showVideoMoreSheet(context),
-                                              ),
+                                                SizedBox(width: spacing),
+                                                if (widget.item.isVideo) ...[
+                                                  IconButton(
+                                                    padding: EdgeInsets.zero,
+                                                    constraints: btnConstraints,
+                                                    icon: Icon(Icons.headphones, color: Colors.white, size: iconSize),
+                                                    onPressed: () async {
+                                                      final video = _video;
+                                                      if (video == null || !video.value.isInitialized) return;
+                                                      final pos = video.value.position;
+                                                      _hideTimer?.cancel();
+                                                      video.pause();
+                                                      await widget.controller.activateBackgroundAudio(pos);
+                                                      widget.controller.closePlayer();
+                                                    },
+                                                  ),
+                                                  SizedBox(width: spacing),
+                                                  IconButton(
+                                                    padding: EdgeInsets.zero,
+                                                    constraints: btnConstraints,
+                                                    icon: Icon(Icons.gif, color: Colors.white, size: iconSize + 3),
+                                                    onPressed: value.duration <= Duration.zero
+                                                        ? null
+                                                        : () => _showGifMakerSheet(context),
+                                                  ),
+                                                  SizedBox(width: spacing),
+                                                  IconButton(
+                                                    padding: EdgeInsets.zero,
+                                                    constraints: btnConstraints,
+                                                    icon: Icon(
+                                                      isLandscape
+                                                          ? Icons.screen_lock_landscape
+                                                          : Icons.screen_lock_portrait,
+                                                      color: Colors.white,
+                                                      size: iconSize,
+                                                    ),
+                                                    onPressed: () {
+                                                      _resetHideTimer();
+                                                      if (isLandscape) {
+                                                        SystemChrome.setPreferredOrientations([
+                                                          DeviceOrientation.portraitUp,
+                                                        ]);
+                                                      } else {
+                                                        SystemChrome.setPreferredOrientations([
+                                                          DeviceOrientation.landscapeLeft,
+                                                          DeviceOrientation.landscapeRight,
+                                                        ]);
+                                                      }
+                                                    },
+                                                  ),
+                                                  SizedBox(width: spacing),
+                                                  IconButton(
+                                                    padding: EdgeInsets.zero,
+                                                    constraints: btnConstraints,
+                                                    icon: Icon(Icons.lock_outline, color: Colors.white, size: iconSize),
+                                                    onPressed: () {
+                                                      HapticFeedback.mediumImpact();
+                                                      setState(() {
+                                                        _isScreenLocked = true;
+                                                        _showControls = false;
+                                                        _showUnlockButton = true;
+                                                      });
+                                                      _resetUnlockButtonTimer();
+                                                    },
+                                                  ),
+                                                  SizedBox(width: spacing),
+                                                  GestureDetector(
+                                                    behavior: HitTestBehavior.opaque,
+                                                    onTap: () => _showVideoMoreSheet(context),
+                                                    child: Padding(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+                                                      child: Icon(Icons.more_vert, color: Colors.white, size: iconSize + 2),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
                                             ],
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                    GestureDetector(
-                                      onTap: () {
-                                        _resetHideTimer();
-                                        _showSpeedSheet(context);
-                                      },
-                                      child: _buildCapsuleGlassContainer(
-                                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                                        height: 48,
-                                        useOwnLayer: true,
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(Icons.speed_rounded, color: Colors.white, size: 18),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w700,
-                                                letterSpacing: 0.3,
-                                              ),
-                                            ),
-                                          ],
+                                          ),
                                         ),
-                                      ),
+                                        GestureDetector(
+                                          onTap: () {
+                                            _resetHideTimer();
+                                            _showSpeedSheet(context);
+                                          },
+                                          child: _buildCapsuleGlassContainer(
+                                            padding: isLandscape
+                                                ? const EdgeInsets.symmetric(horizontal: 14)
+                                                : const EdgeInsets.symmetric(horizontal: 10),
+                                            height: capsuleHeight,
+                                            useOwnLayer: true,
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.speed_rounded, color: Colors.white, size: iconSize - 1),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: isLandscape ? 13 : 12,
+                                                    fontWeight: FontWeight.w700,
+                                                    letterSpacing: 0.3,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
+                                  );
+                                },
                               ),
 
                             const SizedBox(height: 8),
