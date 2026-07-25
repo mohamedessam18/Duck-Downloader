@@ -984,104 +984,115 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
                     // Center Playback Control Row
                     if (!_isTrimmingMode)
-                      Center(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: SizedBox(
-                            width: MediaQuery.sizeOf(context).width - 32,
-                            child: DuckLiquidGlassLayer(
-                              settings: DuckLiquidGlass.button(),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  IconButton(
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    icon: Icon(
-                                      widget.controller.hasPreviousVideo
-                                          ? Icons.skip_previous
-                                          : Icons.skip_previous_outlined,
-                                      size: 32,
-                                      color: widget.controller.hasPreviousVideo
-                                          ? Colors.white
-                                          : Colors.white24,
+                      Builder(
+                        builder: (context) {
+                          final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
+                          final playBtnSize = isLandscape ? 88.0 : 64.0;
+                          final playIconSize = isLandscape ? 42.0 : 32.0;
+                          final seekBtnSize = isLandscape ? 60.0 : 46.0;
+                          final seekIconSize = isLandscape ? 26.0 : 20.0;
+                          final skipIconSize = isLandscape ? 30.0 : 24.0;
+                          final spacing = isLandscape ? 20.0 : 8.0;
+
+                          return Center(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              physics: const BouncingScrollPhysics(),
+                              child: DuckLiquidGlassLayer(
+                                settings: DuckLiquidGlass.button(),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      icon: Icon(
+                                        widget.controller.hasPreviousVideo
+                                            ? Icons.skip_previous
+                                            : Icons.skip_previous_outlined,
+                                        size: skipIconSize,
+                                        color: widget.controller.hasPreviousVideo
+                                            ? Colors.white
+                                            : Colors.white24,
+                                      ),
+                                      onPressed: widget.controller.hasPreviousVideo
+                                          ? () { widget.controller.playPreviousVideo(); }
+                                          : null,
                                     ),
-                                    onPressed: widget.controller.hasPreviousVideo
-                                        ? () { widget.controller.playPreviousVideo(); }
-                                        : null,
-                                  ),
-                                  const SizedBox(width: 16),
-                                  _buildCircularGlassButton(
-                                    size: 64,
-                                    child: const Icon(Icons.replay_10, color: Colors.white, size: 28),
-                                    onPressed: () {
-                                      _resetHideTimer();
-                                      _seekVideo(const Duration(seconds: -10));
-                                    },
-                                    useOwnLayer: false,
-                                  ),
-                                  const SizedBox(width: 32),
-                                  _buildCircularGlassButton(
-                                    size: 90,
-                                    child: Icon(
-                                      isCompleted
-                                          ? Icons.replay
-                                          : value.isPlaying
-                                          ? Icons.pause
-                                          : Icons.play_arrow,
-                                      color: Colors.white,
-                                      size: 44,
+                                    SizedBox(width: spacing),
+                                    _buildCircularGlassButton(
+                                      size: seekBtnSize,
+                                      child: Icon(Icons.replay_10, color: Colors.white, size: seekIconSize),
+                                      onPressed: () {
+                                        _resetHideTimer();
+                                        _seekVideo(const Duration(seconds: -10));
+                                      },
+                                      useOwnLayer: false,
                                     ),
-                                    onPressed: () {
-                                      _resetHideTimer();
-                                      if (isCompleted) {
-                                        video.seekTo(Duration.zero);
-                                        video.play();
-                                        _triggerPlayPauseOverlay(true);
-                                      } else {
-                                        if (value.isPlaying) {
-                                          video.pause();
-                                          _triggerPlayPauseOverlay(false);
-                                        } else {
+                                    SizedBox(width: spacing),
+                                    _buildCircularGlassButton(
+                                      size: playBtnSize,
+                                      child: Icon(
+                                        isCompleted
+                                            ? Icons.replay
+                                            : value.isPlaying
+                                            ? Icons.pause
+                                            : Icons.play_arrow,
+                                        color: Colors.white,
+                                        size: playIconSize,
+                                      ),
+                                      onPressed: () {
+                                        _resetHideTimer();
+                                        if (isCompleted) {
+                                          video.seekTo(Duration.zero);
                                           video.play();
                                           _triggerPlayPauseOverlay(true);
+                                        } else {
+                                          if (value.isPlaying) {
+                                            video.pause();
+                                            _triggerPlayPauseOverlay(false);
+                                          } else {
+                                            video.play();
+                                            _triggerPlayPauseOverlay(true);
+                                          }
                                         }
-                                      }
-                                    },
-                                    useOwnLayer: false,
-                                  ),
-                                  const SizedBox(width: 32),
-                                  _buildCircularGlassButton(
-                                    size: 64,
-                                    child: const Icon(Icons.forward_10, color: Colors.white, size: 28),
-                                    onPressed: () {
-                                      _resetHideTimer();
-                                      _seekVideo(const Duration(seconds: 10));
-                                    },
-                                    useOwnLayer: false,
-                                  ),
-                                  const SizedBox(width: 16),
-                                  IconButton(
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    icon: Icon(
-                                      widget.controller.hasNextVideo
-                                          ? Icons.skip_next
-                                          : Icons.skip_next_outlined,
-                                      size: 32,
-                                      color: widget.controller.hasNextVideo
-                                          ? Colors.white
-                                          : Colors.white24,
+                                      },
+                                      useOwnLayer: false,
                                     ),
-                                    onPressed: widget.controller.hasNextVideo
-                                        ? () { widget.controller.playNextVideo(); }
-                                        : null,
-                                  ),
-                                ],
+                                    SizedBox(width: spacing),
+                                    _buildCircularGlassButton(
+                                      size: seekBtnSize,
+                                      child: Icon(Icons.forward_10, color: Colors.white, size: seekIconSize),
+                                      onPressed: () {
+                                        _resetHideTimer();
+                                        _seekVideo(const Duration(seconds: 10));
+                                      },
+                                      useOwnLayer: false,
+                                    ),
+                                    SizedBox(width: spacing),
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      icon: Icon(
+                                        widget.controller.hasNextVideo
+                                            ? Icons.skip_next
+                                            : Icons.skip_next_outlined,
+                                        size: skipIconSize,
+                                        color: widget.controller.hasNextVideo
+                                            ? Colors.white
+                                            : Colors.white24,
+                                      ),
+                                      onPressed: widget.controller.hasNextVideo
+                                          ? () { widget.controller.playNextVideo(); }
+                                          : null,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
 
                     // Bottom Seeker & Options Area
@@ -1855,42 +1866,44 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                               widget.controller.deleteDownload(widget.item);
                             },
                           ),
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            icon: ListenableBuilder(
-                              listenable: widget.controller,
-                              builder: (context, _) {
-                                final active = widget.controller.isSleepTimerActive;
-                                return Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    Icon(
-                                      active ? Icons.mode_night : Icons.mode_night_outlined,
-                                      color: active ? mediaGold : Colors.white60,
-                                      size: 20,
-                                    ),
-                                    if (active)
-                                      Positioned(
-                                        right: -2,
-                                        top: -2,
-                                        child: Container(
-                                          width: 6,
-                                          height: 6,
-                                          decoration: const BoxDecoration(
-                                            color: mediaDanger,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                );
-                              }
-                            ),
-                            onPressed: () {
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
                               _resetHideTimer();
                               _showSleepTimerSheet(context);
                             },
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: ListenableBuilder(
+                                listenable: widget.controller,
+                                builder: (context, _) {
+                                  final active = widget.controller.isSleepTimerActive;
+                                  return Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Icon(
+                                        active ? Icons.mode_night : Icons.mode_night_outlined,
+                                        color: active ? mediaGold : Colors.white60,
+                                        size: 20,
+                                      ),
+                                      if (active)
+                                        Positioned(
+                                          right: -2,
+                                          top: -2,
+                                          child: Container(
+                                            width: 6,
+                                            height: 6,
+                                            decoration: const BoxDecoration(
+                                              color: mediaDanger,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
                           ),
                           IconButton(
                             padding: EdgeInsets.zero,
