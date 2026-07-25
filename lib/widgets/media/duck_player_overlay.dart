@@ -110,6 +110,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   String _panDirection = ''; // 'horizontal' | 'vertical' | ''
 
   String? _lastAudioItemId;
+  AppLifecycleState _currentLifecycleState = AppLifecycleState.resumed;
   bool _showGifPanel = false;
   double _gifStartTime = 0.0;
   double _gifDuration = 5.0;
@@ -414,6 +415,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     super.didChangeAppLifecycleState(state);
+    _currentLifecycleState = state;
 
     // Only applies to video playback
     if (!widget.item.isVideo) return;
@@ -423,6 +425,12 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     if (state == AppLifecycleState.inactive) {
       // Give Android's onUserLeaveHint() time to trigger PiP before we pause
       await Future.delayed(const Duration(milliseconds: 350));
+
+      // CRITICAL FIX: If app has returned to resumed during the 350ms delay
+      // (which happens on orientation change / system chrome change), CANCEL handoff!
+      if (_currentLifecycleState == AppLifecycleState.resumed) {
+        return;
+      }
 
       // Skip if in PiP — PiP has its own flow
       try {
