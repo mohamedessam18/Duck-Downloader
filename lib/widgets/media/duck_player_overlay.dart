@@ -1153,21 +1153,6 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                   IconButton(
                                                     padding: EdgeInsets.zero,
                                                     constraints: btnConstraints,
-                                                    icon: Icon(Icons.headphones, color: Colors.white, size: iconSize),
-                                                    onPressed: () async {
-                                                      final video = _video;
-                                                      if (video == null || !video.value.isInitialized) return;
-                                                      final pos = video.value.position;
-                                                      _hideTimer?.cancel();
-                                                      video.pause();
-                                                      await widget.controller.activateBackgroundAudio(pos);
-                                                      widget.controller.closePlayer();
-                                                    },
-                                                  ),
-                                                  SizedBox(width: spacing),
-                                                  IconButton(
-                                                    padding: EdgeInsets.zero,
-                                                    constraints: btnConstraints,
                                                     icon: Icon(Icons.gif, color: Colors.white, size: iconSize + 3),
                                                     onPressed: value.duration <= Duration.zero
                                                         ? null
@@ -2800,6 +2785,33 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                             ),
                           ),
                           const SizedBox(height: 16),
+                          ListTile(
+                            leading: const Icon(Icons.headphones, color: Colors.white70),
+                            title: const Text(
+                              'Background Audio Playback',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: const Text(
+                              'Listen to video audio with screen off',
+                              style: TextStyle(color: Colors.white38, fontSize: 12),
+                            ),
+                            onTap: () async {
+                              setState(() {
+                                _showVideoMorePanel = false;
+                              });
+                              final video = _video;
+                              if (video == null || !video.value.isInitialized) return;
+                              final pos = video.value.position;
+                              _hideTimer?.cancel();
+                              video.pause();
+                              await widget.controller.activateBackgroundAudio(pos);
+                              widget.controller.closePlayer();
+                            },
+                          ),
+                          const Divider(color: Colors.white12),
                           ListTile(
                             leading: Icon(
                               _isLooping ? Icons.repeat_one : Icons.repeat,
