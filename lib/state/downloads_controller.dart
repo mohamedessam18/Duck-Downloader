@@ -759,12 +759,7 @@ class DuckDownloadsController extends ChangeNotifier
     lastDownloadedItem = null;
 
     var cleanUrl = url.trim();
-    if (YouTubeExplodeService.isYouTubeUrl(cleanUrl) || YouTubeExplodeService.isYouTubePlaylistUrl(cleanUrl)) {
-      flow = DuckFlow.error;
-      status = 'YouTube downloads are not supported under Google Play policies.';
-      notifyListeners();
-      throw Exception('YouTube downloads are not supported under Google Play policies.');
-    }
+
 
     final isAdult = await _isAdultUrl(cleanUrl);
     if (isAdult) {
