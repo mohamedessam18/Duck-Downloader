@@ -1535,27 +1535,18 @@ class DuckDownloadsController extends ChangeNotifier
 
     final bool canWrite = await _channel.invokeMethod<bool>('canWriteSettings') ?? false;
     if (!canWrite) {
-      status = 'Please allow modifying system settings and try again.';
-      notifyListeners();
       await _channel.invokeMethod<void>('requestWriteSettingsPermission');
-      throw Exception('Permission required: Please enable "Allow modifying system settings" for Duck Downloader, then tap "Set as Default Ringtone" again.');
+      throw Exception('Permission required: Please enable "Allow modifying system settings" in Android Settings, then try again.');
     }
 
-    final info = await _getEffectivePathAndFileName(item);
-    final inputPath = info['path']!;
-
     busy = true;
-    status = 'Cutting audio...';
+    status = 'Preparing ringtone...';
     notifyListeners();
 
-    String? trimmedTempPath;
+    String? inputPath;
     try {
-      trimmedTempPath = await _trimService.trimLocalFile(
-        inputPath: inputPath,
-        startSec: startTime,
-        endSec: endTime,
-        type: DownloadType.audio,
-      );
+      final info = await _getEffectivePathAndFileName(item);
+      inputPath = info['path']!;
 
       final root = await getApplicationDocumentsDirectory();
       final folder = Directory(p.join(root.path, 'Duck Downloader', 'Ringtones'));
@@ -1563,31 +1554,62 @@ class DuckDownloadsController extends ChangeNotifier
 
       final safeName = '${item.id}_ringtone.mp3';
       final finalPath = p.join(folder.path, safeName);
+      final finalFile = File(finalPath);
 
-      final tempFile = File(trimmedTempPath);
-      if (await tempFile.exists()) {
-        if (await File(finalPath).exists()) {
-          await File(finalPath).delete();
-        }
-        await tempFile.copy(finalPath);
-        await tempFile.delete();
+      if (await finalFile.exists()) {
+        try {
+          await finalFile.delete();
+        } catch (_) {}
       }
 
-      status = 'Setting ringtone...';
+      final isFullAudio = startTime <= 0.2 && (endTime - startTime) >= 29.5;
+      if (isFullAudio) {
+        // Fast direct copy without invoking FFmpeg
+        await File(inputPath).copy(finalPath);
+      } else {
+        status = 'Trimming audio...';
+        notifyListeners();
+
+        try {
+          final trimmedTempPath = await _trimService.trimLocalFile(
+            inputPath: inputPath,
+            startSec: startTime,
+            endSec: endTime,
+            type: DownloadType.audio,
+          );
+          final tempFile = File(trimmedTempPath);
+          if (await tempFile.exists()) {
+            await tempFile.copy(finalPath);
+            try {
+              await tempFile.delete();
+            } catch (_) {}
+          } else {
+            await File(inputPath).copy(finalPath);
+          }
+        } catch (e) {
+          debugPrint('FFmpeg trim fallback to direct copy: $e');
+          await File(inputPath).copy(finalPath);
+        }
+      }
+
+      status = 'Setting system ringtone...';
       notifyListeners();
 
       final bool success = await _channel.invokeMethod<bool>('setRingtone', {
         'path': finalPath,
-        'title': '${item.title} Ringtone',
+        'title': item.title,
       }) ?? false;
 
       if (success) {
         status = 'Ringtone set successfully!';
       } else {
-        throw Exception('Failed to register ringtone in system database.');
+        throw Exception('Could not register ringtone in Android system database.');
       }
+    } catch (e) {
+      status = 'Error: ${e.toString()}';
+      rethrow;
     } finally {
-      if (item.isPrivate && inputPath != item.filePath) {
+      if (item.isPrivate && inputPath != null && inputPath != item.filePath) {
         try {
           await File(inputPath).delete();
         } catch (_) {}

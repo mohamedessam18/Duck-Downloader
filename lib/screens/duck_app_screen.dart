@@ -3936,7 +3936,8 @@ class _VaultItemTile extends StatelessWidget {
           ),
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: _muted),
-            color: const Color(0xFF202124),
+            color: _isLight ? Colors.white : const Color(0xFF202124),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             onSelected: (value) async {
               if (value == 'restore') {
                 await controller.moveItemFromVault(item);
@@ -3945,14 +3946,26 @@ class _VaultItemTile extends StatelessWidget {
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'restore',
-                child: Text('Restore to Library'),
+                child: Text(
+                  'Restore to Library',
+                  style: TextStyle(
+                    color: _text,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'delete',
-                child: Text('Delete Permanent'),
+                child: Text(
+                  'Delete Permanent',
+                  style: TextStyle(
+                    color: const Color(0xFFE53935),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ),
             ],
           ),

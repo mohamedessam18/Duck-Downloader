@@ -10,20 +10,145 @@ class SettingsScreen extends StatelessWidget {
 
   static const String privacyPolicyUrl = 'https://duckdownloader.app/privacy-policy.html';
 
-  Future<void> _openPrivacyPolicy(BuildContext context) async {
-    try {
-      final Uri uri = Uri.parse(privacyPolicyUrl);
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        final Uri localUri = Uri.parse('privacy-policy.html');
-        await launchUrl(localUri);
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open Privacy Policy: $e')),
+  void _showPrivacyPolicyDialog(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dialogBg = isDark ? const Color(0xFF1D1D1F) : Colors.white;
+    final textColor = isDark ? Colors.white : const Color(0xFF151517);
+    final mutedColor = isDark ? const Color(0xFFB8B8B8) : const Color(0xFF6F707A);
+    const goldColor = Color(0xFFFFC52F);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: dialogBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 36),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: goldColor.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.shield_outlined, color: goldColor, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        'Privacy Policy',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: mutedColor),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Divider(height: 1),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildPolicySection(
+                          title: '1. User Data & Security',
+                          content:
+                              'Duck Downloader respects your absolute privacy. All downloaded media files, images, videos, and private vault content are stored locally on your device only. No personal files are ever uploaded or transmitted to external servers.',
+                          textColor: textColor,
+                          mutedColor: mutedColor,
+                        ),
+                        _buildPolicySection(
+                          title: '2. Private Vault Encryption',
+                          content:
+                              'Files moved to the Secure Vault are encrypted and hidden from third-party gallery apps. Access is strictly guarded by your personal 4-digit PIN and optional Biometric / Face ID authentication.',
+                          textColor: textColor,
+                          mutedColor: mutedColor,
+                        ),
+                        _buildPolicySection(
+                          title: '3. Device Permissions',
+                          content:
+                              '• Storage & Media: Required exclusively to save downloaded media files to your device gallery/music folder.\n• Notifications: Used solely to show live download progress bars.\n• Write System Settings: Required when setting trimmed audio clips as system ringtones.',
+                          textColor: textColor,
+                          mutedColor: mutedColor,
+                        ),
+                        _buildPolicySection(
+                          title: '4. Google Play Developer Compliance',
+                          content:
+                              'Duck Downloader complies strictly with Google Play Developer Policies. Background operations are limited to active media tasks, and no user tracking or telemetry data is collected.',
+                          textColor: textColor,
+                          mutedColor: mutedColor,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Last Updated: July 2026',
+                          style: TextStyle(color: mutedColor, fontSize: 11, fontStyle: FontStyle.italic),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: goldColor,
+                      foregroundColor: const Color(0xFF151517),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('I Understand', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
-      }
-    }
+      },
+    );
+  }
+
+  Widget _buildPolicySection({
+    required String title,
+    required String content,
+    required Color textColor,
+    required Color mutedColor,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            content,
+            style: TextStyle(color: mutedColor, fontSize: 13, height: 1.4),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -72,8 +197,8 @@ class SettingsScreen extends StatelessWidget {
                         'Read our Google Play compliant Privacy Policy & disclosures',
                         style: TextStyle(color: mutedColor, fontSize: 13),
                       ),
-                      trailing: Icon(Icons.open_in_new, color: mutedColor, size: 20),
-                      onTap: () => _openPrivacyPolicy(context),
+                      trailing: Icon(Icons.chevron_right, color: mutedColor, size: 22),
+                      onTap: () => _showPrivacyPolicyDialog(context),
                     ),
                   ],
                 ),
