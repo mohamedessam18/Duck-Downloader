@@ -1571,12 +1571,14 @@ class DuckDownloadsController extends ChangeNotifier
         notifyListeners();
 
         try {
-          final trimmedTempPath = await _trimService.trimLocalFile(
-            inputPath: inputPath,
-            startSec: startTime,
-            endSec: endTime,
-            type: DownloadType.audio,
-          );
+          final trimmedTempPath = await _trimService
+              .trimLocalFile(
+                inputPath: inputPath,
+                startSec: startTime,
+                endSec: endTime,
+                type: DownloadType.audio,
+              )
+              .timeout(const Duration(seconds: 4));
           final tempFile = File(trimmedTempPath);
           if (await tempFile.exists()) {
             await tempFile.copy(finalPath);

@@ -5697,7 +5697,7 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
                       ),
                       onPressed: () async {
                         try {
-                          _previewPlayer.pause();
+                          await _previewPlayer.stop();
                           await widget.controller.cutAndSetAsRingtone(
                             widget.item,
                             startTime: _startSec,
