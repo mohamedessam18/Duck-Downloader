@@ -119,6 +119,18 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   double _gifDuration = 5.0;
   int _gifWidth = 320;
   bool _isSavingGif = false;
+  bool _is2xSpeedLocked = false;
+  bool _isLongPress2xActive = false;
+  double _longPressStartY = 0.0;
+  bool _hasSwipedToLockDuringPress = false;
+
+  void _unlock2xSpeed() {
+    _video?.setPlaybackSpeed(1.0);
+    setState(() {
+      _is2xSpeedLocked = false;
+      _isLongPress2xActive = false;
+    });
+  }
 
   Duration _cachedAudioDuration = Duration.zero;
   Duration? _draggedAudioPosition;
@@ -640,6 +652,46 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     _triggerRightSeek();
                   }
                 } : null,
+                onLongPressStart: !_isScreenLocked ? (details) {
+                  final v = _video;
+                  if (v != null && v.value.isInitialized) {
+                    _longPressStartY = details.globalPosition.dy;
+                    _hasSwipedToLockDuringPress = false;
+                    setState(() {
+                      _isLongPress2xActive = true;
+                    });
+                    v.setPlaybackSpeed(2.0);
+                  }
+                } : null,
+                onLongPressMoveUpdate: !_isScreenLocked ? (details) {
+                  if (_isLongPress2xActive) {
+                    final double dy = details.globalPosition.dy - _longPressStartY;
+                    if (dy.abs() > 35 && !_hasSwipedToLockDuringPress) {
+                      _hasSwipedToLockDuringPress = true;
+                      setState(() {
+                        _is2xSpeedLocked = !_is2xSpeedLocked;
+                      });
+                      if (!_is2xSpeedLocked) {
+                        _video?.setPlaybackSpeed(1.0);
+                        _isLongPress2xActive = false;
+                      }
+                    }
+                  }
+                } : null,
+                onLongPressEnd: !_isScreenLocked ? (_) {
+                  if (_isLongPress2xActive) {
+                    if (!_is2xSpeedLocked) {
+                      _video?.setPlaybackSpeed(1.0);
+                      setState(() {
+                        _isLongPress2xActive = false;
+                      });
+                    } else {
+                      setState(() {
+                        _isLongPress2xActive = false;
+                      });
+                    }
+                  }
+                } : null,
                 onPanStart: !_isScreenLocked ? (details) {
                   if (video == null) return;
                   _isSwiping = true;
@@ -774,6 +826,46 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                         ),
                       ),
                     ],
+                  ),
+                ),
+              ),
+
+            if (_isLongPress2xActive || _is2xSpeedLocked)
+              Positioned(
+                top: 56,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: GestureDetector(
+                    onTap: _unlock2xSpeed,
+                    child: DuckLiquidGlassSurface(
+                      blurSigma: 16,
+                      fallbackColor: mediaGold.withValues(alpha: 0.25),
+                      fallbackBorderColor: mediaGold.withValues(alpha: 0.6),
+                      borderRadius: 20,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _is2xSpeedLocked ? Icons.lock : Icons.fast_forward_rounded,
+                              color: mediaGold,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _is2xSpeedLocked ? '2x Speed Locked (Tap/Swipe to Unlock)' : '2x Fast Forward ⏩',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),

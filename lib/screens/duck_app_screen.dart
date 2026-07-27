@@ -17,6 +17,7 @@ import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/premium_entitlement.dart';
 import '../state/downloads_controller.dart';
+import '../services/device_media_service.dart';
 import '../core/permissions/permission_service.dart';
 import '../widgets/ambient_background.dart';
 import '../widgets/animated_duck.dart';
@@ -1958,7 +1959,7 @@ class _QueueRow extends StatelessWidget {
 
 
 
-enum _LibrarySubTab { all, favorites, playlists }
+enum _LibrarySubTab { all, folders, favorites, playlists }
 
 class _LibraryView extends StatefulWidget {
   const _LibraryView({
@@ -1994,13 +1995,14 @@ class _LibraryViewState extends State<_LibraryView> {
   Widget _buildUnifiedSubTabBar() {
     final activeIndex = switch (_subTab) {
       _LibrarySubTab.all => 0,
-      _LibrarySubTab.favorites => 1,
-      _LibrarySubTab.playlists => 2,
+      _LibrarySubTab.folders => 1,
+      _LibrarySubTab.favorites => 2,
+      _LibrarySubTab.playlists => 3,
     };
 
     final isLight = Theme.of(context).brightness == Brightness.light;
 
-    final defaultLeft = 4.0 + (activeIndex * 104.0);
+    final defaultLeft = 4.0 + (activeIndex * 78.0);
     final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
     final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 4.0;
 
@@ -2008,27 +2010,29 @@ class _LibraryViewState extends State<_LibraryView> {
     final curve = _isDraggingPill ? Curves.linear : Curves.easeOutBack;
 
     final scale = _isDraggingPill ? 1.08 : 1.0;
-    final width = _isDraggingPill ? 116.0 : 104.0;
-    final leftOffset = _isDraggingPill ? -6.0 : 0.0;
+    final width = _isDraggingPill ? 88.0 : 78.0;
+    final leftOffset = _isDraggingPill ? -5.0 : 0.0;
+
+    final isAudios = widget.title == 'AUDIOS';
 
     return Center(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onPanStart: (details) {
-          final targetLeft = details.localPosition.dx - 52.0;
+          final targetLeft = details.localPosition.dx - 39.0;
           final targetTop = details.localPosition.dy - 16.0;
           final minLeft = 4.0;
-          final maxLeft = 212.0;
+          final maxLeft = 238.0;
           setState(() {
             _isDraggingPill = true;
             _dragPillOffset = Offset(targetLeft.clamp(minLeft, maxLeft), targetTop.clamp(0.0, 8.0));
           });
         },
         onPanUpdate: (details) {
-          final targetLeft = details.localPosition.dx - 52.0;
+          final targetLeft = details.localPosition.dx - 39.0;
           final targetTop = details.localPosition.dy - 16.0;
           final minLeft = 4.0;
-          final maxLeft = 212.0;
+          final maxLeft = 238.0;
           
           double dragLeft = targetLeft;
           if (targetLeft < minLeft) {
@@ -2054,14 +2058,15 @@ class _LibraryViewState extends State<_LibraryView> {
         },
         onPanEnd: (details) {
           if (_dragPillOffset != null) {
-            final center = _dragPillOffset!.dx + 52.0;
-            final targetIndex = ((center - 4.0) / 104.0).round().clamp(0, 2);
+            final center = _dragPillOffset!.dx + 39.0;
+            final targetIndex = ((center - 4.0) / 78.0).round().clamp(0, 3);
             setState(() {
               _isDraggingPill = false;
               _subTab = switch (targetIndex) {
                 0 => _LibrarySubTab.all,
-                1 => _LibrarySubTab.favorites,
-                2 => _LibrarySubTab.playlists,
+                1 => _LibrarySubTab.folders,
+                2 => _LibrarySubTab.favorites,
+                3 => _LibrarySubTab.playlists,
                 _ => _LibrarySubTab.all,
               };
             });
@@ -2083,7 +2088,6 @@ class _LibraryViewState extends State<_LibraryView> {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // 1. Frosted Glass Container Background (Clipped)
               Positioned.fill(
                 child: DuckLiquidGlassTrack(
                   borderRadius: 21,
@@ -2116,13 +2120,13 @@ class _LibraryViewState extends State<_LibraryView> {
                   ),
                 ),
               ),
-              // 3. Tab Text Labels Row
               Positioned.fill(
                 child: Row(
                   children: [
-                    _buildTabOption(_LibrarySubTab.all, 'ALL', activeIndex == 0),
-                    _buildTabOption(_LibrarySubTab.favorites, 'FAVORITES', activeIndex == 1),
-                    _buildTabOption(_LibrarySubTab.playlists, 'PLAYLISTS', activeIndex == 2),
+                    _buildTabOption(_LibrarySubTab.all, isAudios ? 'SONGS' : 'ALL', activeIndex == 0),
+                    _buildTabOption(_LibrarySubTab.folders, 'FOLDERS', activeIndex == 1),
+                    _buildTabOption(_LibrarySubTab.favorites, 'FAVORITES', activeIndex == 2),
+                    _buildTabOption(_LibrarySubTab.playlists, 'PLAYLISTS', activeIndex == 3),
                   ],
                 ),
               ),
@@ -2254,9 +2258,11 @@ class _LibraryViewState extends State<_LibraryView> {
           _buildUnifiedSubTabBar(),
           const SizedBox(height: 10),
           Expanded(
-            child: _subTab == _LibrarySubTab.playlists
-                ? _buildPlaylistsTab()
-                : filteredItems.isEmpty
+            child: _subTab == _LibrarySubTab.folders
+                ? _buildFoldersTab()
+                : _subTab == _LibrarySubTab.playlists
+                    ? _buildPlaylistsTab()
+                    : filteredItems.isEmpty
                 ? Center(
                     child: Text(
                       _subTab == _LibrarySubTab.favorites
@@ -2332,6 +2338,198 @@ class _LibraryViewState extends State<_LibraryView> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFoldersTab() {
+    final title = widget.title.toUpperCase();
+    final List<DeviceMediaFolder> folders = title == 'VIDEOS'
+        ? widget.controller.videoFolders
+        : (title == 'IMAGES'
+            ? widget.controller.imageFolders
+            : widget.controller.audioFolders);
+
+    if (folders.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.folder_off_outlined, size: 48, color: _textMuted),
+            const SizedBox(height: 12),
+            Text(
+              'No $title folders found on device.',
+              style: TextStyle(color: _textMuted, fontSize: 15),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: _gold),
+              ),
+              onPressed: () => widget.controller.refreshDeviceFolders(),
+              icon: Icon(Icons.refresh, color: _gold),
+              label: Text('Scan Storage Folders', style: TextStyle(color: _gold)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: EdgeInsets.only(bottom: _bottomPadding),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 1.1,
+      ),
+      itemCount: folders.length,
+      itemBuilder: (context, index) {
+        final folder = folders[index];
+        return GestureDetector(
+          onTap: () => _showFolderItemsSheet(folder),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withOpacity(0.12)),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Icon(
+                      title == 'VIDEOS'
+                          ? Icons.folder_zip
+                          : (title == 'IMAGES' ? Icons.folder_special : Icons.folder_copy),
+                      color: _gold,
+                      size: 32,
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _gold.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${folder.itemCount} items',
+                        style: TextStyle(
+                          color: _gold,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      folder.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _text,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      folder.path,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _textMuted,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFolderItemsSheet(DeviceMediaFolder folder) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final isLight = Theme.of(context).brightness == Brightness.light;
+        return Container(
+          height: MediaQuery.sizeOf(context).height * 0.75,
+          decoration: BoxDecoration(
+            color: isLight ? Colors.white : const Color(0xFF141518),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.folder, color: _gold, size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            folder.name,
+                            style: TextStyle(
+                              color: _text,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            '${folder.itemCount} items inside this folder',
+                            style: TextStyle(color: _textMuted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: folder.items.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = folder.items[index];
+                    return _DownloadRow(
+                      item: item,
+                      galleryItems: folder.items,
+                      controller: widget.controller,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

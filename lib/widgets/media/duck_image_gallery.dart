@@ -32,6 +32,7 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
   bool _showControls = true;
   final Map<String, String> _decryptedPaths = {};
   final Set<String> _tempFilesToDelete = {};
+  final Map<String, ImageProvider> _providerCache = {};
 
   @override
   void initState() {
@@ -40,6 +41,28 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
     _currentIndex = images.indexWhere((img) => img.id == widget.item.id);
     if (_currentIndex < 0) _currentIndex = 0;
     _pageController = PageController(initialPage: _currentIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _preloadAdjacent(_currentIndex);
+    });
+  }
+
+  void _preloadAdjacent(int index) {
+    final images = _resolvedImages;
+    for (int i = index - 1; i <= index + 1; i++) {
+      if (i >= 0 && i < images.length) {
+        final item = images[i];
+        if (!_providerCache.containsKey(item.id)) {
+          _getEffectiveProvider(item).then((provider) {
+            if (provider != null && mounted) {
+              setState(() {
+                _providerCache[item.id] = provider;
+              });
+              precacheImage(provider, context);
+            }
+          });
+        }
+      }
+    }
   }
 
   @override
@@ -141,9 +164,36 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
             PageView.builder(
               controller: _pageController,
               itemCount: images.length,
-              onPageChanged: (index) => setState(() => _currentIndex = index),
+              onPageChanged: (index) {
+                setState(() => _currentIndex = index);
+                _preloadAdjacent(index);
+              },
               itemBuilder: (context, index) {
                 final item = images[index];
+                final cachedProvider = _providerCache[item.id];
+                if (cachedProvider != null) {
+                  return GestureDetector(
+                    onTap: _toggleControls,
+                    child: PhotoView(
+                      imageProvider: cachedProvider,
+                      gaplessPlayback: true,
+                      minScale: PhotoViewComputedScale.contained * 0.5,
+                      maxScale: PhotoViewComputedScale.covered * 4,
+                      backgroundDecoration: const BoxDecoration(
+                        color: Colors.black,
+                      ),
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Center(
+                          child: Text(
+                            'Could not load image file.',
+                            style: TextStyle(color: Color(0xFFD9D9D9)),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                }
+
                 return FutureBuilder<ImageProvider?>(
                   future: _getEffectiveProvider(item),
                   builder: (context, snapshot) {
@@ -161,10 +211,13 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
                         ),
                       );
                     }
+                    _providerCache[item.id] = provider;
+                    precacheImage(provider, context);
                     return GestureDetector(
                       onTap: _toggleControls,
                       child: PhotoView(
                         imageProvider: provider,
+                        gaplessPlayback: true,
                         minScale: PhotoViewComputedScale.contained * 0.5,
                         maxScale: PhotoViewComputedScale.covered * 4,
                         backgroundDecoration: const BoxDecoration(

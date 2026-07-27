@@ -27,6 +27,7 @@ import '../services/vault_encryption_service.dart';
 import '../services/camera_service.dart';
 import '../services/conversion_service.dart';
 import '../services/cobalt_service.dart';
+import '../services/device_media_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -80,6 +81,7 @@ class DuckDownloadsController extends ChangeNotifier
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_requestPermissionsSafely());
         unawaited(loadCookiesStatus());
+        unawaited(refreshDeviceFolders());
       });
     }
     unawaited(_configureAudioSession());
@@ -355,6 +357,23 @@ class DuckDownloadsController extends ChangeNotifier
   List<DownloadItem> get videos => _completed(DownloadType.video);
   List<DownloadItem> get audios => _completed(DownloadType.audio);
   List<DownloadItem> get images => _completed(DownloadType.image);
+
+  final DeviceMediaService _deviceMediaService = DeviceMediaService();
+  List<DeviceMediaFolder> videoFolders = [];
+  List<DeviceMediaFolder> imageFolders = [];
+  List<DeviceMediaFolder> audioFolders = [];
+
+  Future<void> refreshDeviceFolders() async {
+    try {
+      await _permissions.requestStoragePermission();
+      videoFolders = await _deviceMediaService.getVideoFolders(_downloads);
+      imageFolders = await _deviceMediaService.getImageFolders(_downloads);
+      audioFolders = await _deviceMediaService.getAudioFolders(_downloads);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error scanning device media folders: $e');
+    }
+  }
   List<DownloadItem> get privateDownloads {
     if (isVaultLocked || isDecoySession) {
       return [];
@@ -957,10 +976,10 @@ class DuckDownloadsController extends ChangeNotifier
           flow = DuckFlow.ready;
           status = 'Tap download to save image';
         } else {
-          selectedType = DownloadType.video;
-          quality = _firstQuality(media, DownloadType.video);
+          selectedType = _selectDefaultDownloadType(media, cleanUrl);
+          quality = _firstQuality(media, selectedType);
           flow = DuckFlow.ready;
-          status = 'Choose video or audio';
+          status = selectedType == DownloadType.audio ? 'Choose audio format' : 'Choose video or audio';
         }
       } catch (error) {
         try {
@@ -1656,12 +1675,20 @@ class DuckDownloadsController extends ChangeNotifier
     final media = metadata;
     if (media == null) return;
     selectedType = type;
+    unawaited(_store.writeLastDownloadType(type.name));
     quality = _firstQuality(media, type);
     notifyListeners();
   }
 
   void changeQuality(String value) {
     quality = value;
+    if (selectedType == DownloadType.video) {
+      unawaited(_store.writeLastVideoQuality(value));
+    } else if (selectedType == DownloadType.audio) {
+      unawaited(_store.writeLastAudioQuality(value));
+    } else if (selectedType == DownloadType.image) {
+      unawaited(_store.writeLastImageQuality(value));
+    }
     notifyListeners();
   }
 
@@ -2463,21 +2490,65 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
+  DownloadType _selectDefaultDownloadType(MediaMetadata media, String cleanUrl) {
+    if (_isImageMetadata(media) || _looksLikeImageUrl(cleanUrl)) {
+      return DownloadType.image;
+    }
+    final savedType = _store.readLastDownloadType();
+    if (savedType == 'audio') {
+      return DownloadType.audio;
+    } else if (savedType == 'image') {
+      return DownloadType.image;
+    }
+    return DownloadType.video;
+  }
+
   String _firstQuality(MediaMetadata media, DownloadType type) {
+    String? savedPreference;
+    if (type == DownloadType.video) {
+      savedPreference = _store.readLastVideoQuality();
+    } else if (type == DownloadType.audio) {
+      savedPreference = _store.readLastAudioQuality();
+    } else if (type == DownloadType.image) {
+      savedPreference = _store.readLastImageQuality();
+    }
+
     if (type == DownloadType.image) {
       final formats = media.qualities;
       if (formats.isEmpty) return 'Original Image';
-      // For image metadata yt-dlp returns a single synthetic 'Original Image'
-      // entry, but a yt-dlp video extract may still expose video heights. Pick
-      // the first label regardless so it survives non-image fallback paths.
+      if (savedPreference != null) {
+        final match = formats.firstWhere(
+          (f) => f.label == savedPreference || f.label.toLowerCase() == savedPreference!.toLowerCase(),
+          orElse: () => formats.first,
+        );
+        return match.label;
+      }
       return formats.first.label;
     }
+
     final formats = type == DownloadType.video
         ? media.qualities
         : media.audioFormats;
     if (formats.isEmpty) {
       return type == DownloadType.audio ? 'Best audio' : 'Best';
     }
+
+    if (savedPreference != null) {
+      final exactMatch = formats.firstWhere(
+        (f) => f.label == savedPreference || f.label.toLowerCase() == savedPreference!.toLowerCase(),
+        orElse: () => const FormatInfo(id: '', label: ''),
+      );
+      if (exactMatch.label.isNotEmpty) {
+        return exactMatch.label;
+      }
+      final partialMatch = formats.firstWhere(
+        (f) => f.label.toLowerCase().contains(savedPreference!.toLowerCase()) ||
+               savedPreference!.toLowerCase().contains(f.label.toLowerCase()),
+        orElse: () => formats.first,
+      );
+      return partialMatch.label;
+    }
+
     return formats.first.label;
   }
 
@@ -2821,10 +2892,10 @@ class DuckDownloadsController extends ChangeNotifier
         flow = DuckFlow.ready;
         status = 'Tap download to save image';
       } else {
-        selectedType = DownloadType.video;
-        quality = _firstQuality(media, DownloadType.video);
+        selectedType = _selectDefaultDownloadType(media, url);
+        quality = _firstQuality(media, selectedType);
         flow = DuckFlow.ready;
-        status = 'Choose video or audio';
+        status = selectedType == DownloadType.audio ? 'Choose audio format' : 'Choose video or audio';
       }
     } catch (error) {
       flow = DuckFlow.error;

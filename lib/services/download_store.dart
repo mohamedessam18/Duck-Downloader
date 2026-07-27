@@ -142,4 +142,36 @@ class DownloadStore {
     }
     return _box.put('youtubeCookies', cookies);
   }
+
+  String? readLastDownloadType() {
+    return _box.get('lastDownloadType') as String?;
+  }
+
+  Future<void> writeLastDownloadType(String type) {
+    return _box.put('lastDownloadType', type);
+  }
+
+  String? readLastVideoQuality() {
+    return _box.get('lastVideoQuality') as String?;
+  }
+
+  Future<void> writeLastVideoQuality(String quality) {
+    return _box.put('lastVideoQuality', quality);
+  }
+
+  String? readLastAudioQuality() {
+    return _box.get('lastAudioQuality') as String?;
+  }
+
+  Future<void> writeLastAudioQuality(String quality) {
+    return _box.put('lastAudioQuality', quality);
+  }
+
+  String? readLastImageQuality() {
+    return _box.get('lastImageQuality') as String?;
+  }
+
+  Future<void> writeLastImageQuality(String quality) {
+    return _box.put('lastImageQuality', quality);
+  }
 }

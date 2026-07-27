@@ -1,12 +1,14 @@
 import 'dart:io';
-
 import 'package:permission_handler/permission_handler.dart';
 
 class PermissionService {
   Future<bool> requestStoragePermission() async {
     if (Platform.isIOS) return true;
-    final status = await Permission.storage.request();
-    return status.isGranted;
+    final photos = await Permission.photos.request();
+    final videos = await Permission.videos.request();
+    final audio = await Permission.audio.request();
+    final storage = await Permission.storage.request();
+    return photos.isGranted || videos.isGranted || audio.isGranted || storage.isGranted;
   }
 
   Future<bool> requestMediaImagesPermission() async {
@@ -15,7 +17,9 @@ class PermissionService {
       return status.isGranted;
     }
     final photosStatus = await Permission.photos.request();
-    if (photosStatus.isGranted) return true;
+    final videosStatus = await Permission.videos.request();
+    final audioStatus = await Permission.audio.request();
+    if (photosStatus.isGranted || videosStatus.isGranted || audioStatus.isGranted) return true;
     final storageStatus = await Permission.storage.request();
     return storageStatus.isGranted;
   }
@@ -30,10 +34,10 @@ class PermissionService {
     if (Platform.isIOS) {
       await Permission.photos.request();
     } else {
-      final photosStatus = await Permission.photos.request();
-      if (!photosStatus.isGranted) {
-        await Permission.storage.request();
-      }
+      await Permission.photos.request();
+      await Permission.videos.request();
+      await Permission.audio.request();
+      await Permission.storage.request();
     }
   }
 
@@ -41,15 +45,10 @@ class PermissionService {
     if (Platform.isIOS) return true;
     final storageGranted = await Permission.storage.isGranted;
     final photosGranted = await Permission.photos.isGranted;
-    return storageGranted || photosGranted;
+    final videosGranted = await Permission.videos.isGranted;
+    final audioGranted = await Permission.audio.isGranted;
+    return storageGranted || photosGranted || videosGranted || audioGranted;
   }
 
-  Future<bool> hasMediaImagesPermission() async {
-    if (Platform.isIOS) {
-      return await Permission.photos.isGranted;
-    }
-    final photosGranted = await Permission.photos.isGranted;
-    final storageGranted = await Permission.storage.isGranted;
-    return photosGranted || storageGranted;
-  }
+  Future<bool> hasMediaImagesPermission() => hasStoragePermission();
 }
