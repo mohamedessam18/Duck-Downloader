@@ -320,6 +320,12 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
                     onDismiss: widget.controller.dismissClipboardDetection,
                     onAccept: widget.controller.acceptClipboardDetection,
                   ),
+                if (widget.controller.sharedQuickDownloadUrl != null)
+                  _QuickShareOverlay(
+                    url: widget.controller.sharedQuickDownloadUrl!,
+                    onDismiss: widget.controller.dismissQuickShare,
+                    onAccept: widget.controller.acceptQuickShareDownload,
+                  ),
                 if (widget.controller.showPlaylistChoiceDialog)
                   _PlaylistChoiceOverlay(
                     controller: widget.controller,
@@ -4574,6 +4580,171 @@ class _ClipboardDetectorOverlay extends StatelessWidget {
                             ),
                           ),
                         ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickShareOverlay extends StatelessWidget {
+  const _QuickShareOverlay({
+    required this.url,
+    required this.onDismiss,
+    required this.onAccept,
+  });
+
+  final String url;
+  final VoidCallback onDismiss;
+  final Function(DownloadType) onAccept;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: .6),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: const Color(0x1F2A2A2D),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: _gold.withValues(alpha: .3),
+                      width: 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: .4),
+                        blurRadius: 32,
+                        offset: const Offset(0, 16),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 42,
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: _gold.withValues(alpha: .15),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(Icons.bolt, color: _gold, size: 24),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                'SnapTube Quick Download',
+                                style: TextStyle(
+                                  color: _text,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close, color: _textMuted),
+                            onPressed: onDismiss,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          url,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: _gold, fontSize: 12),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'Select Download Format:',
+                        style: TextStyle(
+                          color: _textMuted,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _gold,
+                                foregroundColor: const Color(0xFF101112),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              onPressed: () => onAccept(DownloadType.video),
+                              icon: const Icon(Icons.movie, size: 20),
+                              label: const Text(
+                                'Video HD',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: BorderSide(color: _gold.withOpacity(0.6)),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              onPressed: () => onAccept(DownloadType.audio),
+                              icon: Icon(Icons.music_note, color: _gold, size: 20),
+                              label: const Text(
+                                'Audio MP3',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton.icon(
+                          onPressed: () => onAccept(DownloadType.image),
+                          icon: Icon(Icons.image, color: _textMuted, size: 18),
+                          label: Text(
+                            'Download Images / Photos',
+                            style: TextStyle(color: _textMuted, fontSize: 13),
+                          ),
+                        ),
                       ),
                     ],
                   ),

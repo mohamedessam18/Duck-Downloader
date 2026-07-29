@@ -3250,12 +3250,30 @@ class DuckDownloadsController extends ChangeNotifier
     });
   }
 
+  String? sharedQuickDownloadUrl;
+
+  void dismissQuickShare() {
+    sharedQuickDownloadUrl = null;
+    notifyListeners();
+  }
+
+  Future<void> acceptQuickShareDownload(DownloadType type) async {
+    final url = sharedQuickDownloadUrl;
+    sharedQuickDownloadUrl = null;
+    selectedType = type;
+    notifyListeners();
+    if (url != null) {
+      unawaited(autoExtractAndDownload(url));
+    }
+  }
+
   Future<void> _handleSharedText(String text) async {
     final regExp = RegExp(r'(https?://[^\s]+)');
     final match = regExp.firstMatch(text);
     final url = match?.group(0);
     if (url != null) {
-      unawaited(autoExtractAndDownload(url));
+      sharedQuickDownloadUrl = url;
+      notifyListeners();
     }
   }
 
