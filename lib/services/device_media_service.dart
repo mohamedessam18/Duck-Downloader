@@ -37,7 +37,6 @@ class DeviceMediaService {
       if (Platform.isAndroid) {
         final sdCard = Directory('/storage/emulated/0');
         if (sdCard.existsSync()) {
-          dirs.add(sdCard);
           final commonPaths = [
             'DCIM',
             'Pictures',

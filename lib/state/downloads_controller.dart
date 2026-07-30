@@ -24,13 +24,11 @@ import '../services/media_save_service.dart';
 import '../services/trim_service.dart';
 import '../services/youtube_explode_service.dart';
 import '../services/vault_encryption_service.dart';
-import '../services/camera_service.dart';
 import '../services/conversion_service.dart';
 import '../services/cobalt_service.dart';
 import '../services/device_media_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 class DuckDownloadsController extends ChangeNotifier
     with WidgetsBindingObserver {
@@ -60,6 +58,9 @@ class DuckDownloadsController extends ChangeNotifier
       _ytExplode.updateCookies(initialCookies);
     }
     _downloads = _store.readDownloads();
+    for (final item in _downloads.where((item) => item.isPrivate)) {
+      _privateMetadata[item.id] = item;
+    }
     _videoResumePositions = _store.readVideoResumePositions();
     autoSaveVideos = _store.readAutoSaveVideos();
     enableClipboardDetection = _store.readEnableClipboardDetection();
@@ -79,9 +80,7 @@ class DuckDownloadsController extends ChangeNotifier
     unawaited(_notifications.initialize(onTap: _handleNotificationTap));
     if (initializePlatformServices) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_requestPermissionsSafely());
-        unawaited(loadCookiesStatus());
-        unawaited(refreshDeviceFolders());
+        unawaited(_initializePlatformServices());
       });
     }
     unawaited(_configureAudioSession());
@@ -134,7 +133,7 @@ class DuckDownloadsController extends ChangeNotifier
   bool get hasPreviousTrack =>
       _audioQueue.length > 1 &&
       (_loopMode == LoopMode.all || _audioQueueIndex > 0);
-      
+
   // Queue management
   List<DownloadItem> get audioQueue => List.unmodifiable(_audioQueue);
   int get audioQueueIndex => _audioQueueIndex;
@@ -167,10 +166,12 @@ class DuckDownloadsController extends ChangeNotifier
     _audioQueueIndex = index;
     playItem(_audioQueue[index], advanceQueue: true);
   }
-      
-  bool get hasNextVideo => _videoQueue.length > 1 && _videoQueueIndex < _videoQueue.length - 1;
+
+  bool get hasNextVideo =>
+      _videoQueue.length > 1 && _videoQueueIndex < _videoQueue.length - 1;
   bool get hasPreviousVideo => _videoQueue.length > 1 && _videoQueueIndex > 0;
-  DownloadItem? get nextVideoItem => hasNextVideo ? _videoQueue[_videoQueueIndex + 1] : null;
+  DownloadItem? get nextVideoItem =>
+      hasNextVideo ? _videoQueue[_videoQueueIndex + 1] : null;
 
   LoopMode get loopMode => _loopMode;
 
@@ -225,12 +226,16 @@ class DuckDownloadsController extends ChangeNotifier
   final YouTubeExplodeService _ytExplode;
 
   List<DownloadItem> _downloads = [];
+  final Map<String, DownloadItem> _privateMetadata = {};
+  bool _privateMetadataIndexHealthy = true;
   List<Playlist> _playlists = [];
   String? _vaultPin;
   String? _decoyVaultPin;
   bool _biometricEnabled = false;
-  bool get isVaultSetup => _vaultPin != null;
-  bool get isDecoyVaultSetup => _decoyVaultPin != null;
+  bool get isVaultSetup =>
+      VaultEncryptionService.isConfigured || _vaultPin != null;
+  bool get isDecoyVaultSetup =>
+      VaultEncryptionService.isDecoyConfigured || _decoyVaultPin != null;
   bool get biometricEnabled => _biometricEnabled;
   bool isVaultLocked = true;
   bool isDecoySession = false;
@@ -258,13 +263,15 @@ class DuckDownloadsController extends ChangeNotifier
   bool backgroundPlaybackEnabled = true;
   String? detectedClipboardUrl;
   String? _lastDetectedUrl;
-  
+
   Completer<bool>? _playlistChoiceCompleter;
   bool showPlaylistChoiceDialog = false;
   String? pendingPlaylistUrl;
   bool externalSaveBusy = false;
   String? activeId;
+  String? _activeDecryptedAudioPath;
   DownloadItem? playerItem;
+  String? _playerTempPath;
   List<DownloadItem>? playerGalleryItems;
   List<DownloadItem>? _audioQueueSource;
   final Set<String> controlPendingIds = {};
@@ -363,9 +370,9 @@ class DuckDownloadsController extends ChangeNotifier
   List<DeviceMediaFolder> imageFolders = [];
   List<DeviceMediaFolder> audioFolders = [];
 
-  Future<void> refreshDeviceFolders() async {
+  Future<void> refreshDeviceFolders({bool requestPermission = true}) async {
     try {
-      await _permissions.requestStoragePermission();
+      if (requestPermission) await _permissions.requestStoragePermission();
       videoFolders = await _deviceMediaService.getVideoFolders(_downloads);
       imageFolders = await _deviceMediaService.getImageFolders(_downloads);
       audioFolders = await _deviceMediaService.getAudioFolders(_downloads);
@@ -374,6 +381,7 @@ class DuckDownloadsController extends ChangeNotifier
       debugPrint('Error scanning device media folders: $e');
     }
   }
+
   List<DownloadItem> get privateDownloads {
     if (isVaultLocked || isDecoySession) {
       return [];
@@ -446,37 +454,129 @@ class DuckDownloadsController extends ChangeNotifier
     return false;
   }
 
-  bool checkVaultPin(String pin) {
-    if (pin == _vaultPin) {
+  Future<bool> checkVaultPin(String pin) async {
+    var unlocked = await VaultEncryptionService.unlockWithPin(pin);
+    if (!unlocked && pin == _vaultPin) {
+      // One-time migration from the legacy plaintext PIN storage.
+      await VaultEncryptionService.configurePin(pin);
+      await _store.writeVaultPin(null);
+      _vaultPin = null;
+      unlocked = true;
+      await _migrateLegacyVaultFiles();
+    }
+    if (unlocked) {
+      await _restorePrivateMetadata();
       isVaultLocked = false;
       isDecoySession = false;
       _failedPinAttempts = 0;
       notifyListeners();
       return true;
-    } else if (pin == _decoyVaultPin) {
+    }
+    var decoyUnlocked = await VaultEncryptionService.unlockWithDecoyPin(pin);
+    if (!decoyUnlocked && pin == _decoyVaultPin) {
+      await VaultEncryptionService.configureDecoyPin(pin);
+      await _store.writeDecoyVaultPin(null);
+      _decoyVaultPin = null;
+      decoyUnlocked = true;
+    }
+    if (decoyUnlocked) {
       isVaultLocked = false;
       isDecoySession = true;
       _failedPinAttempts = 0;
       notifyListeners();
       return true;
     }
+    VaultEncryptionService.lock();
+    isVaultLocked = true;
+    isDecoySession = false;
     _failedPinAttempts++;
-    if (_failedPinAttempts >= 3) {
-      _failedPinAttempts = 0;
-      unawaited(VaultCameraService.captureIntruderSelfie());
-    }
+    if (_failedPinAttempts >= 3) _failedPinAttempts = 0;
+    notifyListeners();
     return false;
   }
 
   Future<void> setVaultPin(String pin) async {
-    _vaultPin = pin;
-    await _store.writeVaultPin(pin);
+    await VaultEncryptionService.configurePin(pin);
+    _vaultPin = null;
+    await _store.writeVaultPin(null);
+    isVaultLocked = false;
+    isDecoySession = false;
+    await _restorePrivateMetadata();
     notifyListeners();
   }
 
+  Future<void> _restorePrivateMetadata() async {
+    List<Map<String, dynamic>> encryptedEntries = const [];
+    try {
+      encryptedEntries =
+          await VaultEncryptionService.readPrivateDownloadIndex();
+      _privateMetadataIndexHealthy = true;
+    } catch (error) {
+      _privateMetadataIndexHealthy = false;
+      debugPrint('Vault metadata index could not be restored: $error');
+    }
+    for (final entry in encryptedEntries) {
+      try {
+        final item = DownloadItem.fromJson(entry);
+        if (item.isPrivate) _privateMetadata[item.id] = item;
+      } catch (_) {}
+    }
+    for (final item in _downloads.where((item) => item.isPrivate)) {
+      if (item.url.isNotEmpty)
+        _privateMetadata.putIfAbsent(item.id, () => item);
+    }
+    _downloads = [
+      for (final item in _downloads)
+        if (item.isPrivate) _privateMetadata[item.id] ?? item else item,
+    ];
+    if (_privateMetadataIndexHealthy) {
+      try {
+        await _persistPrivateMetadata();
+      } catch (error) {
+        debugPrint('Vault metadata index could not be saved: $error');
+      }
+    }
+  }
+
+  Future<void> _persistPrivateMetadata() async {
+    if (!VaultEncryptionService.isUnlocked) return;
+    if (!_privateMetadataIndexHealthy) {
+      throw StateError(
+        'Vault metadata needs recovery before it can be changed.',
+      );
+    }
+    final entries = [
+      for (final item in _privateMetadata.values)
+        if (item.url.isNotEmpty) item.toJson(),
+    ];
+    await VaultEncryptionService.writePrivateDownloadIndex(entries);
+    await _store.writeDownloads(_downloads);
+  }
+
+  void _mergePrivateMetadata() {
+    _downloads = [
+      for (final item in _downloads)
+        if (item.isPrivate) _privateMetadata[item.id] ?? item else item,
+    ];
+  }
+
+  Future<void> _migrateLegacyVaultFiles() async {
+    for (final item in List<DownloadItem>.from(_downloads)) {
+      if (!item.isPrivate || item.filePath == null) continue;
+      if (await VaultEncryptionService.isEncryptedFile(item.filePath!))
+        continue;
+      final encryptedPath = await _files.moveFileToVault(
+        currentPath: item.filePath!,
+        filename: p.basename(item.filePath!),
+      );
+      await _saveItem(item.copyWith(filePath: encryptedPath));
+    }
+  }
+
   Future<void> setDecoyVaultPin(String pin) async {
-    _decoyVaultPin = pin;
-    await _store.writeDecoyVaultPin(pin);
+    await VaultEncryptionService.configureDecoyPin(pin);
+    _decoyVaultPin = null;
+    await _store.writeDecoyVaultPin(null);
     notifyListeners();
   }
 
@@ -487,15 +587,19 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void lockVault() {
+    VaultEncryptionService.lock();
     isVaultLocked = true;
     isDecoySession = false;
     notifyListeners();
   }
 
-  void unlockVaultBiometric() {
+  Future<bool> unlockVaultBiometric() async {
+    if (!await VaultEncryptionService.unlockWithDeviceKey()) return false;
+    await _restorePrivateMetadata();
     isVaultLocked = false;
     isDecoySession = false;
     notifyListeners();
+    return true;
   }
 
   Future<void> toggleFavorite(DownloadItem item) async {
@@ -510,24 +614,55 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
-  Future<void> moveItemToVault(DownloadItem item) async {
+  Future<bool> moveItemToVault(DownloadItem item) async {
+    if (!VaultEncryptionService.isUnlocked) {
+      status = 'Unlock the Secure Vault before moving a file.';
+      notifyListeners();
+      return false;
+    }
     final path = item.filePath;
-    if (path == null) throw Exception('File not available locally.');
-    final ext = path.contains('.')
-        ? path.split('.').last.toLowerCase()
-        : (item.isAudio ? 'mp3' : (item.type == DownloadType.image ? 'jpg' : 'mp4'));
-    final filename = item.title.toLowerCase().endsWith('.$ext')
-        ? item.title
-        : '${item.title}.$ext';
-    
-    final vaultPath = await _files.moveFileToVault(
-      currentPath: path,
-      filename: filename,
-    );
-    final next = item.copyWith(isPrivate: true, filePath: vaultPath);
-    await _saveItem(next);
-    status = 'Moved to Secure Vault';
-    notifyListeners();
+    if (path == null) {
+      status = 'This file is not available locally.';
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      final ext = path.contains('.')
+          ? path.split('.').last.toLowerCase()
+          : (item.isAudio
+                ? 'mp3'
+                : (item.type == DownloadType.image ? 'jpg' : 'mp4'));
+      final filename = item.title.toLowerCase().endsWith('.$ext')
+          ? item.title
+          : '${item.title}.$ext';
+      final vaultPath = await _files.copyFileToVault(
+        currentPath: path,
+        filename: filename,
+      );
+      try {
+        await _saveItem(item.copyWith(isPrivate: true, filePath: vaultPath));
+      } catch (_) {
+        await _files.deleteFile(vaultPath);
+        rethrow;
+      }
+      try {
+        await _files.deleteFile(path);
+      } catch (_) {
+        status =
+            'File was secured, but the original copy could not be removed.';
+        notifyListeners();
+        return false;
+      }
+      status = 'Moved to Secure Vault';
+      notifyListeners();
+      return true;
+    } catch (error) {
+      status = 'Could not move file to Secure Vault: ${_cleanError(error)}';
+      flow = DuckFlow.error;
+      notifyListeners();
+      return false;
+    }
   }
 
   Future<void> moveItemFromVault(DownloadItem item) async {
@@ -535,11 +670,13 @@ class DuckDownloadsController extends ChangeNotifier
     if (path == null) throw Exception('File not available locally.');
     final ext = path.contains('.')
         ? path.split('.').last.toLowerCase()
-        : (item.isAudio ? 'mp3' : (item.type == DownloadType.image ? 'jpg' : 'mp4'));
+        : (item.isAudio
+              ? 'mp3'
+              : (item.type == DownloadType.image ? 'jpg' : 'mp4'));
     final filename = item.title.toLowerCase().endsWith('.$ext')
         ? item.title
         : '${item.title}.$ext';
-    
+
     final destPath = await _files.moveFileFromVault(
       currentPath: path,
       filename: filename,
@@ -551,7 +688,10 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
-  Future<void> importLocalFileToVault(String localPath, DownloadType type) async {
+  Future<void> importLocalFileToVault(
+    String localPath,
+    DownloadType type,
+  ) async {
     final file = File(localPath);
     if (!await file.exists()) throw Exception('File does not exist');
     final filename = p.basename(localPath);
@@ -607,7 +747,11 @@ class DuckDownloadsController extends ChangeNotifier
     return path;
   }
 
-  Future<void> convertVideoToAudio(DownloadItem item, String format, int bitrate) async {
+  Future<void> convertVideoToAudio(
+    DownloadItem item,
+    String format,
+    int bitrate,
+  ) async {
     final originalPath = item.filePath;
     if (originalPath == null) throw Exception('Video file path is empty.');
 
@@ -658,12 +802,14 @@ class DuckDownloadsController extends ChangeNotifier
 
       flow = DuckFlow.success;
       status = 'Conversion complete!';
-      unawaited(_notifications.showDownloadComplete(
-        id: audioItem.id.hashCode,
-        title: audioItem.title,
-        type: 'Audio',
-        downloadId: audioItem.id,
-      ));
+      unawaited(
+        _notifications.showDownloadComplete(
+          id: audioItem.id.hashCode,
+          title: audioItem.title,
+          type: 'Audio',
+          downloadId: audioItem.id,
+        ),
+      );
     } catch (e) {
       flow = DuckFlow.error;
       status = e.toString().replaceAll('Exception: ', '');
@@ -678,7 +824,12 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  Future<void> createGifFromVideo(DownloadItem item, double startTime, double duration, int width) async {
+  Future<void> createGifFromVideo(
+    DownloadItem item,
+    double startTime,
+    double duration,
+    int width,
+  ) async {
     final originalPath = item.filePath;
     if (originalPath == null) throw Exception('Video file path is empty.');
 
@@ -730,12 +881,14 @@ class DuckDownloadsController extends ChangeNotifier
 
       flow = DuckFlow.success;
       status = 'GIF created successfully!';
-      unawaited(_notifications.showDownloadComplete(
-        id: gifItem.id.hashCode,
-        title: gifItem.title,
-        type: 'Image',
-        downloadId: gifItem.id,
-      ));
+      unawaited(
+        _notifications.showDownloadComplete(
+          id: gifItem.id.hashCode,
+          title: gifItem.title,
+          type: 'Image',
+          downloadId: gifItem.id,
+        ),
+      );
     } catch (e) {
       flow = DuckFlow.error;
       status = e.toString().replaceAll('Exception: ', '');
@@ -750,10 +903,15 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  void shareLastDownloadedItem() {
-    if (lastDownloadedItem != null && lastDownloadedItem!.filePath != null) {
-      _files.shareFile(lastDownloadedItem!.filePath);
+  Future<void> shareLastDownloadedItem() async {
+    final item = lastDownloadedItem;
+    if (item == null || item.filePath == null) return;
+    if (item.isPrivate) {
+      status = 'Private files cannot be shared directly.';
+      notifyListeners();
+      return;
     }
+    await _files.shareFile(item.filePath);
   }
 
   Future<void> createPlaylist(String name) async {
@@ -818,15 +976,48 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  void openPlayer(
+  Future<void> openPlayer(
     DownloadItem item, {
     List<DownloadItem>? galleryItems,
     List<DownloadItem>? queueItems,
-  }) {
-    playerItem = item;
+  }) async {
+    if (item.isPrivate && isVaultLocked) {
+      status = 'Unlock the Secure Vault first.';
+      notifyListeners();
+      return;
+    }
+
+    await _clearPlayerTemp();
+    var playableItem = item;
+    if (item.isPrivate && !item.isImage) {
+      try {
+        final info = await _getEffectivePathAndFileName(item);
+        _playerTempPath = info['path'];
+        playableItem = item.copyWith(
+          filePath: _playerTempPath,
+          isPrivate: false,
+        );
+      } catch (error) {
+        status = 'Could not open Vault media: ${_cleanError(error)}';
+        flow = DuckFlow.error;
+        notifyListeners();
+        return;
+      }
+    }
+
+    playerItem = playableItem;
     playerGalleryItems = galleryItems;
     _audioQueueSource = queueItems;
     notifyListeners();
+  }
+
+  Future<void> _clearPlayerTemp() async {
+    final path = _playerTempPath;
+    _playerTempPath = null;
+    if (path == null) return;
+    try {
+      await File(path).delete();
+    } catch (_) {}
   }
 
   void openPlayerById(String downloadId) {
@@ -839,13 +1030,14 @@ class DuckDownloadsController extends ChangeNotifier
         } else if (item.isAudio) {
           setTab(DuckTab.audios);
         }
-        openPlayer(item);
+        unawaited(openPlayer(item));
         return;
       }
     }
   }
 
   void closePlayer() {
+    unawaited(_clearPlayerTemp());
     playerItem = null;
     playerGalleryItems = null;
     _audioQueueSource = null;
@@ -863,7 +1055,6 @@ class DuckDownloadsController extends ChangeNotifier
 
     var cleanUrl = url.trim();
 
-
     final isAdult = await _isAdultUrl(cleanUrl);
     if (isAdult) {
       isAdultContentBlocked = true;
@@ -871,8 +1062,11 @@ class DuckDownloadsController extends ChangeNotifier
       throw Exception('BLOCKED_ADULT_CONTENT');
     }
 
-    final hasVideoAndList = cleanUrl.contains('v=') && (cleanUrl.contains('list=') || cleanUrl.contains('/playlist'));
-    var isPlaylist = cleanUrl.contains('list=') || cleanUrl.contains('/playlist');
+    final hasVideoAndList =
+        cleanUrl.contains('v=') &&
+        (cleanUrl.contains('list=') || cleanUrl.contains('/playlist'));
+    var isPlaylist =
+        cleanUrl.contains('list=') || cleanUrl.contains('/playlist');
 
     if (hasVideoAndList && YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
       final downloadPlaylist = await _promptPlaylistChoice(cleanUrl);
@@ -979,7 +1173,9 @@ class DuckDownloadsController extends ChangeNotifier
           selectedType = _selectDefaultDownloadType(media, cleanUrl);
           quality = _firstQuality(media, selectedType);
           flow = DuckFlow.ready;
-          status = selectedType == DownloadType.audio ? 'Choose audio format' : 'Choose video or audio';
+          status = selectedType == DownloadType.audio
+              ? 'Choose audio format'
+              : 'Choose video or audio';
         }
       } catch (error) {
         try {
@@ -1088,7 +1284,6 @@ class DuckDownloadsController extends ChangeNotifier
         debugPrint('Cobalt extraction failed: $e');
       }
 
-
       final id = await _api.startDownload(
         url: media.url,
         type: selectedType,
@@ -1116,7 +1311,8 @@ class DuckDownloadsController extends ChangeNotifier
     } catch (error) {
       flow = DuckFlow.error;
       status = _cleanError(error);
-      if (_isLoginRequiredError(error.toString()) && !_justReturnedFromLockedBrowser) {
+      if (_isLoginRequiredError(error.toString()) &&
+          !_justReturnedFromLockedBrowser) {
         _requestLockedBrowser(media.url, _browserPlatformFor(media.url));
         return;
       }
@@ -1127,7 +1323,10 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   /// Downloads media via Cobalt URL directly on-device.
-  Future<void> _startCobaltDownload(MediaMetadata media, String downloadUrl) async {
+  Future<void> _startCobaltDownload(
+    MediaMetadata media,
+    String downloadUrl,
+  ) async {
     final ext = selectedType == DownloadType.audio
         ? 'mp3'
         : (selectedType == DownloadType.image ? 'jpg' : 'mp4');
@@ -1185,25 +1384,36 @@ class DuckDownloadsController extends ChangeNotifier
           progress: 100,
           status: DownloadStatus.completed,
         );
+        if (item.isPrivate) {
+          final vaultPath = await _files.moveFileToVault(
+            currentPath: filePath,
+            filename: p.basename(filePath),
+          );
+          item = item.copyWith(filePath: vaultPath);
+        }
         await _saveItem(item);
 
-        if (autoSaveVideos) {
+        if (!item.isPrivate && autoSaveVideos) {
           item = await _trySaveMediaAfterDownload(item);
         }
       }
 
       lastDownloadedItem = item;
       flow = DuckFlow.success;
-      status = ((item.isVideo && item.savedToGallery) || (item.isAudio && item.savedToMusic))
+      status =
+          ((item.isVideo && item.savedToGallery) ||
+              (item.isAudio && item.savedToMusic))
           ? 'Download complete and saved externally'
           : 'Download complete';
 
-      unawaited(_notifications.showDownloadComplete(
-        id: item.id.hashCode,
-        title: item.title,
-        type: item.isVideo ? 'Video' : 'Audio',
-        downloadId: item.id,
-      ));
+      unawaited(
+        _notifications.showDownloadComplete(
+          id: item.id.hashCode,
+          title: item.title,
+          type: item.isVideo ? 'Video' : 'Audio',
+          downloadId: item.id,
+        ),
+      );
     } catch (error) {
       item = item.copyWith(status: DownloadStatus.failed);
       await _saveItem(item);
@@ -1275,7 +1485,8 @@ class DuckDownloadsController extends ChangeNotifier
 
     // For audio: default to webm (YouTube's native Opus container) so the
     // transcode step always fires and produces a playable .m4a
-    final ext = format.ext ?? (selectedType == DownloadType.audio ? 'webm' : 'mp4');
+    final ext =
+        format.ext ?? (selectedType == DownloadType.audio ? 'webm' : 'mp4');
     final itemId = DateTime.now().millisecondsSinceEpoch.toString();
 
     var item = DownloadItem(
@@ -1364,25 +1575,36 @@ class DuckDownloadsController extends ChangeNotifier
           progress: 100,
           status: DownloadStatus.completed,
         );
+        if (item.isPrivate) {
+          final vaultPath = await _files.moveFileToVault(
+            currentPath: filePath,
+            filename: p.basename(filePath),
+          );
+          item = item.copyWith(filePath: vaultPath);
+        }
         await _saveItem(item);
 
-        if (autoSaveVideos) {
+        if (!item.isPrivate && autoSaveVideos) {
           item = await _trySaveMediaAfterDownload(item);
         }
       }
 
       lastDownloadedItem = item;
       flow = DuckFlow.success;
-      status = ((item.isVideo && item.savedToGallery) || (item.isAudio && item.savedToMusic))
+      status =
+          ((item.isVideo && item.savedToGallery) ||
+              (item.isAudio && item.savedToMusic))
           ? 'Download complete and saved externally'
           : 'Download complete';
 
-      unawaited(_notifications.showDownloadComplete(
-        id: item.id.hashCode,
-        title: item.title,
-        type: item.isVideo ? 'Video' : 'Audio',
-        downloadId: item.id,
-      ));
+      unawaited(
+        _notifications.showDownloadComplete(
+          id: item.id.hashCode,
+          title: item.title,
+          type: item.isVideo ? 'Video' : 'Audio',
+          downloadId: item.id,
+        ),
+      );
     } catch (error) {
       item = item.copyWith(status: DownloadStatus.failed);
       await _saveItem(item);
@@ -1400,6 +1622,7 @@ class DuckDownloadsController extends ChangeNotifier
     required String title,
     required String? thumbnail,
     required DownloadType type,
+    FormatInfo? preferredFormat,
   }) async {
     // 1. Extract metadata on-device to get streams
     final ytMeta = await _ytExplode.extractMetadata(url);
@@ -1407,12 +1630,21 @@ class DuckDownloadsController extends ChangeNotifier
       throw Exception('Could not extract streams for YouTube video.');
     }
 
-    // 2. Select first quality format
-    final allFormats = type == DownloadType.video ? ytMeta.qualities : ytMeta.audioFormats;
+    // 2. Respect the quality selected by the user when it is still available.
+    final allFormats = type == DownloadType.video
+        ? ytMeta.qualities
+        : ytMeta.audioFormats;
     if (allFormats.isEmpty) {
       throw Exception('No compatible quality format found.');
     }
-    final format = allFormats.first;
+    final format = preferredFormat == null
+        ? allFormats.first
+        : allFormats.firstWhere(
+            (candidate) =>
+                candidate.id == preferredFormat.id ||
+                candidate.label == preferredFormat.label,
+            orElse: () => allFormats.first,
+          );
     final ext = format.ext ?? (type == DownloadType.audio ? 'webm' : 'mp4');
 
     // 3. Create download item
@@ -1429,6 +1661,7 @@ class DuckDownloadsController extends ChangeNotifier
       status: DownloadStatus.downloading,
       progress: 0,
       favorite: false,
+      isPrivate: downloadDirectToVault,
     );
     await _saveItem(item);
 
@@ -1483,18 +1716,27 @@ class DuckDownloadsController extends ChangeNotifier
           progress: 100,
           status: DownloadStatus.completed,
         );
+        if (item.isPrivate) {
+          final vaultPath = await _files.moveFileToVault(
+            currentPath: filePath,
+            filename: p.basename(filePath),
+          );
+          item = item.copyWith(filePath: vaultPath);
+        }
         await _saveItem(item);
 
-        if (autoSaveVideos) {
+        if (!item.isPrivate && autoSaveVideos) {
           item = await _trySaveMediaAfterDownload(item);
         }
 
-        unawaited(_notifications.showDownloadComplete(
-          id: item.id.hashCode,
-          title: item.title,
-          type: item.isVideo ? 'Video' : 'Audio',
-          downloadId: item.id,
-        ));
+        unawaited(
+          _notifications.showDownloadComplete(
+            id: item.id.hashCode,
+            title: item.title,
+            type: item.isVideo ? 'Video' : 'Audio',
+            downloadId: item.id,
+          ),
+        );
         notifyListeners();
       } catch (e) {
         final failedItem = item.copyWith(
@@ -1502,16 +1744,17 @@ class DuckDownloadsController extends ChangeNotifier
           progress: 0,
         );
         await _saveItem(failedItem);
-        unawaited(_notifications.showDownloadFailed(
-          id: item.id.hashCode,
-          title: item.title,
-          error: e.toString().replaceAll('Exception: ', ''),
-        ));
+        unawaited(
+          _notifications.showDownloadFailed(
+            id: item.id.hashCode,
+            title: item.title,
+            error: e.toString().replaceAll('Exception: ', ''),
+          ),
+        );
         notifyListeners();
       }
     }());
   }
-
 
   Future<void> pauseDownload(DownloadItem item) {
     return _controlDownload(item: item, action: 'pause');
@@ -1532,8 +1775,10 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> deleteDownload(DownloadItem item) async {
     _cancelDownloadSubscription(item.id);
     await _files.deleteFile(item.filePath);
+    _privateMetadata.remove(item.id);
     await _store.delete(item.id);
     _downloads = _store.readDownloads();
+    await _persistPrivateMetadata();
     if (playerItem?.id == item.id) playerItem = null;
     notifyListeners();
   }
@@ -1549,13 +1794,18 @@ class DuckDownloadsController extends ChangeNotifier
     if (busy) return;
 
     if (!Platform.isAndroid) {
-      throw Exception('Ringtones can only be set programmatically on Android devices.');
+      throw Exception(
+        'Ringtones can only be set programmatically on Android devices.',
+      );
     }
 
-    final bool canWrite = await _channel.invokeMethod<bool>('canWriteSettings') ?? false;
+    final bool canWrite =
+        await _channel.invokeMethod<bool>('canWriteSettings') ?? false;
     if (!canWrite) {
       await _channel.invokeMethod<void>('requestWriteSettingsPermission');
-      throw Exception('Permission required: Please enable "Allow modifying system settings" in Android Settings, then try again.');
+      throw Exception(
+        'Permission required: Please enable "Allow modifying system settings" in Android Settings, then try again.',
+      );
     }
 
     busy = true;
@@ -1568,7 +1818,9 @@ class DuckDownloadsController extends ChangeNotifier
       inputPath = info['path']!;
 
       final root = await getApplicationDocumentsDirectory();
-      final folder = Directory(p.join(root.path, 'Duck Downloader', 'Ringtones'));
+      final folder = Directory(
+        p.join(root.path, 'Duck Downloader', 'Ringtones'),
+      );
       await folder.create(recursive: true);
 
       final safeName = '${item.id}_ringtone.mp3';
@@ -1616,15 +1868,19 @@ class DuckDownloadsController extends ChangeNotifier
       status = 'Setting system ringtone...';
       notifyListeners();
 
-      final bool success = await _channel.invokeMethod<bool>('setRingtone', {
-        'path': finalPath,
-        'title': item.title,
-      }) ?? false;
+      final bool success =
+          await _channel.invokeMethod<bool>('setRingtone', {
+            'path': finalPath,
+            'title': item.title,
+          }) ??
+          false;
 
       if (success) {
         status = 'Ringtone set successfully!';
       } else {
-        throw Exception('Could not register ringtone in Android system database.');
+        throw Exception(
+          'Could not register ringtone in Android system database.',
+        );
       }
     } catch (e) {
       status = 'Error: ${e.toString()}';
@@ -1650,7 +1906,9 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> toggleBackgroundPlayback(bool enabled) async {
     backgroundPlaybackEnabled = enabled;
     await _store.writeBackgroundPlaybackEnabled(enabled);
-    status = enabled ? 'Background playback enabled' : 'Background playback disabled';
+    status = enabled
+        ? 'Background playback enabled'
+        : 'Background playback disabled';
     notifyListeners();
   }
 
@@ -1840,7 +2098,9 @@ class DuckDownloadsController extends ChangeNotifier
 
               await _saveItem(next.copyWith(status: DownloadStatus.failed));
               flow = DuckFlow.error;
-              status = _cleanError(errText.isNotEmpty ? errText : 'Download failed.');
+              status = _cleanError(
+                errText.isNotEmpty ? errText : 'Download failed.',
+              );
 
               if (isLoginRequired && !_justReturnedFromLockedBrowser) {
                 _requestLockedBrowser(
@@ -1888,8 +2148,21 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   Future<void> _saveItem(DownloadItem item) async {
+    if (item.isPrivate && !VaultEncryptionService.isUnlocked) {
+      throw StateError(
+        'Unlock the Secure Vault before saving private content.',
+      );
+    }
+    if (item.isPrivate) {
+      _privateMetadata[item.id] = item;
+      await _persistPrivateMetadata();
+    } else {
+      _privateMetadata.remove(item.id);
+      await _persistPrivateMetadata();
+    }
     await _store.upsert(item);
     _downloads = _store.readDownloads();
+    _mergePrivateMetadata();
     _syncActiveFlow();
     notifyListeners();
   }
@@ -1921,6 +2194,11 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<void> _saveExternally(DownloadItem item, DownloadType type) async {
     if (externalSaveBusy) return;
+    if (item.isPrivate && isVaultLocked) {
+      status = 'Unlock the Secure Vault first.';
+      notifyListeners();
+      return;
+    }
     externalSaveBusy = true;
     status = type == DownloadType.video
         ? 'Saving to gallery...'
@@ -1954,7 +2232,9 @@ class DuckDownloadsController extends ChangeNotifier
   Future<Map<String, String>> getEffectivePathAndFileName(DownloadItem item) =>
       _getEffectivePathAndFileName(item);
 
-  Future<Map<String, String>> _getEffectivePathAndFileName(DownloadItem item) async {
+  Future<Map<String, String>> _getEffectivePathAndFileName(
+    DownloadItem item,
+  ) async {
     final path = item.filePath;
     if (path == null) throw Exception('File is not available.');
 
@@ -1967,10 +2247,7 @@ class DuckDownloadsController extends ChangeNotifier
         originalFilename: fileName,
       );
     }
-    return {
-      'path': effectivePath,
-      'filename': fileName,
-    };
+    return {'path': effectivePath, 'filename': fileName};
   }
 
   Future<DownloadItem> _saveVideoItem(DownloadItem item) async {
@@ -2040,7 +2317,9 @@ class DuckDownloadsController extends ChangeNotifier
         if (!hasPerm) {
           final granted = await _permissions.requestMediaImagesPermission();
           if (!granted) {
-            throw Exception('Storage permission is required to save images: $e');
+            throw Exception(
+              'Storage permission is required to save images: $e',
+            );
           }
         }
         await _mediaSaver.saveImage(
@@ -2074,12 +2353,14 @@ class DuckDownloadsController extends ChangeNotifier
         final pathExt = item.filePath?.split('.').last ?? 'jpg';
         if (pathExt != 'enc') ext = pathExt;
       }
-      
-      final cleanTitle = item.title
-          .replaceAll(RegExp(r'\.(jpg|jpeg|png|webp|gif)$', caseSensitive: false), '');
+
+      final cleanTitle = item.title.replaceAll(
+        RegExp(r'\.(jpg|jpeg|png|webp|gif)$', caseSensitive: false),
+        '',
+      );
       return '$cleanTitle.$ext';
     }
-    
+
     if (item.isAudio) {
       String ext = 'mp3';
       if (item.title.toLowerCase().contains('.m4a')) {
@@ -2088,8 +2369,10 @@ class DuckDownloadsController extends ChangeNotifier
         final pathExt = item.filePath?.split('.').last ?? 'mp3';
         if (pathExt != 'enc') ext = pathExt;
       }
-      final cleanTitle = item.title
-          .replaceAll(RegExp(r'\.(mp3|m4a)$', caseSensitive: false), '');
+      final cleanTitle = item.title.replaceAll(
+        RegExp(r'\.(mp3|m4a)$', caseSensitive: false),
+        '',
+      );
       return '$cleanTitle.$ext';
     }
 
@@ -2098,15 +2381,18 @@ class DuckDownloadsController extends ChangeNotifier
       final pathExt = item.filePath?.split('.').last ?? 'mp4';
       if (pathExt != 'enc') ext = pathExt;
     }
-    final cleanTitle = item.title
-        .replaceAll(RegExp(r'\.mp4$', caseSensitive: false), '');
+    final cleanTitle = item.title.replaceAll(
+      RegExp(r'\.mp4$', caseSensitive: false),
+      '',
+    );
     return '$cleanTitle.$ext';
   }
 
   Future<void> markAudioBackgroundReady() async {
     if (audioBackgroundReady) return;
     audioBackgroundReady = true;
-    if (_audioBackgroundCompleter != null && !_audioBackgroundCompleter!.isCompleted) {
+    if (_audioBackgroundCompleter != null &&
+        !_audioBackgroundCompleter!.isCompleted) {
       _audioBackgroundCompleter!.complete();
     }
     notifyListeners();
@@ -2116,7 +2402,9 @@ class DuckDownloadsController extends ChangeNotifier
     if (audioBackgroundReady) return;
     _audioBackgroundCompleter ??= Completer<void>();
     try {
-      await _audioBackgroundCompleter!.future.timeout(const Duration(seconds: 5));
+      await _audioBackgroundCompleter!.future.timeout(
+        const Duration(seconds: 5),
+      );
     } catch (_) {}
   }
 
@@ -2143,10 +2431,11 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> playItem(DownloadItem item, {bool advanceQueue = false}) async {
     if (item.filePath == null) return;
     if (item.isAudio) {
-      if (!advanceQueue) {
-        _buildAudioQueue(item);
-      }
+      if (!advanceQueue) _buildAudioQueue(item);
       await audioPlayer.stop();
+      await _clearActiveDecryptedAudio();
+      final playablePath = await _getEffectiveInputPath(item);
+      if (item.isPrivate) _activeDecryptedAudioPath = playablePath;
       playingItem = item;
       playerItem = item;
       notifyListeners();
@@ -2155,7 +2444,7 @@ class DuckDownloadsController extends ChangeNotifier
         if (audioBackgroundReady) {
           await audioPlayer.setAudioSource(
             AudioSource.file(
-              item.filePath!,
+              playablePath,
               tag: MediaItem(
                 id: item.id,
                 title: item.title,
@@ -2166,25 +2455,31 @@ class DuckDownloadsController extends ChangeNotifier
             ),
           );
         } else {
-          await audioPlayer.setFilePath(item.filePath!);
+          await audioPlayer.setFilePath(playablePath);
         }
         await audioPlayer.setLoopMode(_loopMode);
         await audioPlayer.play();
-      } catch (e) {
-        try {
-          await audioPlayer.setFilePath(item.filePath!);
-          await audioPlayer.play();
-        } catch (fallbackError) {
-          playingItem = null;
-          status = 'Failed to play audio: $fallbackError';
-          notifyListeners();
-        }
+      } catch (error) {
+        playingItem = null;
+        status = 'Failed to play audio: $error';
+        await _clearActiveDecryptedAudio();
+        notifyListeners();
       }
     } else {
       await audioPlayer.stop();
+      await _clearActiveDecryptedAudio();
       playingItem = null;
-      openPlayer(item);
+      unawaited(openPlayer(item));
     }
+  }
+
+  Future<void> _clearActiveDecryptedAudio() async {
+    final path = _activeDecryptedAudioPath;
+    _activeDecryptedAudioPath = null;
+    if (path == null) return;
+    try {
+      await File(path).delete();
+    } catch (_) {}
   }
 
   void _buildAudioQueue(DownloadItem item, {bool forceReshuffle = false}) {
@@ -2193,8 +2488,9 @@ class DuckDownloadsController extends ChangeNotifier
     final sourceChanged = sourceKey != _lastQueueSourceKey;
     _lastQueueSourceKey = sourceKey;
 
-    _audioQueue =
-        source.where((entry) => entry.filePath != null && entry.isAudio).toList();
+    _audioQueue = source
+        .where((entry) => entry.filePath != null && entry.isAudio)
+        .toList();
     _audioQueueIndex = _audioQueue.indexWhere((entry) => entry.id == item.id);
     if (_audioQueueIndex < 0) {
       _audioQueue = [item];
@@ -2246,7 +2542,9 @@ class DuckDownloadsController extends ChangeNotifier
 
   void buildVideoQueue(DownloadItem item) {
     final source = playerGalleryItems ?? videos;
-    _videoQueue = source.where((entry) => entry.filePath != null && entry.isVideo).toList();
+    _videoQueue = source
+        .where((entry) => entry.filePath != null && entry.isVideo)
+        .toList();
     _videoQueueIndex = _videoQueue.indexWhere((entry) => entry.id == item.id);
     if (_videoQueueIndex < 0) {
       _videoQueue = [item];
@@ -2257,13 +2555,25 @@ class DuckDownloadsController extends ChangeNotifier
   void playNextVideo() {
     if (!hasNextVideo) return;
     _videoQueueIndex++;
-    openPlayer(_videoQueue[_videoQueueIndex], galleryItems: playerGalleryItems, queueItems: _audioQueueSource);
+    unawaited(
+      openPlayer(
+        _videoQueue[_videoQueueIndex],
+        galleryItems: playerGalleryItems,
+        queueItems: _audioQueueSource,
+      ),
+    );
   }
 
   void playPreviousVideo() {
     if (!hasPreviousVideo) return;
     _videoQueueIndex--;
-    openPlayer(_videoQueue[_videoQueueIndex], galleryItems: playerGalleryItems, queueItems: _audioQueueSource);
+    unawaited(
+      openPlayer(
+        _videoQueue[_videoQueueIndex],
+        galleryItems: playerGalleryItems,
+        queueItems: _audioQueueSource,
+      ),
+    );
   }
 
   Future<void> toggleShuffle() async {
@@ -2297,6 +2607,12 @@ class DuckDownloadsController extends ChangeNotifier
     if (previous != null && (ms - previous).abs() < 3000) return;
     _videoResumePositions[id] = ms;
     unawaited(_store.writeVideoResumePosition(id, ms));
+  }
+
+  Future<void> _initializePlatformServices() async {
+    await _requestPermissionsSafely();
+    await loadCookiesStatus();
+    await refreshDeviceFolders(requestPermission: false);
   }
 
   Future<void> _requestPermissionsSafely() async {
@@ -2369,7 +2685,8 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void stopAudio() {
-    audioPlayer.stop();
+    unawaited(audioPlayer.stop());
+    unawaited(_clearActiveDecryptedAudio());
     playingItem = null;
     notifyListeners();
   }
@@ -2459,7 +2776,7 @@ class DuckDownloadsController extends ChangeNotifier
     if (!_backgroundVideoActive) return;
     _backgroundVideoActive = false;
     await audioPlayer.setVolume(0.0); // mute — instant
-    await audioPlayer.pause();        // pause, don't stop (keeps source loaded)
+    await audioPlayer.pause(); // pause, don't stop (keeps source loaded)
     notifyListeners();
   }
 
@@ -2490,7 +2807,10 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  DownloadType _selectDefaultDownloadType(MediaMetadata media, String cleanUrl) {
+  DownloadType _selectDefaultDownloadType(
+    MediaMetadata media,
+    String cleanUrl,
+  ) {
     if (_isImageMetadata(media) || _looksLikeImageUrl(cleanUrl)) {
       return DownloadType.image;
     }
@@ -2518,7 +2838,9 @@ class DuckDownloadsController extends ChangeNotifier
       if (formats.isEmpty) return 'Original Image';
       if (savedPreference != null) {
         final match = formats.firstWhere(
-          (f) => f.label == savedPreference || f.label.toLowerCase() == savedPreference!.toLowerCase(),
+          (f) =>
+              f.label == savedPreference ||
+              f.label.toLowerCase() == savedPreference!.toLowerCase(),
           orElse: () => formats.first,
         );
         return match.label;
@@ -2535,15 +2857,18 @@ class DuckDownloadsController extends ChangeNotifier
 
     if (savedPreference != null) {
       final exactMatch = formats.firstWhere(
-        (f) => f.label == savedPreference || f.label.toLowerCase() == savedPreference!.toLowerCase(),
+        (f) =>
+            f.label == savedPreference ||
+            f.label.toLowerCase() == savedPreference!.toLowerCase(),
         orElse: () => const FormatInfo(id: '', label: ''),
       );
       if (exactMatch.label.isNotEmpty) {
         return exactMatch.label;
       }
       final partialMatch = formats.firstWhere(
-        (f) => f.label.toLowerCase().contains(savedPreference!.toLowerCase()) ||
-               savedPreference!.toLowerCase().contains(f.label.toLowerCase()),
+        (f) =>
+            f.label.toLowerCase().contains(savedPreference!.toLowerCase()) ||
+            savedPreference!.toLowerCase().contains(f.label.toLowerCase()),
         orElse: () => formats.first,
       );
       return partialMatch.label;
@@ -2607,18 +2932,20 @@ class DuckDownloadsController extends ChangeNotifier
     // Show an error instead so the user understands the server limitation.
     if (_justReturnedFromLockedBrowser) return false;
     final lowerUrl = url.toLowerCase();
-    
-    final isYouTube = lowerUrl.contains('youtube.com') || lowerUrl.contains('youtu.be');
+
+    final isYouTube =
+        lowerUrl.contains('youtube.com') || lowerUrl.contains('youtu.be');
     if (isYouTube) {
       final errStr = error.toString().toLowerCase();
-      return _isLoginRequiredError(errStr) || 
-             errStr.contains('unplayable') ||
-             errStr.contains('age-restricted') ||
-             errStr.contains('restricted') ||
-             errStr.contains('forbidden');
+      return _isLoginRequiredError(errStr) ||
+          errStr.contains('unplayable') ||
+          errStr.contains('age-restricted') ||
+          errStr.contains('restricted') ||
+          errStr.contains('forbidden');
     }
-    
-    final isBrowserPlatform = lowerUrl.contains('instagram.com') ||
+
+    final isBrowserPlatform =
+        lowerUrl.contains('instagram.com') ||
         lowerUrl.contains('threads.net') ||
         lowerUrl.contains('threads.com') ||
         lowerUrl.contains('x.com') ||
@@ -2635,10 +2962,13 @@ class DuckDownloadsController extends ChangeNotifier
   String _browserPlatformFor(String url) {
     final lower = url.toLowerCase();
     if (lower.contains('instagram.com')) return 'Instagram';
-    if (lower.contains('threads.net') || lower.contains('threads.com')) return 'Threads';
+    if (lower.contains('threads.net') || lower.contains('threads.com'))
+      return 'Threads';
     if (lower.contains('x.com') || lower.contains('twitter.com')) return 'X';
-    if (lower.contains('youtube.com') || lower.contains('youtu.be')) return 'YouTube';
-    if (lower.contains('facebook.com') || lower.contains('fb.watch')) return 'Facebook';
+    if (lower.contains('youtube.com') || lower.contains('youtu.be'))
+      return 'YouTube';
+    if (lower.contains('facebook.com') || lower.contains('fb.watch'))
+      return 'Facebook';
     return 'Social';
   }
 
@@ -2655,17 +2985,24 @@ class DuckDownloadsController extends ChangeNotifier
     }
 
     // 1. YouTube specific bot/sign-in errors
-    if (lower.contains('sign in') || lower.contains('bot') || lower.contains('captcha') || lower.contains('confirm you are not')) {
+    if (lower.contains('sign in') ||
+        lower.contains('bot') ||
+        lower.contains('captcha') ||
+        lower.contains('confirm you are not')) {
       return 'YouTube is blocking this download. Please try again later or try another video.';
     }
 
     // 2. Facebook/Instagram/TikTok parse/extraction errors
-    if (lower.contains('cannot parse data') || lower.contains('extractor') || lower.contains('unable to extract')) {
+    if (lower.contains('cannot parse data') ||
+        lower.contains('extractor') ||
+        lower.contains('unable to extract')) {
       return 'Failed to extract media. The post might be private, restricted, or requires browser login.';
     }
 
     // 3. Private/Login gated content
-    if (lower.contains('login') || lower.contains('private') || lower.contains('cookies')) {
+    if (lower.contains('login') ||
+        lower.contains('private') ||
+        lower.contains('cookies')) {
       return 'This post requires authentication. Please log in first using the in-app browser.';
     }
 
@@ -2675,7 +3012,10 @@ class DuckDownloadsController extends ChangeNotifier
     }
 
     // 5. Network/Timeout errors
-    if (lower.contains('timeout') || lower.contains('connection') || lower.contains('http') || lower.contains('socket')) {
+    if (lower.contains('timeout') ||
+        lower.contains('connection') ||
+        lower.contains('http') ||
+        lower.contains('socket')) {
       return 'Connection error. Please check your internet connection and try again.';
     }
 
@@ -2694,16 +3034,57 @@ class DuckDownloadsController extends ChangeNotifier
       // 1. Quick local keyword check for instant block (covering porn, hentai, and AI content)
       final lowerHost = host.toLowerCase();
       final localKeywords = [
-        'porn', 'xxx', 'sex', 'nude', 'adult', 'camgirl', 'livecam', 
-        'hentai', 'xvideo', 'pornhub', 'xnxx', 'xhamster', 'redtube',
-        'youporn', 'chaturbate', 'rule34', 'onlyfans', 'stripchat',
-        'bongacams', 'camsoda', 'adultfriendfinder', 'cam4', 'imlive',
-        'livejasmin', 'doujin', 'nhentai', 'gelbooru', 'danbooru',
-        'e621', 'sankakucomplex', 'yande.re', 'rule34.xxx', 'e-hentai',
-        'luscious', 'spankbang', 'eporner', 'hqporn', 'motherless',
-        'heavyr', 'tube8', 'pornai', 'aiporn', 'nudify', 'undressai',
-        'pornpen', 'soulgen', 'candyai', 'dreamgf', 'nsfwai', 'spicychat',
-        'janitorai'
+        'porn',
+        'xxx',
+        'sex',
+        'nude',
+        'adult',
+        'camgirl',
+        'livecam',
+        'hentai',
+        'xvideo',
+        'pornhub',
+        'xnxx',
+        'xhamster',
+        'redtube',
+        'youporn',
+        'chaturbate',
+        'rule34',
+        'onlyfans',
+        'stripchat',
+        'bongacams',
+        'camsoda',
+        'adultfriendfinder',
+        'cam4',
+        'imlive',
+        'livejasmin',
+        'doujin',
+        'nhentai',
+        'gelbooru',
+        'danbooru',
+        'e621',
+        'sankakucomplex',
+        'yande.re',
+        'rule34.xxx',
+        'e-hentai',
+        'luscious',
+        'spankbang',
+        'eporner',
+        'hqporn',
+        'motherless',
+        'heavyr',
+        'tube8',
+        'pornai',
+        'aiporn',
+        'nudify',
+        'undressai',
+        'pornpen',
+        'soulgen',
+        'candyai',
+        'dreamgf',
+        'nsfwai',
+        'spicychat',
+        'janitorai',
       ];
       for (final kw in localKeywords) {
         if (lowerHost.contains(kw)) return true;
@@ -2726,9 +3107,11 @@ class DuckDownloadsController extends ChangeNotifier
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 3);
-      final request = await client.getUrl(Uri.parse(
-        'https://family.cloudflare-dns.com/dns-query?name=${Uri.encodeComponent(host)}&type=A'
-      ));
+      final request = await client.getUrl(
+        Uri.parse(
+          'https://family.cloudflare-dns.com/dns-query?name=${Uri.encodeComponent(host)}&type=A',
+        ),
+      );
       request.headers.set('Accept', 'application/dns-json');
       final response = await request.close();
       if (response.statusCode == 200) {
@@ -2738,7 +3121,8 @@ class DuckDownloadsController extends ChangeNotifier
           final answers = data['Answer'];
           if (answers is List) {
             for (final answer in answers) {
-              if (answer is Map && (answer['data'] == '0.0.0.0' || answer['data'] == '::')) {
+              if (answer is Map &&
+                  (answer['data'] == '0.0.0.0' || answer['data'] == '::')) {
                 return true; // Blocked by Cloudflare Families filter
               }
             }
@@ -2761,9 +3145,11 @@ class DuckDownloadsController extends ChangeNotifier
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 3);
-      final request = await client.getUrl(Uri.parse(
-        'https://dns-family.adguard.com/dns-query?name=${Uri.encodeComponent(host)}&type=A'
-      ));
+      final request = await client.getUrl(
+        Uri.parse(
+          'https://dns-family.adguard.com/dns-query?name=${Uri.encodeComponent(host)}&type=A',
+        ),
+      );
       request.headers.set('Accept', 'application/dns-json');
       final response = await request.close();
       if (response.statusCode == 200) {
@@ -2776,7 +3162,9 @@ class DuckDownloadsController extends ChangeNotifier
               if (answer is Map) {
                 final ip = answer['data'].toString();
                 // AdGuard Family DNS blocks adult sites by returning 0.0.0.0, 127.0.0.1, or a block page IP (starts with 94.140)
-                if (ip == '0.0.0.0' || ip == '127.0.0.1' || ip.startsWith('94.140.')) {
+                if (ip == '0.0.0.0' ||
+                    ip == '127.0.0.1' ||
+                    ip.startsWith('94.140.')) {
                   return true;
                 }
               }
@@ -2790,6 +3178,12 @@ class DuckDownloadsController extends ChangeNotifier
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      lockVault();
+      closePlayer();
+    }
     if (state == AppLifecycleState.resumed) {
       _checkClipboardOnResume();
     }
@@ -2819,10 +3213,7 @@ class DuckDownloadsController extends ChangeNotifier
         if (url != _lastDetectedUrl) {
           detectedClipboardUrl = url;
           unawaited(
-            _notifications.showClipboardDetected(
-              id: url.hashCode,
-              url: url,
-            ),
+            _notifications.showClipboardDetected(id: url.hashCode, url: url),
           );
           notifyListeners();
         }
@@ -2895,7 +3286,9 @@ class DuckDownloadsController extends ChangeNotifier
         selectedType = _selectDefaultDownloadType(media, url);
         quality = _firstQuality(media, selectedType);
         flow = DuckFlow.ready;
-        status = selectedType == DownloadType.audio ? 'Choose audio format' : 'Choose video or audio';
+        status = selectedType == DownloadType.audio
+            ? 'Choose audio format'
+            : 'Choose video or audio';
       }
     } catch (error) {
       flow = DuckFlow.error;
@@ -3015,7 +3408,9 @@ class DuckDownloadsController extends ChangeNotifier
         final itemType = forceHybrid
             ? (isVideo ? DownloadType.video : DownloadType.image)
             : type;
-        debugPrint('DEBUG BATCH: url=$url title=${batchItem?.title} isVideo=$isVideo forceHybrid=$forceHybrid itemType=$itemType');
+        debugPrint(
+          'DEBUG BATCH: url=$url title=${batchItem?.title} isVideo=$isVideo forceHybrid=$forceHybrid itemType=$itemType',
+        );
         if (itemType == DownloadType.image && batchItem?.isPreview == true) {
           throw Exception('Could not access the full-size Instagram image.');
         }
@@ -3047,7 +3442,9 @@ class DuckDownloadsController extends ChangeNotifier
         String? thumbnail;
         String platform;
 
-        if (_looksLikeImageUrl(url) || itemType == DownloadType.image || (itemType == DownloadType.video && isVideo)) {
+        if (_looksLikeImageUrl(url) ||
+            itemType == DownloadType.image ||
+            (itemType == DownloadType.video && isVideo)) {
           mediaUrl = url;
           thumbnail = batchItem?.thumbnail ?? url;
           platform = batchPlatform ?? 'Public source';
@@ -3218,7 +3615,8 @@ class DuckDownloadsController extends ChangeNotifier
 
   bool handleDoubleBackToExit() {
     final now = DateTime.now();
-    if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+    if (_lastBackPressTime == null ||
+        now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
       _lastBackPressTime = now;
       return false;
     }
@@ -3232,14 +3630,17 @@ class DuckDownloadsController extends ChangeNotifier
     }
 
     // For sharing while app is running/backgrounded
-    _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen((value) {
-      if (value.isNotEmpty) {
-        final path = value.first.path;
-        _handleSharedText(path);
-      }
-    }, onError: (err) {
-      debugPrint("Sharing intent stream error: $err");
-    });
+    _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen(
+      (value) {
+        if (value.isNotEmpty) {
+          final path = value.first.path;
+          _handleSharedText(path);
+        }
+      },
+      onError: (err) {
+        debugPrint("Sharing intent stream error: $err");
+      },
+    );
 
     // For sharing that triggers a cold start
     ReceiveSharingIntent.instance.getInitialMedia().then((value) {
@@ -3248,22 +3649,83 @@ class DuckDownloadsController extends ChangeNotifier
         _handleSharedText(path);
       }
     });
+
+    const MethodChannel('duck_downloader/media').setMethodCallHandler((
+      call,
+    ) async {
+      if (call.method == 'startDirectQuickDownload') {
+        final String? url = call.arguments['url'];
+        final String? typeStr = call.arguments['type'];
+        if (url != null) {
+          showAdOnOpen = true; // Trigger ad on next app open
+          DownloadType type = DownloadType.video;
+          if (typeStr == 'audio') type = DownloadType.audio;
+          if (typeStr == 'image') type = DownloadType.image;
+          selectedType = type;
+          unawaited(autoExtractAndDownload(url));
+        }
+      }
+    });
   }
 
   String? sharedQuickDownloadUrl;
+  MediaMetadata? _quickShareMetadata;
+  bool isQuickShareMode = false;
+  bool isQuickShareExtracting = false;
+  List<FormatInfo> quickShareVideoQualities = [];
+  List<FormatInfo> quickShareAudioQualities = [];
 
   void dismissQuickShare() {
     sharedQuickDownloadUrl = null;
+    isQuickShareMode = false;
+    isQuickShareExtracting = false;
+    quickShareVideoQualities.clear();
+    quickShareAudioQualities.clear();
+    _quickShareMetadata = null;
     notifyListeners();
   }
 
   Future<void> acceptQuickShareDownload(DownloadType type) async {
     final url = sharedQuickDownloadUrl;
     sharedQuickDownloadUrl = null;
+    isQuickShareMode = false;
+    showAdOnOpen = true; // Trigger ad on next app open
     selectedType = type;
     notifyListeners();
     if (url != null) {
       unawaited(autoExtractAndDownload(url));
+    }
+  }
+
+  Future<void> acceptQuickShareDownloadWithFormat(
+    FormatInfo format,
+    DownloadType type,
+  ) async {
+    final url = sharedQuickDownloadUrl;
+    sharedQuickDownloadUrl = null;
+    isQuickShareMode = false;
+    showAdOnOpen = true; // Trigger ad on next app open
+    selectedType = type;
+    quality = format.label;
+    notifyListeners();
+    if (url != null) {
+      if (YouTubeExplodeService.isYouTubeUrl(url)) {
+        unawaited(
+          _startYouTubeExplodeBatchDownload(
+            url: url,
+            title: '',
+            thumbnail: null,
+            type: type,
+            preferredFormat: format,
+          ),
+        );
+      } else {
+        metadata = _quickShareMetadata;
+        if (metadata == null) {
+          metadata = await _api.extract(url);
+        }
+        unawaited(startDownload());
+      }
     }
   }
 
@@ -3273,7 +3735,32 @@ class DuckDownloadsController extends ChangeNotifier
     final url = match?.group(0);
     if (url != null) {
       sharedQuickDownloadUrl = url;
+      isQuickShareMode = true;
+      isQuickShareExtracting = true;
+      quickShareVideoQualities.clear();
+      quickShareAudioQualities.clear();
       notifyListeners();
+
+      try {
+        if (YouTubeExplodeService.isYouTubeUrl(url)) {
+          final meta = await _ytExplode.extractMetadata(url);
+          if (meta != null) {
+            _quickShareMetadata = meta;
+            quickShareVideoQualities = meta.qualities;
+            quickShareAudioQualities = meta.audioFormats;
+          }
+        } else {
+          final meta = await _api.extract(url);
+          _quickShareMetadata = meta;
+          quickShareVideoQualities = meta.qualities;
+          quickShareAudioQualities = meta.audioFormats;
+        }
+      } catch (e) {
+        debugPrint('Quick share metadata extraction error: $e');
+      } finally {
+        isQuickShareExtracting = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -3294,6 +3781,19 @@ class DuckDownloadsController extends ChangeNotifier
         throw Exception('BLOCKED_ADULT_CONTENT');
       }
 
+      // 1. YouTube links
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        busy = false;
+        await _startYouTubeExplodeBatchDownload(
+          url: cleanUrl,
+          title: '',
+          thumbnail: null,
+          type: selectedType,
+        );
+        showAdOnOpen = true;
+        notifyListeners();
+        return;
+      }
 
       // 2. Instagram
       if (cleanUrl.contains('instagram.com')) {
@@ -3303,7 +3803,9 @@ class DuckDownloadsController extends ChangeNotifier
           for (final item in playlist.items) {
             final itemMeta = await _api.extract(item.url);
             metadata = itemMeta;
-            selectedType = _isImageMetadata(itemMeta) ? DownloadType.image : DownloadType.video;
+            selectedType = _isImageMetadata(itemMeta)
+                ? DownloadType.image
+                : DownloadType.video;
             quality = _firstQuality(itemMeta, selectedType);
             await startDownload();
             busy = false;
@@ -3346,7 +3848,8 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void resolvePlaylistChoice(bool downloadPlaylist) {
-    if (_playlistChoiceCompleter != null && !_playlistChoiceCompleter!.isCompleted) {
+    if (_playlistChoiceCompleter != null &&
+        !_playlistChoiceCompleter!.isCompleted) {
       _playlistChoiceCompleter!.complete(downloadPlaylist);
     }
   }

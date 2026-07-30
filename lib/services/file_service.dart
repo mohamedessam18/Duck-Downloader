@@ -33,7 +33,7 @@ class DuckFileService {
     );
     await folder.create(recursive: true);
     final safeName = _sanitizeFilename(filename);
-    
+
     var filePath = p.join(folder.path, safeName);
     if (await File(filePath).exists()) {
       final ext = p.extension(safeName);
@@ -44,7 +44,7 @@ class DuckFileService {
         counter++;
       }
     }
-    
+
     await _dio.download(url, filePath);
     return filePath;
   }
@@ -72,6 +72,16 @@ class DuckFileService {
     required String filename,
   }) async {
     return VaultEncryptionService.encryptAndMoveToVault(
+      currentPath: currentPath,
+      originalFilename: filename,
+    );
+  }
+
+  Future<String> copyFileToVault({
+    required String currentPath,
+    required String filename,
+  }) {
+    return VaultEncryptionService.encryptToVault(
       currentPath: currentPath,
       originalFilename: filename,
     );

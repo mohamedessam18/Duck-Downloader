@@ -51,12 +51,20 @@ class MainActivity : AudioServiceFragmentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleIntent(intent)
+        setIntent(intent)
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            moveTaskToBack(true)
+        val isQuickShare = intent?.getBooleanExtra("quickShare", false) ?: false
+        val startDownload = intent?.getBooleanExtra("startDownloadDirectly", false) ?: false
+        val url = intent?.getStringExtra("quickShareUrl") ?: intent?.getStringExtra(Intent.EXTRA_TEXT)
+        val downloadType = intent?.getStringExtra("downloadType") ?: "video"
+
+        if (startDownload && !url.isNullOrEmpty()) {
+            methodChannel?.invokeMethod("startDirectQuickDownload", mapOf(
+                "url" to url,
+                "type" to downloadType
+            ))
         }
     }
 
@@ -68,6 +76,7 @@ class MainActivity : AudioServiceFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         methodChannel = channel
+        handleIntent(intent)
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {

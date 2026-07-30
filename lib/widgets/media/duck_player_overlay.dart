@@ -1859,151 +1859,170 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   if (!_isTrimmingMode)
                     _buildCapsuleGlassContainer(
                       height: 52,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: EdgeInsets.zero,
                       useOwnLayer: false,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            icon: Icon(
-                              widget.controller.shuffleEnabled
-                                  ? Icons.shuffle
-                                  : Icons.shuffle_outlined,
-                              size: 20,
-                              color: widget.controller.shuffleEnabled
-                                  ? mediaGold
-                                  : Colors.white60,
-                            ),
-                            onPressed: widget.controller.toggleShuffle,
-                          ),
-                          GestureDetector(
-                            onTap: () {
-                              _resetHideTimer();
-                              _showSpeedSheet(context);
-                            },
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: mediaGold.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: mediaGold.withValues(alpha: 0.45),
-                                  width: 1,
-                                ),
-                              ),
+                              constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
                               child: Row(
-                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Icon(Icons.speed_rounded, size: 15, color: mediaGold),
-                                  const SizedBox(width: 5),
-                                  Text(
-                                    '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
-                                    style: TextStyle(
-                                      color: mediaGold,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.3,
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: Icon(
+                                      widget.controller.shuffleEnabled
+                                          ? Icons.shuffle
+                                          : Icons.shuffle_outlined,
+                                      size: 20,
+                                      color: widget.controller.shuffleEnabled
+                                          ? mediaGold
+                                          : Colors.white60,
                                     ),
+                                    onPressed: widget.controller.toggleShuffle,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: () {
+                                      _resetHideTimer();
+                                      _showSpeedSheet(context);
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: mediaGold.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                          color: mediaGold.withValues(alpha: 0.45),
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.speed_rounded, size: 15, color: mediaGold),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 0 : 2)}x',
+                                            style: TextStyle(
+                                              color: mediaGold,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.3,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  if (!kIsWeb) ...[
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      icon: const Icon(Icons.content_cut, color: Colors.white70, size: 18),
+                                      onPressed: duration <= Duration.zero
+                                          ? null
+                                          : () {
+                                              setState(() {
+                                                _isTrimmingMode = true;
+                                                _trimStart = 0.0;
+                                                _trimEnd = duration.inSeconds.toDouble();
+                                              });
+                                            },
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 18),
+                                    onPressed: () {
+                                      widget.controller.closePlayer();
+                                      widget.controller.deleteDownload(widget.item);
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      _resetHideTimer();
+                                      setState(() => _showSleepTimerPanel = true);
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(4.0),
+                                      child: ListenableBuilder(
+                                        listenable: widget.controller,
+                                        builder: (context, _) {
+                                          final active = widget.controller.isSleepTimerActive;
+                                          return Stack(
+                                            clipBehavior: Clip.none,
+                                            children: [
+                                              Icon(
+                                                active ? Icons.mode_night : Icons.mode_night_outlined,
+                                                color: active ? mediaGold : Colors.white60,
+                                                size: 20,
+                                              ),
+                                              if (active)
+                                                Positioned(
+                                                  right: -2,
+                                                  top: -2,
+                                                  child: Container(
+                                                    width: 6,
+                                                    height: 6,
+                                                    decoration: const BoxDecoration(
+                                                      color: mediaDanger,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: Icon(
+                                      switch (widget.controller.loopMode) {
+                                        LoopMode.one => Icons.repeat_one,
+                                        LoopMode.all => Icons.repeat,
+                                        LoopMode.off => Icons.repeat_outlined,
+                                      },
+                                      size: 20,
+                                      color: widget.controller.loopMode == LoopMode.off
+                                          ? Colors.white60
+                                          : mediaGold,
+                                    ),
+                                    onPressed: widget.controller.toggleLoopMode,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: const Icon(
+                                      Icons.queue_music,
+                                      size: 20,
+                                      color: Colors.white60,
+                                    ),
+                                    onPressed: () {
+                                      _resetHideTimer();
+                                      setState(() => _showQueuePanel = true);
+                                    },
                                   ),
                                 ],
                               ),
                             ),
-                          ),
-                          if (!kIsWeb)
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              icon: const Icon(Icons.content_cut, color: Colors.white70, size: 18),
-                              onPressed: duration <= Duration.zero
-                                  ? null
-                                  : () {
-                                      setState(() {
-                                        _isTrimmingMode = true;
-                                        _trimStart = 0.0;
-                                        _trimEnd = duration.inSeconds.toDouble();
-                                      });
-                                    },
-                            ),
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            icon: const Icon(Icons.delete_outline, color: mediaDanger, size: 18),
-                            onPressed: () {
-                              widget.controller.closePlayer();
-                              widget.controller.deleteDownload(widget.item);
-                            },
-                          ),
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {
-                              _resetHideTimer();
-                              setState(() => _showSleepTimerPanel = true);
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: ListenableBuilder(
-                                listenable: widget.controller,
-                                builder: (context, _) {
-                                  final active = widget.controller.isSleepTimerActive;
-                                  return Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      Icon(
-                                        active ? Icons.mode_night : Icons.mode_night_outlined,
-                                        color: active ? mediaGold : Colors.white60,
-                                        size: 20,
-                                      ),
-                                      if (active)
-                                        Positioned(
-                                          right: -2,
-                                          top: -2,
-                                          child: Container(
-                                            width: 6,
-                                            height: 6,
-                                            decoration: const BoxDecoration(
-                                              color: mediaDanger,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            icon: Icon(
-                              switch (widget.controller.loopMode) {
-                                LoopMode.one => Icons.repeat_one,
-                                LoopMode.all => Icons.repeat,
-                                LoopMode.off => Icons.repeat_outlined,
-                              },
-                              size: 20,
-                              color: widget.controller.loopMode == LoopMode.off
-                                  ? Colors.white60
-                                  : mediaGold,
-                            ),
-                            onPressed: widget.controller.toggleLoopMode,
-                          ),
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            icon: const Icon(
-                              Icons.queue_music,
-                              size: 20,
-                              color: Colors.white60,
-                            ),
-                            onPressed: () {
-                              _resetHideTimer();
-                              setState(() => _showQueuePanel = true);
-                            },
-                          ),
-                        ],
+                          );
+                        },
                       ),
                     ),
                 ],

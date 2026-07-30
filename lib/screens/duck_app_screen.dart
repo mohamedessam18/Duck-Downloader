@@ -7,7 +7,6 @@ import 'package:file_picker/file_picker.dart';
 import '../services/camera_service.dart';
 import 'package:path/path.dart' as p;
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -38,15 +37,23 @@ bool get _isLight {
 }
 
 Color get _gold => _isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
-Color get _warmGold => _isLight ? const Color(0xFFB58032) : const Color(0xFFF6BD6A);
+Color get _warmGold =>
+    _isLight ? const Color(0xFFB58032) : const Color(0xFFF6BD6A);
 Color get _dark => _isLight ? const Color(0xFFF5F6F8) : const Color(0xFF101112);
 Color get _nav => _isLight ? const Color(0xFFFFFFFF) : const Color(0xFF171819);
-Color get _panel => _isLight ? const Color(0xFFFFFFFF) : const Color(0xFF1D1D1F);
-Color get _muted => _isLight ? const Color(0xFF6F707A) : const Color(0xFFB8B8B8);
+Color get _panel =>
+    _isLight ? const Color(0xFFFFFFFF) : const Color(0xFF1D1D1F);
+Color get _muted =>
+    _isLight ? const Color(0xFF6F707A) : const Color(0xFFB8B8B8);
 Color get _text => _isLight ? const Color(0xFF151517) : const Color(0xFFFFFFFF);
-Color get _textMuted => _isLight ? const Color(0xFF5A5A62) : const Color(0xFFB8B8B8);
-Color get _border => _isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08);
-Color get _divider => _isLight ? Colors.black.withValues(alpha: 0.06) : Colors.white.withValues(alpha: 0.08);
+Color get _textMuted =>
+    _isLight ? const Color(0xFF5A5A62) : const Color(0xFFB8B8B8);
+Color get _border => _isLight
+    ? Colors.black.withValues(alpha: 0.08)
+    : Colors.white.withValues(alpha: 0.08);
+Color get _divider => _isLight
+    ? Colors.black.withValues(alpha: 0.06)
+    : Colors.white.withValues(alpha: 0.08);
 const _danger = Color(0xFFFF7A65);
 const _green = Color(0xFF41D27D);
 
@@ -97,7 +104,9 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
         _showSettingToast(context, 'Download Completed!', true);
       } else if (currentFlow == DuckFlow.error) {
         final err = widget.controller.status;
-        if (err.isNotEmpty && err != 'null' && !err.contains('BLOCKED_ADULT_CONTENT')) {
+        if (err.isNotEmpty &&
+            err != 'null' &&
+            !err.contains('BLOCKED_ADULT_CONTENT')) {
           _showSettingToast(context, err, false);
         }
       }
@@ -155,11 +164,7 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
               Text(
                 'الإباحية سجن نفسي وعقلي يستنزف طاقتك وشبابك. الإقلاع عنها هو خطوتك الأولى لاستعادة توازنك النفسي وحريتك الشخصية والاستمتاع بحياتك الحقيقية. لحمايتك وحماية خصوصيتك، تم حظر هذا المحتوى بالكامل.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _text,
-                  fontSize: 14,
-                  height: 1.6,
-                ),
+                style: TextStyle(color: _text, fontSize: 14, height: 1.6),
               ),
             ],
           ),
@@ -179,10 +184,7 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
                   onPressed: () => Navigator.pop(context),
                   child: const Text(
                     'موافق',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -199,16 +201,15 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
   ) async {
     if (widget.controller.lockedBrowserRequest != request) return;
     widget.controller.clearLockedBrowserRequest();
-    final result = await Navigator.of(context)
-        .push<dynamic>(
-          CupertinoPageRoute(
-            builder: (_) => LockedSocialBrowserScreen(
-              initialUrl: request.url,
-              platform: request.platform,
-              controller: widget.controller,
-            ),
-          ),
-        );
+    final result = await Navigator.of(context).push<dynamic>(
+      CupertinoPageRoute(
+        builder: (_) => LockedSocialBrowserScreen(
+          initialUrl: request.url,
+          platform: request.platform,
+          controller: widget.controller,
+        ),
+      ),
+    );
     if (!context.mounted || result == null) return;
     if (result is String) {
       // fromLockedBrowser: true prevents re-opening the browser on failure
@@ -237,7 +238,8 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
         }
 
         final isAndroid = Theme.of(context).platform == TargetPlatform.android;
-        final canPop = !isAndroid &&
+        final canPop =
+            !isAndroid &&
             widget.controller.playerItem == null &&
             widget.controller.detectedClipboardUrl == null &&
             widget.controller.tab == DuckTab.home &&
@@ -268,7 +270,9 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
             }
 
             // 4. Double-back to exit on Android when on Home tab with empty history
-            if (isAndroid && widget.controller.tab == DuckTab.home && widget.controller.tabHistory.isEmpty) {
+            if (isAndroid &&
+                widget.controller.tab == DuckTab.home &&
+                widget.controller.tabHistory.isEmpty) {
               final shouldExit = widget.controller.handleDoubleBackToExit();
               if (shouldExit) {
                 SystemNavigator.pop();
@@ -286,28 +290,34 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
             widget.controller.popTabHistory();
           },
           child: Scaffold(
-            backgroundColor: _dark,
+            backgroundColor: widget.controller.isQuickShareMode
+                ? Colors.transparent
+                : _dark,
             body: Stack(
               children: [
-                Positioned.fill(
-                  child: AmbientBackground(
-                    padding: EdgeInsets.only(
-                      top: MediaQuery.paddingOf(context).top,
-                      bottom: widget.controller.playingItem != null &&
-                              widget.controller.playerItem == null
-                          ? 80
-                          : 0,
+                if (!widget.controller.isQuickShareMode)
+                  Positioned.fill(
+                    child: AmbientBackground(
+                      padding: EdgeInsets.only(
+                        top: MediaQuery.paddingOf(context).top,
+                        bottom:
+                            widget.controller.playingItem != null &&
+                                widget.controller.playerItem == null
+                            ? 80
+                            : 0,
+                      ),
+                      child: _bodyForTab(context),
                     ),
-                    child: _bodyForTab(context),
                   ),
-                ),
-                if (widget.controller.playingItem != null &&
+                if (!widget.controller.isQuickShareMode &&
+                    widget.controller.playingItem != null &&
                     widget.controller.playerItem == null)
                   Builder(
                     builder: (context) {
                       final bottomShift = 68.0;
                       return Positioned(
-                        bottom: bottomShift + MediaQuery.paddingOf(context).bottom,
+                        bottom:
+                            bottomShift + MediaQuery.paddingOf(context).bottom,
                         left: 16,
                         right: 16,
                         child: MiniPlayer(controller: widget.controller),
@@ -323,14 +333,39 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
                 if (widget.controller.sharedQuickDownloadUrl != null)
                   _QuickShareOverlay(
                     url: widget.controller.sharedQuickDownloadUrl!,
-                    onDismiss: widget.controller.dismissQuickShare,
-                    onAccept: widget.controller.acceptQuickShareDownload,
+                    controller: widget.controller,
+                    onDismiss: () {
+                      widget.controller.dismissQuickShare();
+                    },
+                    onAcceptFormat: (format, type) {
+                      widget.controller.acceptQuickShareDownloadWithFormat(
+                        format,
+                        type,
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Downloading in ${format.label}...'),
+                          backgroundColor: const Color(0xFF101112),
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    },
+                    onAcceptDefault: (type) {
+                      widget.controller.acceptQuickShareDownload(type);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Downloading...'),
+                          backgroundColor: Color(0xFF101112),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    },
                   ),
                 if (widget.controller.showPlaylistChoiceDialog)
-                  _PlaylistChoiceOverlay(
-                    controller: widget.controller,
-                  ),
-                if (widget.controller.playerItem == null && MediaQuery.viewInsetsOf(context).bottom == 0)
+                  _PlaylistChoiceOverlay(controller: widget.controller),
+                if (!widget.controller.isQuickShareMode &&
+                    widget.controller.playerItem == null &&
+                    MediaQuery.viewInsetsOf(context).bottom == 0)
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -385,7 +420,12 @@ class _HomeView extends StatelessWidget {
       children: [
         Positioned.fill(
           child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(28, showQueue ? 14 : 22, 28, 130 * scale),
+            padding: EdgeInsets.fromLTRB(
+              28,
+              showQueue ? 14 : 22,
+              28,
+              130 * scale,
+            ),
             child: Column(
               children: [
                 Align(
@@ -417,11 +457,7 @@ class _HomeView extends StatelessWidget {
                   const SizedBox(height: 12),
                   IconButton(
                     onPressed: controller.shareLastDownloadedItem,
-                    icon: Icon(
-                      Icons.ios_share,
-                      color: _gold,
-                      size: 28,
-                    ),
+                    icon: Icon(Icons.ios_share, color: _gold, size: 28),
                   ),
                 ],
                 _StatusBar(
@@ -429,7 +465,9 @@ class _HomeView extends StatelessWidget {
                   status: controller.status,
                   progress: active?.progress ?? 0,
                 ),
-                if (controller.status.toLowerCase().contains('in-app browser')) ...[
+                if (controller.status.toLowerCase().contains(
+                  'in-app browser',
+                )) ...[
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
@@ -438,21 +476,29 @@ class _HomeView extends StatelessWidget {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
                     ),
                     onPressed: () {
-                      final url = controller.lastAttemptedUrl ?? 'https://www.instagram.com';
+                      final url =
+                          controller.lastAttemptedUrl ??
+                          'https://www.instagram.com';
                       final lower = url.toLowerCase();
                       final platform = lower.contains('instagram')
                           ? 'Instagram'
                           : lower.contains('facebook')
-                              ? 'Facebook'
-                              : lower.contains('youtube')
-                                  ? 'YouTube'
-                                  : lower.contains('twitter') || lower.contains('x.com')
-                                      ? 'X'
-                                      : 'Social';
-                      controller.lockedBrowserRequest = LockedBrowserRequest(url: url, platform: platform);
+                          ? 'Facebook'
+                          : lower.contains('youtube')
+                          ? 'YouTube'
+                          : lower.contains('twitter') || lower.contains('x.com')
+                          ? 'X'
+                          : 'Social';
+                      controller.lockedBrowserRequest = LockedBrowserRequest(
+                        url: url,
+                        platform: platform,
+                      );
                     },
                     icon: const Icon(Icons.open_in_browser),
                     label: const Text(
@@ -526,9 +572,9 @@ class _Brand extends StatelessWidget {
 
 void _showSettingToast(BuildContext context, String message, bool enabled) {
   ScaffoldMessenger.of(context).clearSnackBars();
-  
+
   final isLight = Theme.of(context).brightness == Brightness.light;
-  
+
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       backgroundColor: Colors.transparent,
@@ -556,7 +602,9 @@ void _showSettingToast(BuildContext context, String message, bool enabled) {
             children: [
               Icon(
                 enabled ? Icons.check_circle : Icons.cancel,
-                color: enabled ? const Color(0xFF2ECC71) : const Color(0xFFE74C3C),
+                color: enabled
+                    ? const Color(0xFF2ECC71)
+                    : const Color(0xFFE74C3C),
                 size: 22,
               ),
               const SizedBox(width: 12),
@@ -623,7 +671,9 @@ class _ClipboardToggle extends StatelessWidget {
         controller.toggleEnableClipboardDetection(newStatus);
         _showSettingToast(
           context,
-          newStatus ? 'Clipboard Detection Enabled' : 'Clipboard Detection Disabled',
+          newStatus
+              ? 'Clipboard Detection Enabled'
+              : 'Clipboard Detection Disabled',
           newStatus,
         );
       },
@@ -649,7 +699,9 @@ class _BackgroundPlayToggle extends StatelessWidget {
         controller.toggleBackgroundPlayback(newStatus);
         _showSettingToast(
           context,
-          newStatus ? 'Background Playback Enabled' : 'Background Playback Disabled',
+          newStatus
+              ? 'Background Playback Enabled'
+              : 'Background Playback Disabled',
           newStatus,
         );
       },
@@ -706,8 +758,8 @@ class _HeaderToggleState extends State<_HeaderToggle> {
     final isLight = Theme.of(context).brightness == Brightness.light;
 
     final baseColor = widget.active ? _green : Colors.white;
-    final containerColor = widget.active 
-        ? _green.withOpacity(isLight ? 0.24 : 0.16) 
+    final containerColor = widget.active
+        ? _green.withOpacity(isLight ? 0.24 : 0.16)
         : Colors.white.withOpacity(0.06);
 
     return GestureDetector(
@@ -722,13 +774,15 @@ class _HeaderToggleState extends State<_HeaderToggle> {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
-            boxShadow: useLiquidEffects ? [
-              BoxShadow(
-                color: baseColor.withOpacity(widget.active ? 0.24 : 0.08),
-                blurRadius: widget.active ? 10 : 4,
-                offset: const Offset(0, 2),
-              ),
-            ] : null,
+            boxShadow: useLiquidEffects
+                ? [
+                    BoxShadow(
+                      color: baseColor.withOpacity(widget.active ? 0.24 : 0.08),
+                      blurRadius: widget.active ? 10 : 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(999),
@@ -737,14 +791,24 @@ class _HeaderToggleState extends State<_HeaderToggle> {
                     filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: _buildContent(isLight, baseColor, containerColor),
                   )
-                : _buildContent(isLight, baseColor, containerColor, noBlur: true),
+                : _buildContent(
+                    isLight,
+                    baseColor,
+                    containerColor,
+                    noBlur: true,
+                  ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildContent(bool isLight, Color baseColor, Color containerColor, {bool noBlur = false}) {
+  Widget _buildContent(
+    bool isLight,
+    Color baseColor,
+    Color containerColor, {
+    bool noBlur = false,
+  }) {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: containerColor,
@@ -755,10 +819,7 @@ class _HeaderToggleState extends State<_HeaderToggle> {
         ),
         gradient: (widget.active && !noBlur)
             ? LinearGradient(
-                colors: [
-                  Colors.white.withOpacity(0.12),
-                  Colors.transparent,
-                ],
+                colors: [Colors.white.withOpacity(0.12), Colors.transparent],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               )
@@ -771,15 +832,19 @@ class _HeaderToggleState extends State<_HeaderToggle> {
           children: [
             Icon(
               widget.icon,
-              color: widget.active ? _green : (isLight ? Colors.black54 : Colors.white60),
+              color: widget.active
+                  ? _green
+                  : (isLight ? Colors.black54 : Colors.white60),
               size: 17,
             ),
             const SizedBox(width: 7),
             Text(
               widget.label,
               style: TextStyle(
-                color: widget.active 
-                    ? (isLight ? const Color(0xFF0F3A1B) : const Color(0xFFEAF8EE))
+                color: widget.active
+                    ? (isLight
+                          ? const Color(0xFF0F3A1B)
+                          : const Color(0xFFEAF8EE))
                     : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
                 fontSize: 12,
                 fontWeight: FontWeight.w900,
@@ -814,8 +879,8 @@ class _ProBadgeState extends State<_ProBadge> {
     final useLiquidEffects = !reduceMotion;
 
     final baseColor = active ? _gold : Colors.white;
-    final containerColor = active 
-        ? _gold.withOpacity(isLight ? 0.24 : 0.16) 
+    final containerColor = active
+        ? _gold.withOpacity(isLight ? 0.24 : 0.16)
         : Colors.white.withOpacity(0.06);
 
     return GestureDetector(
@@ -830,29 +895,48 @@ class _ProBadgeState extends State<_ProBadge> {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
-            boxShadow: useLiquidEffects ? [
-              BoxShadow(
-                color: baseColor.withOpacity(active ? 0.24 : 0.08),
-                blurRadius: active ? 10 : 4,
-                offset: const Offset(0, 2),
-              ),
-            ] : null,
+            boxShadow: useLiquidEffects
+                ? [
+                    BoxShadow(
+                      color: baseColor.withOpacity(active ? 0.24 : 0.08),
+                      blurRadius: active ? 10 : 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: useLiquidEffects
                 ? BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                    child: _buildContent(isLight, active, baseColor, containerColor),
+                    child: _buildContent(
+                      isLight,
+                      active,
+                      baseColor,
+                      containerColor,
+                    ),
                   )
-                : _buildContent(isLight, active, baseColor, containerColor, noBlur: true),
+                : _buildContent(
+                    isLight,
+                    active,
+                    baseColor,
+                    containerColor,
+                    noBlur: true,
+                  ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildContent(bool isLight, bool active, Color baseColor, Color containerColor, {bool noBlur = false}) {
+  Widget _buildContent(
+    bool isLight,
+    bool active,
+    Color baseColor,
+    Color containerColor, {
+    bool noBlur = false,
+  }) {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: containerColor,
@@ -863,10 +947,7 @@ class _ProBadgeState extends State<_ProBadge> {
         ),
         gradient: (active && !noBlur)
             ? LinearGradient(
-                colors: [
-                  Colors.white.withOpacity(0.12),
-                  Colors.transparent,
-                ],
+                colors: [Colors.white.withOpacity(0.12), Colors.transparent],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               )
@@ -878,15 +959,19 @@ class _ProBadgeState extends State<_ProBadge> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              active ? Icons.workspace_premium : Icons.workspace_premium_outlined,
-              color: active ? _gold : (isLight ? Colors.black54 : Colors.white60),
+              active
+                  ? Icons.workspace_premium
+                  : Icons.workspace_premium_outlined,
+              color: active
+                  ? _gold
+                  : (isLight ? Colors.black54 : Colors.white60),
               size: 18,
             ),
             const SizedBox(width: 7),
             Text(
               active ? 'PREMIUM' : 'DUCK PREMIUM',
               style: TextStyle(
-                color: active 
+                color: active
                     ? (isLight ? const Color(0xFF3D2D03) : _gold)
                     : (isLight ? Colors.black87 : const Color(0xFFE8E8E8)),
                 fontSize: 12,
@@ -965,10 +1050,7 @@ class _PremiumSheet extends StatelessWidget {
                             color: _gold.withValues(alpha: .16),
                             borderRadius: BorderRadius.circular(14),
                           ),
-                          child: Icon(
-                            Icons.workspace_premium,
-                            color: _gold,
-                          ),
+                          child: Icon(Icons.workspace_premium, color: _gold),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -987,10 +1069,7 @@ class _PremiumSheet extends StatelessWidget {
                                 active
                                     ? 'Your subscription is active.'
                                     : 'Subscribe through the app store.',
-                                style: TextStyle(
-                                  color: _muted,
-                                  fontSize: 12,
-                                ),
+                                style: TextStyle(color: _muted, fontSize: 12),
                               ),
                             ],
                           ),
@@ -1215,7 +1294,6 @@ class _SubscriptionButton extends StatelessWidget {
   }
 }
 
-
 class _StatusBar extends StatelessWidget {
   const _StatusBar({
     required this.flow,
@@ -1327,10 +1405,7 @@ class _StatusBar extends StatelessWidget {
         duration: const Duration(milliseconds: 280),
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
-        child: KeyedSubtree(
-          key: ValueKey(flow),
-          child: child,
-        ),
+        child: KeyedSubtree(key: ValueKey(flow), child: child),
       ),
     );
   }
@@ -1602,25 +1677,29 @@ class _BatchOptionsCardState extends State<_BatchOptionsCard> {
                   active: _selectedMode == _BatchDownloadMode.hybrid,
                   icon: Icons.layers,
                   label: 'Hybrid',
-                  onTap: () => setState(() => _selectedMode = _BatchDownloadMode.hybrid),
+                  onTap: () =>
+                      setState(() => _selectedMode = _BatchDownloadMode.hybrid),
                 ),
               _Chip(
                 active: _selectedMode == _BatchDownloadMode.image,
                 icon: Icons.image,
                 label: 'Image',
-                onTap: () => setState(() => _selectedMode = _BatchDownloadMode.image),
+                onTap: () =>
+                    setState(() => _selectedMode = _BatchDownloadMode.image),
               ),
               _Chip(
                 active: _selectedMode == _BatchDownloadMode.video,
                 icon: Icons.play_arrow,
                 label: 'Video',
-                onTap: () => setState(() => _selectedMode = _BatchDownloadMode.video),
+                onTap: () =>
+                    setState(() => _selectedMode = _BatchDownloadMode.video),
               ),
               _Chip(
                 active: _selectedMode == _BatchDownloadMode.audio,
                 icon: Icons.music_note,
                 label: 'Audio',
-                onTap: () => setState(() => _selectedMode = _BatchDownloadMode.audio),
+                onTap: () =>
+                    setState(() => _selectedMode = _BatchDownloadMode.audio),
               ),
             ],
           ),
@@ -1628,7 +1707,9 @@ class _BatchOptionsCardState extends State<_BatchOptionsCard> {
           Container(
             height: 180,
             decoration: BoxDecoration(
-              color: _isLight ? const Color(0xFFF1F1F3) : const Color(0xFF1C1C1E),
+              color: _isLight
+                  ? const Color(0xFFF1F1F3)
+                  : const Color(0xFF1C1C1E),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: _border),
             ),
@@ -1711,10 +1792,7 @@ class _BatchOptionsCardState extends State<_BatchOptionsCard> {
                                 item.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: _text,
-                                  fontSize: 13,
-                                ),
+                                style: TextStyle(color: _text, fontSize: 13),
                               ),
                             ),
                           ],
@@ -1757,7 +1835,8 @@ class _BatchOptionsCardState extends State<_BatchOptionsCard> {
                           DownloadType dlType;
                           if (_selectedMode == _BatchDownloadMode.image) {
                             dlType = DownloadType.image;
-                          } else if (_selectedMode == _BatchDownloadMode.audio) {
+                          } else if (_selectedMode ==
+                              _BatchDownloadMode.audio) {
                             dlType = DownloadType.audio;
                           } else {
                             dlType = DownloadType.video;
@@ -1766,7 +1845,8 @@ class _BatchOptionsCardState extends State<_BatchOptionsCard> {
                             urls: urls,
                             type: dlType,
                             quality: _selectedQuality,
-                            forceHybrid: _selectedMode == _BatchDownloadMode.hybrid,
+                            forceHybrid:
+                                _selectedMode == _BatchDownloadMode.hybrid,
                           );
                           widget.controller.clearBatch();
                         },
@@ -1816,10 +1896,7 @@ class _DownloadQueueCard extends StatelessWidget {
                 ),
                 Text(
                   '${items.length}',
-                  style: TextStyle(
-                    color: _muted,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: TextStyle(color: _muted, fontWeight: FontWeight.w900),
                 ),
               ],
             ),
@@ -1963,8 +2040,6 @@ class _QueueRow extends StatelessWidget {
   }
 }
 
-
-
 enum _LibrarySubTab { all, folders, favorites, playlists }
 
 class _LibraryView extends StatefulWidget {
@@ -1993,7 +2068,8 @@ class _LibraryViewState extends State<_LibraryView> {
   bool get _isImagesTab => widget.title == 'IMAGES';
 
   double get _bottomPadding {
-    final hasMiniPlayer = widget.controller.playingItem != null &&
+    final hasMiniPlayer =
+        widget.controller.playingItem != null &&
         widget.controller.playerItem == null;
     return hasMiniPlayer ? 144.0 : 80.0;
   }
@@ -2012,7 +2088,9 @@ class _LibraryViewState extends State<_LibraryView> {
     final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
     final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 4.0;
 
-    final duration = _isDraggingPill ? Duration.zero : const Duration(milliseconds: 300);
+    final duration = _isDraggingPill
+        ? Duration.zero
+        : const Duration(milliseconds: 300);
     final curve = _isDraggingPill ? Curves.linear : Curves.easeOutBack;
 
     final scale = _isDraggingPill ? 1.08 : 1.0;
@@ -2031,7 +2109,10 @@ class _LibraryViewState extends State<_LibraryView> {
           final maxLeft = 238.0;
           setState(() {
             _isDraggingPill = true;
-            _dragPillOffset = Offset(targetLeft.clamp(minLeft, maxLeft), targetTop.clamp(0.0, 8.0));
+            _dragPillOffset = Offset(
+              targetLeft.clamp(minLeft, maxLeft),
+              targetTop.clamp(0.0, 8.0),
+            );
           });
         },
         onPanUpdate: (details) {
@@ -2039,7 +2120,7 @@ class _LibraryViewState extends State<_LibraryView> {
           final targetTop = details.localPosition.dy - 16.0;
           final minLeft = 4.0;
           final maxLeft = 238.0;
-          
+
           double dragLeft = targetLeft;
           if (targetLeft < minLeft) {
             final diff = minLeft - targetLeft;
@@ -2129,10 +2210,26 @@ class _LibraryViewState extends State<_LibraryView> {
               Positioned.fill(
                 child: Row(
                   children: [
-                    _buildTabOption(_LibrarySubTab.all, isAudios ? 'SONGS' : 'ALL', activeIndex == 0),
-                    _buildTabOption(_LibrarySubTab.folders, 'FOLDERS', activeIndex == 1),
-                    _buildTabOption(_LibrarySubTab.favorites, 'FAVORITES', activeIndex == 2),
-                    _buildTabOption(_LibrarySubTab.playlists, 'PLAYLISTS', activeIndex == 3),
+                    _buildTabOption(
+                      _LibrarySubTab.all,
+                      isAudios ? 'SONGS' : 'ALL',
+                      activeIndex == 0,
+                    ),
+                    _buildTabOption(
+                      _LibrarySubTab.folders,
+                      'FOLDERS',
+                      activeIndex == 1,
+                    ),
+                    _buildTabOption(
+                      _LibrarySubTab.favorites,
+                      'FAVORITES',
+                      activeIndex == 2,
+                    ),
+                    _buildTabOption(
+                      _LibrarySubTab.playlists,
+                      'PLAYLISTS',
+                      activeIndex == 3,
+                    ),
                   ],
                 ),
               ),
@@ -2215,13 +2312,16 @@ class _LibraryViewState extends State<_LibraryView> {
                         if (_isImagesTab && _subTab != _LibrarySubTab.playlists)
                           IconButton(
                             icon: Icon(
-                              _useGridLayout ? Icons.view_list : Icons.grid_view,
+                              _useGridLayout
+                                  ? Icons.view_list
+                                  : Icons.grid_view,
                               color: _gold,
                               size: 24,
                             ),
                             tooltip: _useGridLayout ? 'List view' : 'Grid view',
-                            onPressed: () =>
-                                setState(() => _useGridLayout = !_useGridLayout),
+                            onPressed: () => setState(
+                              () => _useGridLayout = !_useGridLayout,
+                            ),
                           ),
                         IconButton(
                           icon: Icon(
@@ -2267,29 +2367,27 @@ class _LibraryViewState extends State<_LibraryView> {
             child: _subTab == _LibrarySubTab.folders
                 ? _buildFoldersTab()
                 : _subTab == _LibrarySubTab.playlists
-                    ? _buildPlaylistsTab()
-                    : filteredItems.isEmpty
+                ? _buildPlaylistsTab()
+                : filteredItems.isEmpty
                 ? Center(
                     child: Text(
                       _subTab == _LibrarySubTab.favorites
                           ? 'No favorites added yet.'
                           : widget.empty,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: _textMuted,
-                        fontSize: 18,
-                      ),
+                      style: TextStyle(color: _textMuted, fontSize: 18),
                     ),
                   )
                 : _isImagesTab && _useGridLayout
                 ? GridView.builder(
                     padding: EdgeInsets.only(bottom: _bottomPadding),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      mainAxisSpacing: 8,
-                      crossAxisSpacing: 8,
-                      childAspectRatio: 1,
-                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                          childAspectRatio: 1,
+                        ),
                     itemCount: filteredItems.length,
                     itemBuilder: (context, index) {
                       final item = filteredItems[index];
@@ -2331,8 +2429,7 @@ class _LibraryViewState extends State<_LibraryView> {
                     itemBuilder: (context, index) => _DownloadRow(
                       item: filteredItems[index],
                       controller: widget.controller,
-                      galleryItems:
-                          _isImagesTab ? filteredItems : null,
+                      galleryItems: _isImagesTab ? filteredItems : null,
                       queueItems: widget.title == 'AUDIOS'
                           ? filteredItems
                           : null,
@@ -2352,8 +2449,8 @@ class _LibraryViewState extends State<_LibraryView> {
     final List<DeviceMediaFolder> folders = title == 'VIDEOS'
         ? widget.controller.videoFolders
         : (title == 'IMAGES'
-            ? widget.controller.imageFolders
-            : widget.controller.audioFolders);
+              ? widget.controller.imageFolders
+              : widget.controller.audioFolders);
 
     if (folders.isEmpty) {
       return Center(
@@ -2368,12 +2465,13 @@ class _LibraryViewState extends State<_LibraryView> {
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: _gold),
-              ),
+              style: OutlinedButton.styleFrom(side: BorderSide(color: _gold)),
               onPressed: () => widget.controller.refreshDeviceFolders(),
               icon: Icon(Icons.refresh, color: _gold),
-              label: Text('Scan Storage Folders', style: TextStyle(color: _gold)),
+              label: Text(
+                'Scan Storage Folders',
+                style: TextStyle(color: _gold),
+              ),
             ),
           ],
         ),
@@ -2410,12 +2508,17 @@ class _LibraryViewState extends State<_LibraryView> {
                     Icon(
                       title == 'VIDEOS'
                           ? Icons.folder_zip
-                          : (title == 'IMAGES' ? Icons.folder_special : Icons.folder_copy),
+                          : (title == 'IMAGES'
+                                ? Icons.folder_special
+                                : Icons.folder_copy),
                       color: _gold,
                       size: 32,
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: _gold.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(10),
@@ -2449,10 +2552,7 @@ class _LibraryViewState extends State<_LibraryView> {
                       folder.path,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _textMuted,
-                        fontSize: 10,
-                      ),
+                      style: TextStyle(color: _textMuted, fontSize: 10),
                     ),
                   ],
                 ),
@@ -2595,9 +2695,7 @@ class _LibraryViewState extends State<_LibraryView> {
                       decoration: BoxDecoration(
                         color: _panel,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: _border,
-                        ),
+                        border: Border.all(color: _border),
                       ),
                       child: ListTile(
                         leading: Icon(
@@ -2684,20 +2782,12 @@ class _DownloadRow extends StatelessWidget {
         children: [
           Row(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              _dot(),
-              const SizedBox(width: 4),
-              _dot(),
-            ],
+            children: [_dot(), const SizedBox(width: 4), _dot()],
           ),
           const SizedBox(height: 4),
           Row(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              _dot(),
-              const SizedBox(width: 4),
-              _dot(),
-            ],
+            children: [_dot(), const SizedBox(width: 4), _dot()],
           ),
         ],
       ),
@@ -2708,10 +2798,7 @@ class _DownloadRow extends StatelessWidget {
     return Container(
       width: 5,
       height: 5,
-      decoration: BoxDecoration(
-        color: _gold,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: _gold, shape: BoxShape.circle),
     );
   }
 
@@ -2788,7 +2875,9 @@ class _DownloadRow extends StatelessWidget {
           PopupMenuButton<String>(
             icon: _buildGridIcon(),
             color: _isLight ? const Color(0xFFFFFFFF) : const Color(0xFF18181A),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
             onSelected: (value) {
               switch (value) {
                 case 'view':
@@ -2810,7 +2899,17 @@ class _DownloadRow extends StatelessWidget {
                 case 'playlist':
                   _showPlaylistSelectionSheet(context, item, controller);
                 case 'vault':
-                  controller.moveItemToVault(item);
+                  if (controller.isVaultLocked) {
+                    _showVaultPinDialog(
+                      context,
+                      controller,
+                      onSuccess: () {
+                        unawaited(controller.moveItemToVault(item));
+                      },
+                    );
+                  } else {
+                    unawaited(controller.moveItemToVault(item));
+                  }
                 case 'edit_tag':
                   _showMetadataEditDialog(context, item, controller);
                 case 'convert_audio':
@@ -2839,10 +2938,7 @@ class _DownloadRow extends StatelessWidget {
                   children: [
                     Icon(Icons.share, color: _gold, size: 20),
                     SizedBox(width: 12),
-                    Text(
-                      'Share',
-                      style: TextStyle(color: _text, fontSize: 14),
-                    ),
+                    Text('Share', style: TextStyle(color: _text, fontSize: 14)),
                   ],
                 ),
               ),
@@ -2953,7 +3049,11 @@ class _DownloadRow extends StatelessWidget {
                     const SizedBox(width: 12),
                     Text(
                       'Delete',
-                      style: TextStyle(color: _danger, fontSize: 14, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: _danger,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -2978,9 +3078,6 @@ class _DownloadRow extends StatelessWidget {
         : '${item.title}.$ext';
   }
 }
-
-
-
 
 void _showPlaylistSelectionSheet(
   BuildContext context,
@@ -3184,6 +3281,7 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   String _message = '';
   bool _resetMode = false;
   bool _newPinMode = false;
+  bool _isCheckingPin = false;
 
   @override
   void initState() {
@@ -3201,20 +3299,22 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   Future<void> _authenticateWithBiometrics() async {
     final auth = LocalAuthentication();
     try {
-      final bool canAuthenticateWithBiometrics = await auth.canCheckBiometrics;
-      final bool canAuthenticate = canAuthenticateWithBiometrics || await auth.isDeviceSupported();
+      final canAuthenticateWithBiometrics = await auth.canCheckBiometrics;
+      final canAuthenticate =
+          canAuthenticateWithBiometrics || await auth.isDeviceSupported();
       if (!canAuthenticate) return;
 
-      final bool didAuthenticate = await auth.authenticate(
+      final didAuthenticate = await auth.authenticate(
         localizedReason: 'Authenticate to access the Secure Vault',
         options: const AuthenticationOptions(
           biometricOnly: true,
           stickyAuth: true,
         ),
       );
-      if (didAuthenticate) {
+      if (didAuthenticate &&
+          mounted &&
+          await widget.controller.unlockVaultBiometric()) {
         if (!mounted) return;
-        widget.controller.unlockVaultBiometric();
         Navigator.pop(context);
         widget.onSuccess();
       }
@@ -3222,15 +3322,30 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   }
 
   void _onKeyPress(String val) {
-    if (_pin.length >= 4) return;
+    if (_isCheckingPin || _pin.length >= 4) return;
     setState(() {
       _pin += val;
-      if (_pin.length == 4) {
-        _handlePinComplete();
-      }
+      if (_pin.length == 4) _message = 'Checking passcode...';
     });
+    if (_pin.length == 4) unawaited(_submitPin());
   }
 
+  Future<void> _submitPin() async {
+    if (_isCheckingPin) return;
+    setState(() => _isCheckingPin = true);
+    try {
+      await _handlePinComplete();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _pin = '';
+          _message = 'Vault error. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingPin = false);
+    }
+  }
   void _onBackspace() {
     if (_pin.isEmpty) return;
     setState(() {
@@ -3248,90 +3363,63 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
     });
   }
 
-  void _handlePinComplete() {
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (!mounted) return;
+  Future<void> _handlePinComplete() async {
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
 
-      if (_resetMode) {
-        final correct = widget.controller.checkVaultPin(_pin);
-        if (correct) {
-          setState(() {
-            _resetMode = false;
-            _newPinMode = true;
-            _confirmMode = false;
-            _pin = '';
-            _message = 'Create a new 4-digit passcode';
-          });
-          widget.controller.lockVault();
-        } else {
-          setState(() {
-            _pin = '';
-            _message = 'Incorrect passcode. Try again.';
-          });
-        }
-        return;
-      }
-
-      if (_newPinMode) {
-        if (!_confirmMode) {
-          setState(() {
-            _firstPin = _pin;
-            _pin = '';
-            _confirmMode = true;
-            _message = 'Confirm your new passcode';
-          });
-        } else {
-          if (_pin == _firstPin) {
-            widget.controller.setVaultPin(_pin);
-            widget.controller.checkVaultPin(_pin);
-            Navigator.pop(context);
-            widget.onSuccess();
-          } else {
-            setState(() {
-              _pin = '';
-              _confirmMode = false;
-              _message = 'Passcodes do not match. Try again.';
-            });
-          }
-        }
-        return;
-      }
-
-      if (!widget.controller.isVaultSetup) {
-        if (!_confirmMode) {
-          setState(() {
-            _firstPin = _pin;
-            _pin = '';
-            _confirmMode = true;
-            _message = 'Confirm your vault passcode';
-          });
-        } else {
-          if (_pin == _firstPin) {
-            widget.controller.setVaultPin(_pin);
-            widget.controller.checkVaultPin(_pin);
-            Navigator.pop(context);
-            widget.onSuccess();
-          } else {
-            setState(() {
-              _pin = '';
-              _confirmMode = false;
-              _message = 'Passcodes do not match. Try again.';
-            });
-          }
-        }
+    if (_resetMode) {
+      final correct = await widget.controller.checkVaultPin(_pin);
+      if (correct) {
+        setState(() {
+          _resetMode = false;
+          _newPinMode = true;
+          _confirmMode = false;
+          _pin = '';
+          _message = 'Create a new 4-digit passcode';
+        });
       } else {
-        final correct = widget.controller.checkVaultPin(_pin);
-        if (correct) {
-          Navigator.pop(context);
-          widget.onSuccess();
-        } else {
-          setState(() {
-            _pin = '';
-            _message = 'Incorrect passcode. Try again.';
-          });
-        }
+        setState(() {
+          _pin = '';
+          _message = 'Incorrect passcode. Try again.';
+        });
       }
-    });
+      return;
+    }
+
+    if (_newPinMode || !widget.controller.isVaultSetup) {
+      if (!_confirmMode) {
+        setState(() {
+          _firstPin = _pin;
+          _pin = '';
+          _confirmMode = true;
+          _message = 'Confirm your vault passcode';
+        });
+      } else if (_pin == _firstPin) {
+        await widget.controller.setVaultPin(_pin);
+        if (!mounted) return;
+        Navigator.pop(context);
+        widget.onSuccess();
+      } else {
+        setState(() {
+          _pin = '';
+          _confirmMode = false;
+          _message = 'Passcodes do not match. Try again.';
+        });
+      }
+      return;
+    }
+
+    final correct = await widget.controller.checkVaultPin(_pin);
+    if (!mounted) return;
+    if (correct) {
+      Navigator.pop(context);
+      widget.onSuccess();
+    } else {
+      setState(() {
+        _pin = '';
+        _message = 'Incorrect passcode. Try again.';
+      });
+    }
   }
 
   @override
@@ -3390,7 +3478,8 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
                   );
                 }),
               ),
-              if (widget.controller.isVaultSetup && widget.controller.biometricEnabled) ...[
+              if (widget.controller.isVaultSetup &&
+                  widget.controller.biometricEnabled) ...[
                 const SizedBox(height: 12),
                 IconButton(
                   icon: Icon(Icons.fingerprint, color: _gold, size: 40),
@@ -3441,17 +3530,21 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
                     },
                     child: Center(
                       child: val == '⌫'
-                          ? Icon(Icons.backspace_outlined, color: _text, size: 22)
+                          ? Icon(
+                              Icons.backspace_outlined,
+                              color: _text,
+                              size: 22,
+                            )
                           : val == 'Reset'
-                              ? Icon(Icons.lock_reset, color: _text, size: 26)
-                              : Text(
-                                  val,
-                                  style: TextStyle(
-                                    color: isAction ? _muted : _text,
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
+                          ? Icon(Icons.lock_reset, color: _text, size: 26)
+                          : Text(
+                              val,
+                              style: TextStyle(
+                                color: isAction ? _muted : _text,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
                 ),
@@ -3482,10 +3575,7 @@ class _SecureVaultView extends StatelessWidget {
           ),
           title: Text(
             'Exit Vault?',
-            style: TextStyle(
-              color: _text,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: _text, fontWeight: FontWeight.bold),
           ),
           content: Text(
             'Are you sure you want to exit the secure vault and lock it?',
@@ -3494,19 +3584,13 @@ class _SecureVaultView extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: Text(
-                'Cancel',
-                style: TextStyle(color: _muted),
-              ),
+              child: Text('Cancel', style: TextStyle(color: _muted)),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
               child: const Text(
                 'Exit',
-                style: TextStyle(
-                  color: _danger,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: _danger, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -3568,8 +3652,14 @@ class _SecureVaultView extends StatelessWidget {
               const SizedBox(height: 16),
               StatefulBuilder(
                 builder: (context, setModalState) => SwitchListTile(
-                  title: Text('Biometric Unlock', style: TextStyle(color: _text)),
-                  subtitle: Text('Unlock the vault using fingerprint / Face ID', style: TextStyle(color: _muted)),
+                  title: Text(
+                    'Biometric Unlock',
+                    style: TextStyle(color: _text),
+                  ),
+                  subtitle: Text(
+                    'Unlock the vault using fingerprint / Face ID',
+                    style: TextStyle(color: _muted),
+                  ),
                   value: controller.biometricEnabled,
                   activeColor: _gold,
                   onChanged: (val) async {
@@ -3581,8 +3671,14 @@ class _SecureVaultView extends StatelessWidget {
               const Divider(color: Colors.white10),
               ListTile(
                 leading: const Icon(Icons.security, color: _danger),
-                title: Text('Set Decoy Passcode', style: TextStyle(color: _text)),
-                subtitle: Text('Shows a decoy empty vault when entered', style: TextStyle(color: _muted)),
+                title: Text(
+                  'Set Decoy Passcode',
+                  style: TextStyle(color: _text),
+                ),
+                subtitle: Text(
+                  'Shows a decoy empty vault when entered',
+                  style: TextStyle(color: _muted),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _showSetDecoyPinDialog(context);
@@ -3591,13 +3687,21 @@ class _SecureVaultView extends StatelessWidget {
               const Divider(color: Colors.white10),
               ListTile(
                 leading: Icon(Icons.photo_camera, color: _warmGold),
-                title: Text('View Intruder Logs', style: TextStyle(color: _text)),
-                subtitle: Text('Photos captured on failed passcode attempts', style: TextStyle(color: _muted)),
+                title: Text(
+                  'View Intruder Logs',
+                  style: TextStyle(color: _text),
+                ),
+                subtitle: Text(
+                  'Photos captured on failed passcode attempts',
+                  style: TextStyle(color: _muted),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    CupertinoPageRoute(builder: (context) => const _IntruderLogsScreen()),
+                    CupertinoPageRoute(
+                      builder: (context) => const _IntruderLogsScreen(),
+                    ),
                   );
                 },
               ),
@@ -3647,9 +3751,8 @@ class _SecureVaultView extends StatelessWidget {
           showDialog(
             context: context,
             barrierDismissible: false,
-            builder: (context) => Center(
-              child: CircularProgressIndicator(color: _gold),
-            ),
+            builder: (context) =>
+                Center(child: CircularProgressIndicator(color: _gold)),
           );
         }
 
@@ -3657,7 +3760,11 @@ class _SecureVaultView extends StatelessWidget {
 
         if (context.mounted) {
           Navigator.pop(context); // Close loading indicator
-          _showSettingToast(context, 'Media added to vault and removed from gallery!', true);
+          _showSettingToast(
+            context,
+            'Media added to vault and removed from gallery!',
+            true,
+          );
         }
       }
     } catch (e) {
@@ -3684,8 +3791,8 @@ class _SecureVaultView extends StatelessWidget {
             mediaType == 'audio'
                 ? 'AUDIO VAULT'
                 : mediaType == 'video'
-                    ? 'VIDEO VAULT'
-                    : 'IMAGE VAULT',
+                ? 'VIDEO VAULT'
+                : 'IMAGE VAULT',
             style: TextStyle(
               color: _gold,
               fontWeight: FontWeight.w900,
@@ -3764,12 +3871,9 @@ class _DecoyPinSetupSheetState extends State<_DecoyPinSetupSheet> {
     if (_pin.length >= 4) return;
     setState(() {
       _pin += val;
-      if (_pin.length == 4) {
-        _handlePinComplete();
-      }
+      if (_pin.length == 4) _handlePinComplete();
     });
   }
-
   void _onBackspace() {
     if (_pin.isEmpty) return;
     setState(() {
@@ -3792,7 +3896,11 @@ class _DecoyPinSetupSheetState extends State<_DecoyPinSetupSheet> {
         if (_pin == _firstPin) {
           widget.controller.setDecoyVaultPin(_pin);
           Navigator.pop(context);
-          _showSettingToast(context, 'Decoy passcode configured successfully!', true);
+          _showSettingToast(
+            context,
+            'Decoy passcode configured successfully!',
+            true,
+          );
         } else {
           setState(() {
             _pin = '';
@@ -3895,7 +4003,11 @@ class _DecoyPinSetupSheetState extends State<_DecoyPinSetupSheet> {
                     },
                     child: Center(
                       child: val == '⌫'
-                          ? Icon(Icons.backspace_outlined, color: _text, size: 22)
+                          ? Icon(
+                              Icons.backspace_outlined,
+                              color: _text,
+                              size: 22,
+                            )
                           : Text(
                               val,
                               style: TextStyle(
@@ -3946,8 +4058,14 @@ class _IntruderLogsScreenState extends State<_IntruderLogsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: _dark,
-        title: Text('Clear Logs?', style: TextStyle(color: _text, fontWeight: FontWeight.bold)),
-        content: Text('Are you sure you want to delete all intruder logs?', style: TextStyle(color: _muted)),
+        title: Text(
+          'Clear Logs?',
+          style: TextStyle(color: _text, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Are you sure you want to delete all intruder logs?',
+          style: TextStyle(color: _muted),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -3955,7 +4073,10 @@ class _IntruderLogsScreenState extends State<_IntruderLogsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete All', style: TextStyle(color: _danger, fontWeight: FontWeight.bold)),
+            child: const Text(
+              'Delete All',
+              style: TextStyle(color: _danger, fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -4001,73 +4122,74 @@ class _IntruderLogsScreenState extends State<_IntruderLogsScreen> {
       body: _loading
           ? Center(child: CircularProgressIndicator(color: _gold))
           : _logs.isEmpty
-              ? Center(
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle_outline, color: _muted, size: 64),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No intrusion attempts logged.',
+                    style: TextStyle(color: _muted, fontSize: 16),
+                  ),
+                ],
+              ),
+            )
+          : GridView.builder(
+              padding: const EdgeInsets.all(16),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.75,
+              ),
+              itemCount: _logs.length,
+              itemBuilder: (context, index) {
+                final file = _logs[index];
+                final filename = p.basename(file.path);
+                final timestampStr = filename
+                    .replaceAll('intruder_', '')
+                    .replaceAll('.jpg', '');
+                final timestamp = int.tryParse(timestampStr) ?? 0;
+                final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+                final dateFormatted =
+                    '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+
+                return Container(
+                  decoration: BoxDecoration(
+                    color: _panel,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _border),
+                  ),
+                  clipBehavior: Clip.antiAlias,
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(Icons.check_circle_outline, color: _muted, size: 64),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No intrusion attempts logged.',
-                        style: TextStyle(color: _muted, fontSize: 16),
+                      Expanded(
+                        child: Image.file(
+                          file,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Center(child: Icon(Icons.broken_image)),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          dateFormatted,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _text,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                )
-              : GridView.builder(
-                  padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    childAspectRatio: 0.75,
-                  ),
-                  itemCount: _logs.length,
-                  itemBuilder: (context, index) {
-                    final file = _logs[index];
-                    final filename = p.basename(file.path);
-                    final timestampStr = filename
-                        .replaceAll('intruder_', '')
-                        .replaceAll('.jpg', '');
-                    final timestamp = int.tryParse(timestampStr) ?? 0;
-                    final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
-                    final dateFormatted = '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-
-                    return Container(
-                      decoration: BoxDecoration(
-                        color: _panel,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: _border),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: Image.file(
-                              file,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  const Center(child: Icon(Icons.broken_image)),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Text(
-                              dateFormatted,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: _text,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                );
+              },
+            ),
     );
   }
 }
@@ -4106,10 +4228,7 @@ class _VaultItemTile extends StatelessWidget {
                   item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _text,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(color: _text, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -4132,8 +4251,8 @@ class _VaultItemTile extends StatelessWidget {
                 galleryItems: item.isImage ? vaultImages : null,
                 queueItems: item.isAudio
                     ? controller.privateDownloads
-                        .where((entry) => entry.isAudio)
-                        .toList()
+                          .where((entry) => entry.isAudio)
+                          .toList()
                     : null,
               );
             },
@@ -4141,7 +4260,9 @@ class _VaultItemTile extends StatelessWidget {
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: _muted),
             color: _isLight ? Colors.white : const Color(0xFF202124),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
             onSelected: (value) async {
               if (value == 'restore') {
                 await controller.moveItemFromVault(item);
@@ -4154,10 +4275,7 @@ class _VaultItemTile extends StatelessWidget {
                 value: 'restore',
                 child: Text(
                   'Restore to Library',
-                  style: TextStyle(
-                    color: _text,
-                    fontWeight: FontWeight.w500,
-                  ),
+                  style: TextStyle(color: _text, fontWeight: FontWeight.w500),
                 ),
               ),
               const PopupMenuDivider(),
@@ -4284,10 +4402,7 @@ class _PlaylistItemsView extends StatelessWidget {
                                   item.title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: _text,
-                                    fontSize: 13,
-                                  ),
+                                  style: TextStyle(color: _text, fontSize: 13),
                                 ),
                               ),
                             ],
@@ -4321,7 +4436,6 @@ class _PlaylistItemsView extends StatelessWidget {
   }
 }
 
-
 class _Panel extends StatelessWidget {
   const _Panel({required this.child, required this.padding});
 
@@ -4330,10 +4444,7 @@ class _Panel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassPanel(
-      padding: padding,
-      child: child,
-    );
+    return GlassPanel(padding: padding, child: child);
   }
 }
 
@@ -4361,9 +4472,7 @@ class _Chip extends StatelessWidget {
         decoration: BoxDecoration(
           color: active ? _gold : _dark,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: active ? _gold : _border,
-          ),
+          border: Border.all(color: active ? _gold : _border),
         ),
         child: Row(
           children: [
@@ -4542,9 +4651,7 @@ class _ClipboardDetectorOverlay extends StatelessWidget {
                             child: OutlinedButton(
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: _textMuted,
-                                side: BorderSide(
-                                  color: _border,
-                                ),
+                                side: BorderSide(color: _border),
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 14,
                                 ),
@@ -4596,22 +4703,30 @@ class _ClipboardDetectorOverlay extends StatelessWidget {
 class _QuickShareOverlay extends StatelessWidget {
   const _QuickShareOverlay({
     required this.url,
+    required this.controller,
     required this.onDismiss,
-    required this.onAccept,
+    required this.onAcceptFormat,
+    required this.onAcceptDefault,
   });
 
   final String url;
+  final DuckDownloadsController controller;
   final VoidCallback onDismiss;
-  final Function(DownloadType) onAccept;
+  final Function(FormatInfo, DownloadType) onAcceptFormat;
+  final Function(DownloadType) onAcceptDefault;
 
   @override
   Widget build(BuildContext context) {
+    final videoQualities = controller.quickShareVideoQualities;
+    final audioQualities = controller.quickShareAudioQualities;
+    final isExtracting = controller.isQuickShareExtracting;
+
     return Positioned.fill(
       child: Container(
         color: Colors.black.withValues(alpha: .6),
         child: Center(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(28),
               child: BackdropFilter(
@@ -4619,7 +4734,7 @@ class _QuickShareOverlay extends StatelessWidget {
                 child: Container(
                   width: double.infinity,
                   constraints: const BoxConstraints(maxWidth: 480),
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
                     color: const Color(0x1F2A2A2D),
                     borderRadius: BorderRadius.circular(28),
@@ -4637,31 +4752,30 @@ class _QuickShareOverlay extends StatelessWidget {
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 42,
-                                height: 42,
-                                decoration: BoxDecoration(
-                                  color: _gold.withValues(alpha: .15),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(Icons.bolt, color: _gold, size: 24),
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: _gold.withValues(alpha: .15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.bolt, color: _gold, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Duck Quick Download',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: _text,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
                               ),
-                              const SizedBox(width: 12),
-                              Text(
-                                'SnapTube Quick Download',
-                                style: TextStyle(
-                                  color: _text,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                           IconButton(
                             icon: Icon(Icons.close, color: _textMuted),
@@ -4669,9 +4783,12 @@ class _QuickShareOverlay extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.05),
                           borderRadius: BorderRadius.circular(12),
@@ -4683,62 +4800,164 @@ class _QuickShareOverlay extends StatelessWidget {
                           style: TextStyle(color: _gold, fontSize: 12),
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'Select Download Format:',
-                        style: TextStyle(
-                          color: _textMuted,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _gold,
-                                foregroundColor: const Color(0xFF101112),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
+                      const SizedBox(height: 16),
+                      if (isExtracting) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    _gold,
+                                  ),
                                 ),
                               ),
-                              onPressed: () => onAccept(DownloadType.video),
-                              icon: const Icon(Icons.movie, size: 20),
-                              label: const Text(
-                                'Video HD',
-                                style: TextStyle(fontWeight: FontWeight.bold),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Analyzing available qualities...',
+                                style: TextStyle(
+                                  color: _textMuted,
+                                  fontSize: 13,
+                                ),
                               ),
+                            ],
+                          ),
+                        ),
+                      ] else if (videoQualities.isNotEmpty ||
+                          audioQualities.isNotEmpty) ...[
+                        Text(
+                          'Select Video Quality:',
+                          style: TextStyle(
+                            color: _textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: videoQualities.map((q) {
+                            return ChoiceChip(
+                              label: Text(q.label),
+                              selected: false,
+                              selectedColor: _gold,
+                              backgroundColor: Colors.white.withOpacity(0.08),
+                              labelStyle: TextStyle(
+                                color: _gold,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              onSelected: (_) =>
+                                  onAcceptFormat(q, DownloadType.video),
+                            );
+                          }).toList(),
+                        ),
+                        if (audioQualities.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            'Select Audio Quality:',
+                            style: TextStyle(
+                              color: _textMuted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.white,
-                                side: BorderSide(color: _gold.withOpacity(0.6)),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: audioQualities.map((q) {
+                              return ChoiceChip(
+                                label: Text('MP3 (${q.label})'),
+                                selected: false,
+                                selectedColor: _gold,
+                                backgroundColor: Colors.white.withOpacity(0.08),
+                                labelStyle: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
                                 ),
-                              ),
-                              onPressed: () => onAccept(DownloadType.audio),
-                              icon: Icon(Icons.music_note, color: _gold, size: 20),
-                              label: const Text(
-                                'Audio MP3',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
+                                onSelected: (_) =>
+                                    onAcceptFormat(q, DownloadType.audio),
+                              );
+                            }).toList(),
                           ),
                         ],
-                      ),
+                      ] else ...[
+                        Text(
+                          'Select Download Format:',
+                          style: TextStyle(
+                            color: _textMuted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _gold,
+                                  foregroundColor: const Color(0xFF101112),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                onPressed: () =>
+                                    onAcceptDefault(DownloadType.video),
+                                icon: const Icon(Icons.movie, size: 20),
+                                label: const Text(
+                                  'Video HD',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: BorderSide(
+                                    color: _gold.withOpacity(0.6),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                onPressed: () =>
+                                    onAcceptDefault(DownloadType.audio),
+                                icon: Icon(
+                                  Icons.music_note,
+                                  color: _gold,
+                                  size: 20,
+                                ),
+                                label: const Text(
+                                  'Audio MP3',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
                         child: TextButton.icon(
-                          onPressed: () => onAccept(DownloadType.image),
+                          onPressed: () => onAcceptDefault(DownloadType.image),
                           icon: Icon(Icons.image, color: _textMuted, size: 18),
                           label: Text(
                             'Download Images / Photos',
@@ -4871,34 +5090,45 @@ void _showMetadataEditDialog(
   );
 }
 
-Future<bool> _checkAndRequestStoragePermission(BuildContext context, DownloadType type) async {
+Future<bool> _checkAndRequestStoragePermission(
+  BuildContext context,
+  DownloadType type,
+) async {
   final permissions = PermissionService();
   bool hasPerm = false;
-  
+
   if (type == DownloadType.image) {
     hasPerm = await permissions.hasMediaImagesPermission();
   } else {
     // For video/audio on Android 10+, Scoped Storage/MediaStore is used which does not need storage permissions
     if (Platform.isAndroid) {
-      return true; 
+      return true;
     }
     hasPerm = await permissions.hasStoragePermission();
   }
-  
+
   if (hasPerm) return true;
-  
+
   if (context.mounted) {
     final granted = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           backgroundColor: const Color(0xFF18181A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: const Row(
             children: [
               Icon(Icons.security, color: Color(0xFFFFD700), size: 24),
               SizedBox(width: 10),
-              Text('Permission Required', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              Text(
+                'Permission Required',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
           content: Text(
@@ -4910,17 +5140,26 @@ Future<bool> _checkAndRequestStoragePermission(BuildContext context, DownloadTyp
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.white54),
+              ),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Grant', style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold)),
+              child: const Text(
+                'Grant',
+                style: TextStyle(
+                  color: Color(0xFFFFD700),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         );
       },
     );
-    
+
     if (granted == true) {
       if (type == DownloadType.image) {
         return await permissions.requestMediaImagesPermission();
@@ -4932,15 +5171,23 @@ Future<bool> _checkAndRequestStoragePermission(BuildContext context, DownloadTyp
   return false;
 }
 
-void _handleSaveAction(BuildContext context, DownloadItem item, DuckDownloadsController controller) async {
+void _handleSaveAction(
+  BuildContext context,
+  DownloadItem item,
+  DuckDownloadsController controller,
+) async {
   final hasPerm = await _checkAndRequestStoragePermission(context, item.type);
   if (!hasPerm) {
     if (context.mounted) {
-      _showSettingToast(context, 'Permission denied. Cannot save media.', false);
+      _showSettingToast(
+        context,
+        'Permission denied. Cannot save media.',
+        false,
+      );
     }
     return;
   }
-  
+
   if (item.isImage) {
     controller.saveImageExternally(item);
   } else if (item.isVideo) {
@@ -4982,7 +5229,10 @@ void _showRenameDialog(
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           TextButton(
             onPressed: () async {
@@ -5020,10 +5270,16 @@ void _showVideoToAudioDialog(
         builder: (context, setState) {
           return AlertDialog(
             backgroundColor: _panel,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
+            ),
             title: Text(
               'Convert Video to Audio',
-              style: TextStyle(color: _text, fontWeight: FontWeight.bold, fontSize: 18),
+              style: TextStyle(
+                color: _text,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -5038,7 +5294,11 @@ void _showVideoToAudioDialog(
                 const SizedBox(height: 20),
                 Text(
                   'Format',
-                  style: TextStyle(color: _text, fontWeight: FontWeight.bold, fontSize: 14),
+                  style: TextStyle(
+                    color: _text,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -5046,22 +5306,44 @@ void _showVideoToAudioDialog(
                     Expanded(
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: selectedFormat == 'mp3' ? _gold : Colors.white24),
-                          backgroundColor: selectedFormat == 'mp3' ? _gold.withOpacity(0.1) : Colors.transparent,
+                          side: BorderSide(
+                            color: selectedFormat == 'mp3'
+                                ? _gold
+                                : Colors.white24,
+                          ),
+                          backgroundColor: selectedFormat == 'mp3'
+                              ? _gold.withOpacity(0.1)
+                              : Colors.transparent,
                         ),
                         onPressed: () => setState(() => selectedFormat = 'mp3'),
-                        child: Text('MP3 (Standard)', style: TextStyle(color: selectedFormat == 'mp3' ? _gold : _text)),
+                        child: Text(
+                          'MP3 (Standard)',
+                          style: TextStyle(
+                            color: selectedFormat == 'mp3' ? _gold : _text,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: selectedFormat == 'm4a' ? _gold : Colors.white24),
-                          backgroundColor: selectedFormat == 'm4a' ? _gold.withOpacity(0.1) : Colors.transparent,
+                          side: BorderSide(
+                            color: selectedFormat == 'm4a'
+                                ? _gold
+                                : Colors.white24,
+                          ),
+                          backgroundColor: selectedFormat == 'm4a'
+                              ? _gold.withOpacity(0.1)
+                              : Colors.transparent,
                         ),
                         onPressed: () => setState(() => selectedFormat = 'm4a'),
-                        child: Text('M4A (AAC)', style: TextStyle(color: selectedFormat == 'm4a' ? _gold : _text)),
+                        child: Text(
+                          'M4A (AAC)',
+                          style: TextStyle(
+                            color: selectedFormat == 'm4a' ? _gold : _text,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -5069,7 +5351,11 @@ void _showVideoToAudioDialog(
                 const SizedBox(height: 20),
                 Text(
                   'Audio Bitrate (Quality)',
-                  style: TextStyle(color: _text, fontWeight: FontWeight.bold, fontSize: 14),
+                  style: TextStyle(
+                    color: _text,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<int>(
@@ -5088,8 +5374,14 @@ void _showVideoToAudioDialog(
                   ),
                   items: const [
                     DropdownMenuItem(value: 128, child: Text('128 kbps (Low)')),
-                    DropdownMenuItem(value: 192, child: Text('192 kbps (Medium)')),
-                    DropdownMenuItem(value: 320, child: Text('320 kbps (High/HD)')),
+                    DropdownMenuItem(
+                      value: 192,
+                      child: Text('192 kbps (Medium)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 320,
+                      child: Text('320 kbps (High/HD)'),
+                    ),
                   ],
                   onChanged: (val) {
                     if (val != null) {
@@ -5107,10 +5399,23 @@ void _showVideoToAudioDialog(
               TextButton(
                 onPressed: () {
                   Navigator.pop(context);
-                  _showSettingToast(context, 'Audio extraction started in background...', true);
-                  unawaited(controller.convertVideoToAudio(item, selectedFormat, selectedBitrate));
+                  _showSettingToast(
+                    context,
+                    'Audio extraction started in background...',
+                    true,
+                  );
+                  unawaited(
+                    controller.convertVideoToAudio(
+                      item,
+                      selectedFormat,
+                      selectedBitrate,
+                    ),
+                  );
                 },
-                child: Text('Convert', style: TextStyle(color: _gold, fontWeight: FontWeight.bold)),
+                child: Text(
+                  'Convert',
+                  style: TextStyle(color: _gold, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
           );
@@ -5141,7 +5446,9 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
     final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
     final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 3.0;
 
-    final duration = _isDraggingPill ? Duration.zero : const Duration(milliseconds: 240);
+    final duration = _isDraggingPill
+        ? Duration.zero
+        : const Duration(milliseconds: 240);
     final curve = _isDraggingPill ? Curves.linear : Curves.easeOutBack;
 
     final scale = _isDraggingPill ? 1.08 : 1.0;
@@ -5161,7 +5468,10 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
             final maxLeft = 53.0;
             setState(() {
               _isDraggingPill = true;
-              _dragPillOffset = Offset(targetLeft.clamp(minLeft, maxLeft), targetTop.clamp(0.0, 6.0));
+              _dragPillOffset = Offset(
+                targetLeft.clamp(minLeft, maxLeft),
+                targetTop.clamp(0.0, 6.0),
+              );
             });
           },
           onPanUpdate: (details) {
@@ -5169,7 +5479,7 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
             final targetTop = details.localPosition.dy - 13.0;
             final minLeft = 3.0;
             final maxLeft = 53.0;
-            
+
             double dragLeft = targetLeft;
             if (targetLeft < minLeft) {
               final diff = minLeft - targetLeft;
@@ -5261,7 +5571,9 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
                         color: _gold,
                         boxShadow: [
                           BoxShadow(
-                            color: _gold.withOpacity(_isDraggingPill ? 0.5 : 0.3),
+                            color: _gold.withOpacity(
+                              _isDraggingPill ? 0.5 : 0.3,
+                            ),
                             blurRadius: _isDraggingPill ? 10 : 6,
                             offset: const Offset(0, 1),
                           ),
@@ -5280,14 +5592,20 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
                           onTap: () {
                             if (!widget.controller.autoSaveVideos) {
                               widget.controller.toggleAutoSaveVideos(true);
-                              _showSettingToast(context, 'Auto Save Enabled', true);
+                              _showSettingToast(
+                                context,
+                                'Auto Save Enabled',
+                                true,
+                              );
                             }
                           },
                           child: Center(
                             child: AnimatedDefaultTextStyle(
                               duration: const Duration(milliseconds: 180),
                               style: TextStyle(
-                                color: active ? const Color(0xFF101112) : Colors.white60,
+                                color: active
+                                    ? const Color(0xFF101112)
+                                    : Colors.white60,
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -5302,14 +5620,20 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
                           onTap: () {
                             if (widget.controller.autoSaveVideos) {
                               widget.controller.toggleAutoSaveVideos(false);
-                              _showSettingToast(context, 'Auto Save Disabled', false);
+                              _showSettingToast(
+                                context,
+                                'Auto Save Disabled',
+                                false,
+                              );
                             }
                           },
                           child: Center(
                             child: AnimatedDefaultTextStyle(
                               duration: const Duration(milliseconds: 180),
                               style: TextStyle(
-                                color: !active ? const Color(0xFF101112) : Colors.white60,
+                                color: !active
+                                    ? const Color(0xFF101112)
+                                    : Colors.white60,
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -5328,10 +5652,7 @@ class _AutoSaveToggleSwitchState extends State<_AutoSaveToggleSwitch> {
         const SizedBox(height: 4),
         const Text(
           'Auto save',
-          style: TextStyle(
-            color: Colors.white70,
-            fontSize: 11,
-          ),
+          style: TextStyle(color: Colors.white70, fontSize: 11),
         ),
       ],
     );
@@ -5348,9 +5669,7 @@ class DottedCircleIcon extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: CustomPaint(
-        painter: _DottedCirclePainter(color: color),
-      ),
+      child: CustomPaint(painter: _DottedCirclePainter(color: color)),
     );
   }
 }
@@ -5392,10 +5711,7 @@ class _DottedCirclePainter extends CustomPainter {
 }
 
 class _LibraryButton extends StatefulWidget {
-  const _LibraryButton({
-    required this.label,
-    required this.onTap,
-  });
+  const _LibraryButton({required this.label, required this.onTap});
 
   final String label;
   final VoidCallback onTap;
@@ -5457,7 +5773,9 @@ class _BottomNavBarState extends State<_BottomNavBar> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final goldColor = isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
+    final goldColor = isLight
+        ? const Color(0xFFC69214)
+        : const Color(0xFFFFC52F);
 
     // iOS iPhone layout with 4 tabs and liquid glass support
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -5477,7 +5795,9 @@ class _BottomNavBarState extends State<_BottomNavBar> {
 
     final useLiquidGlass = DuckLiquidGlass.shouldUseLiquidGlass(context);
 
-    final duration = _isDraggingPill ? Duration.zero : const Duration(milliseconds: 300);
+    final duration = _isDraggingPill
+        ? Duration.zero
+        : const Duration(milliseconds: 300);
     final curve = _isDraggingPill
         ? Curves.linear
         : (useLiquidGlass ? Curves.easeOutBack : Curves.easeInOut);
@@ -5505,7 +5825,10 @@ class _BottomNavBarState extends State<_BottomNavBar> {
           final maxLeft = totalWidth - tabWidth + 4.0;
           setState(() {
             _isDraggingPill = true;
-            _dragPillOffset = Offset(targetLeft.clamp(minLeft, maxLeft), targetTop.clamp(0.0, 8.0));
+            _dragPillOffset = Offset(
+              targetLeft.clamp(minLeft, maxLeft),
+              targetTop.clamp(0.0, 8.0),
+            );
           });
         },
         onPanUpdate: (details) {
@@ -5513,7 +5836,7 @@ class _BottomNavBarState extends State<_BottomNavBar> {
           final targetTop = details.localPosition.dy - 20.0;
           final minLeft = 4.0;
           final maxLeft = totalWidth - tabWidth + 4.0;
-          
+
           double dragLeft = targetLeft;
           if (targetLeft < minLeft) {
             final diff = minLeft - targetLeft;
@@ -5577,8 +5900,9 @@ class _BottomNavBarState extends State<_BottomNavBar> {
                   fallbackColor: isLight
                       ? Colors.white.withValues(alpha: 0.82)
                       : Colors.white.withValues(alpha: 0.06),
-                  fallbackBorderColor:
-                      goldColor.withValues(alpha: isLight ? 0.12 : 0.16),
+                  fallbackBorderColor: goldColor.withValues(
+                    alpha: isLight ? 0.12 : 0.16,
+                  ),
                   child: const SizedBox.expand(),
                 ),
               ),
@@ -5619,7 +5943,12 @@ class _BottomNavBarState extends State<_BottomNavBar> {
     );
   }
 
-  Widget _buildIOSTabOption(int index, String label, bool active, bool isLight) {
+  Widget _buildIOSTabOption(
+    int index,
+    String label,
+    bool active,
+    bool isLight,
+  ) {
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -5637,8 +5966,8 @@ class _BottomNavBarState extends State<_BottomNavBar> {
           child: AnimatedDefaultTextStyle(
             duration: const Duration(milliseconds: 200),
             style: TextStyle(
-              color: active 
-                  ? const Color(0xFF101112) 
+              color: active
+                  ? const Color(0xFF101112)
                   : (isLight ? Colors.black54 : Colors.white60),
               fontSize: 10,
               fontWeight: FontWeight.bold,
@@ -5663,7 +5992,9 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
     final gold = isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
     final dark = isLight ? const Color(0xFFF0F1F2) : const Color(0xFF101112);
     final text = isLight ? const Color(0xFF101112) : Colors.white;
-    final textMuted = isLight ? const Color(0xFF707172) : const Color(0xFF888A8C);
+    final textMuted = isLight
+        ? const Color(0xFF707172)
+        : const Color(0xFF888A8C);
 
     return Positioned.fill(
       child: Container(
@@ -5720,7 +6051,8 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
                         ),
                         IconButton(
                           icon: Icon(Icons.close, color: textMuted, size: 20),
-                          onPressed: () => controller.resolvePlaylistChoice(false),
+                          onPressed: () =>
+                              controller.resolvePlaylistChoice(false),
                         ),
                       ],
                     ),
@@ -5749,7 +6081,8 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
                                 side: BorderSide(color: gold.withOpacity(0.5)),
                               ),
                             ),
-                            onPressed: () => controller.resolvePlaylistChoice(false),
+                            onPressed: () =>
+                                controller.resolvePlaylistChoice(false),
                             child: const Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -5778,7 +6111,8 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            onPressed: () => controller.resolvePlaylistChoice(true),
+                            onPressed: () =>
+                                controller.resolvePlaylistChoice(true),
                             child: const Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -5824,10 +6158,7 @@ void _showRingtoneCutterSheet(
 }
 
 class _RingtoneCutterSheet extends StatefulWidget {
-  const _RingtoneCutterSheet({
-    required this.item,
-    required this.controller,
-  });
+  const _RingtoneCutterSheet({required this.item, required this.controller});
 
   final DownloadItem item;
   final DuckDownloadsController controller;
@@ -5858,10 +6189,13 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
       final filePath = widget.item.filePath;
       if (filePath == null) return;
 
-      final info = await widget.controller.getEffectivePathAndFileName(widget.item);
+      final info = await widget.controller.getEffectivePathAndFileName(
+        widget.item,
+      );
       final actualPath = info['path']!;
 
-      final duration = await _previewPlayer.setFilePath(actualPath) ?? Duration.zero;
+      final duration =
+          await _previewPlayer.setFilePath(actualPath) ?? Duration.zero;
       if (mounted) {
         setState(() {
           _durationSec = duration.inMilliseconds / 1000.0;
@@ -5874,7 +6208,9 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
         final posSec = pos.inMilliseconds / 1000.0;
         if (_isPlaying && posSec >= _endSec) {
           _previewPlayer.pause();
-          _previewPlayer.seek(Duration(milliseconds: (_startSec * 1000).toInt()));
+          _previewPlayer.seek(
+            Duration(milliseconds: (_startSec * 1000).toInt()),
+          );
         }
       });
 
@@ -5914,7 +6250,9 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
     final gold = isLight ? const Color(0xFFC69214) : const Color(0xFFFFC52F);
     final dark = isLight ? const Color(0xFFF0F1F2) : const Color(0xFF101112);
     final text = isLight ? const Color(0xFF101112) : Colors.white;
-    final textMuted = isLight ? const Color(0xFF707172) : const Color(0xFF888A8C);
+    final textMuted = isLight
+        ? const Color(0xFF707172)
+        : const Color(0xFF888A8C);
 
     final selectedDur = _endSec - _startSec;
 
@@ -5930,7 +6268,12 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
           ),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.paddingOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        20 + MediaQuery.paddingOf(context).bottom,
+      ),
       child: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {
@@ -6027,14 +6370,18 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
                             _startSec = newStart;
                             _endSec = newEnd;
                           });
-                          _previewPlayer.seek(Duration(milliseconds: (_startSec * 1000).toInt()));
+                          _previewPlayer.seek(
+                            Duration(milliseconds: (_startSec * 1000).toInt()),
+                          );
                         },
                 ),
                 const SizedBox(height: 20),
                 IconButton(
                   iconSize: 48,
                   icon: Icon(
-                    _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                    _isPlaying
+                        ? Icons.pause_circle_filled
+                        : Icons.play_circle_filled,
                     color: gold,
                   ),
                   onPressed: isBusy ? null : _togglePlay,
@@ -6074,7 +6421,9 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
                           );
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Ringtone updated successfully!')),
+                              const SnackBar(
+                                content: Text('Ringtone updated successfully!'),
+                              ),
                             );
                             Navigator.pop(context);
                           }
@@ -6096,4 +6445,3 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
     );
   }
 }
-

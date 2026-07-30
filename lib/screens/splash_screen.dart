@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import '../constants/asset_paths.dart';
+import '../services/ad_service.dart';
 import '../state/downloads_controller.dart';
 import '../theme/duck_theme.dart';
 import '../widgets/ambient_background.dart';
@@ -68,7 +69,9 @@ class _SplashScreenState extends State<SplashScreen>
       if (mounted) _titleController.forward();
     });
 
-    unawaited(_bootstrap());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_bootstrap());
+    });
   }
 
   Future<void> _bootstrap() async {
@@ -98,6 +101,15 @@ class _SplashScreenState extends State<SplashScreen>
     }
     if (!mounted || _navigated) return;
     _navigated = true;
+
+    if (widget.controller.showAdOnOpen) {
+      widget.controller.showAdOnOpen = false;
+      AdService.instance.showInterstitialAd(
+        isPremiumActive: widget.controller.isPremiumActive,
+        onAdClosed: () {},
+      );
+    }
+
     await Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>

@@ -14,7 +14,8 @@ class PurchaseRepository {
   static const _verifiedAtKey = 'subscriptionVerifiedAt';
 
   PremiumEntitlement readEntitlement() {
-    final active = _box.get(_activeKey, defaultValue: false) as bool;
+    final value = _box.get(_activeKey);
+    final active = value is bool ? value : false;
     if (!active) return const PremiumEntitlement.inactive();
     final productId = _box.get(_productIdKey) as String?;
     if (productId == null || !premiumProductIds.contains(productId)) {

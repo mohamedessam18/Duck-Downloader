@@ -12,6 +12,7 @@ import 'package:duck_downloader/services/purchase_repository.dart';
 import 'package:duck_downloader/services/subscription_service.dart';
 import 'package:duck_downloader/services/media_save_service.dart';
 import 'package:duck_downloader/state/downloads_controller.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 
@@ -91,6 +92,14 @@ class FakeFileService extends DuckFileService {
   }
 
   @override
+  @override
+  Future<String> copyFileToVault({
+    required String currentPath,
+    required String filename,
+  }) async {
+    return '/vault/$filename';
+  }
+
   Future<String> moveFileFromVault({
     required String currentPath,
     required String filename,
@@ -119,9 +128,45 @@ class FakeFileService extends DuckFileService {
 void main() {
   late Directory hiveDir;
   late File mediaFile;
+  final secureStorage = <String, String>{};
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+          (call) async {
+            final key = call.arguments['key'] as String?;
+            switch (call.method) {
+              case 'read':
+                return key == null ? null : secureStorage[key];
+              case 'write':
+                if (key != null) {
+                  secureStorage[key] = call.arguments['value'] as String;
+                }
+                return null;
+              case 'delete':
+                if (key != null) secureStorage.remove(key);
+                return null;
+              case 'deleteAll':
+                secureStorage.clear();
+                return null;
+              case 'readAll':
+                return secureStorage;
+            }
+            return null;
+          },
+        );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (call) async {
+            if (call.method == 'getApplicationDocumentsDirectory') {
+              return hiveDir.path;
+            }
+            return null;
+          },
+        );
     hiveDir = await Directory.systemTemp.createTemp('media_save_controller_');
     Hive.init(hiveDir.path);
     mediaFile = File('${hiveDir.path}/video.mp4');
@@ -267,11 +312,11 @@ void main() {
     await controller.setVaultPin('5555');
     expect(controller.isVaultSetup, isTrue);
 
-    bool ok = controller.checkVaultPin('1111');
+    bool ok = await controller.checkVaultPin('1111');
     expect(ok, isFalse);
     expect(controller.isVaultLocked, isTrue);
 
-    ok = controller.checkVaultPin('5555');
+    ok = await controller.checkVaultPin('5555');
     expect(ok, isTrue);
     expect(controller.isVaultLocked, isFalse);
 
@@ -291,6 +336,8 @@ void main() {
       addTearDown(controller.dispose);
 
       expect(controller.downloads.single.isPrivate, isFalse);
+
+      await controller.setVaultPin('5555');
 
       await controller.moveItemToVault(controller.downloads.single);
       expect(controller.downloads.single.isPrivate, isTrue);
@@ -414,42 +461,51 @@ void main() {
     expect(controller.status, 'Started 1 images, 1 failed');
   });
 
-  test('batch hybrid download downloads images as images and videos as videos', () async {
-    final box = await Hive.openBox('media-save-controller-hybrid-batch');
-    addTearDown(box.close);
-    await box.clear();
-    final api = FakeBatchApiClient();
-    final controller = _controller(box, FakeMediaSaveService(), api: api);
-    addTearDown(controller.dispose);
-    controller.batchPlatform = 'Instagram';
-    controller.batchItems = const [
-      PlaylistItem(
-        url: 'https://cdninstagram.com/image-1.jpg',
-        title: 'Image 1',
-        thumbnail: 'https://cdninstagram.com/image-1.jpg',
-        isVideo: false,
-      ),
-      PlaylistItem(
-        url: 'https://cdninstagram.com/video-1.mp4',
-        title: 'Video 1',
-        thumbnail: 'https://cdninstagram.com/video-1.mp4',
-        isVideo: true,
-      ),
-    ];
+  test(
+    'batch hybrid download downloads images as images and videos as videos',
+    () async {
+      final box = await Hive.openBox('media-save-controller-hybrid-batch');
+      addTearDown(box.close);
+      await box.clear();
+      final api = FakeBatchApiClient();
+      final controller = _controller(box, FakeMediaSaveService(), api: api);
+      addTearDown(controller.dispose);
+      controller.batchPlatform = 'Instagram';
+      controller.batchItems = const [
+        PlaylistItem(
+          url: 'https://cdninstagram.com/image-1.jpg',
+          title: 'Image 1',
+          thumbnail: 'https://cdninstagram.com/image-1.jpg',
+          isVideo: false,
+        ),
+        PlaylistItem(
+          url: 'https://cdninstagram.com/video-1.mp4',
+          title: 'Video 1',
+          thumbnail: 'https://cdninstagram.com/video-1.mp4',
+          isVideo: true,
+        ),
+      ];
 
-    await controller.startBatchDownload(
-      urls: controller.batchItems!.map((item) => item.url).toList(),
-      type: DownloadType.video,
-      quality: 'Best',
-      forceHybrid: true,
-    );
+      await controller.startBatchDownload(
+        urls: controller.batchItems!.map((item) => item.url).toList(),
+        type: DownloadType.video,
+        quality: 'Best',
+        forceHybrid: true,
+      );
 
-    expect(api.startedDownloads, hasLength(2));
-    expect(api.startedDownloads[0].url, 'https://cdninstagram.com/image-1.jpg');
-    expect(api.startedDownloads[0].type, DownloadType.image);
-    expect(api.startedDownloads[1].url, 'https://cdninstagram.com/video-1.mp4');
-    expect(api.startedDownloads[1].type, DownloadType.video);
-  });
+      expect(api.startedDownloads, hasLength(2));
+      expect(
+        api.startedDownloads[0].url,
+        'https://cdninstagram.com/image-1.jpg',
+      );
+      expect(api.startedDownloads[0].type, DownloadType.image);
+      expect(
+        api.startedDownloads[1].url,
+        'https://cdninstagram.com/video-1.mp4',
+      );
+      expect(api.startedDownloads[1].type, DownloadType.video);
+    },
+  );
 
   test('batch image download rejects preview-only Instagram items', () async {
     final box = await Hive.openBox('media-save-controller-image-preview-only');

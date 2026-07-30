@@ -5,6 +5,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 
 import 'app.dart';
 import 'services/ad_service.dart';
+import 'services/vault_encryption_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,13 +15,32 @@ Future<void> main() async {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
 
-  await AdService.instance.initialize();
-  await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.duck.downloader.audio',
-    androidNotificationChannelName: 'Duck Audio Playback',
-    androidNotificationOngoing: true,
-  );
+  try {
+    await AdService.instance.initialize();
+  } catch (error, stackTrace) {
+    debugPrint('Ad SDK initialization failed: $error\n$stackTrace');
+  }
+  try {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'com.duck.downloader.audio',
+      androidNotificationChannelName: 'Duck Audio Playback',
+      androidNotificationOngoing: true,
+    );
+  } catch (error, stackTrace) {
+    debugPrint('Audio background initialization failed: $error\n$stackTrace');
+  }
   await Hive.initFlutter();
-  await Hive.openBox('duck-downloads');
+  await VaultEncryptionService.initialize();
+  await _openDownloadsBox();
   runApp(const DuckDownloaderApp());
-}
+}
+
+Future<void> _openDownloadsBox() async {
+  try {
+    await Hive.openBox('duck-downloads');
+  } catch (error, stackTrace) {
+    debugPrint('Recovering unreadable local data: $error\n$stackTrace');
+    await Hive.deleteBoxFromDisk('duck-downloads');
+    await Hive.openBox('duck-downloads');
+  }
+}
