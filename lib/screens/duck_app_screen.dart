@@ -12,6 +12,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/premium_entitlement.dart';
@@ -2083,8 +2084,10 @@ class _LibraryViewState extends State<_LibraryView> {
     };
 
     final isLight = Theme.of(context).brightness == Brightness.light;
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final effectiveIndex = isRtl ? (3 - activeIndex) : activeIndex;
 
-    final defaultLeft = 4.0 + (activeIndex * 78.0);
+    final defaultLeft = 4.0 + (effectiveIndex * 78.0);
     final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
     final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 4.0;
 
@@ -2146,7 +2149,8 @@ class _LibraryViewState extends State<_LibraryView> {
         onPanEnd: (details) {
           if (_dragPillOffset != null) {
             final center = _dragPillOffset!.dx + 39.0;
-            final targetIndex = ((center - 4.0) / 78.0).round().clamp(0, 3);
+            final rawIndex = ((center - 4.0) / 78.0).round().clamp(0, 3);
+            final targetIndex = isRtl ? (3 - rawIndex) : rawIndex;
             setState(() {
               _isDraggingPill = false;
               _subTab = switch (targetIndex) {
@@ -2159,86 +2163,88 @@ class _LibraryViewState extends State<_LibraryView> {
             });
           }
         },
-        child: Container(
-          width: 320,
-          height: 42,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(21),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.12),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned.fill(
-                child: DuckLiquidGlassTrack(
-                  borderRadius: 21,
-                  isLight: isLight,
-                  isDragging: _isDraggingPill,
-                  blurSigma: 16,
-                  fallbackColor: Colors.white.withValues(
-                    alpha: isLight ? 0.45 : 0.05,
-                  ),
-                  fallbackBorderColor: (isLight ? Colors.black : Colors.white)
-                      .withValues(alpha: 0.12),
-                  child: const SizedBox.expand(),
+          child: Container(
+            width: 320,
+            height: 42,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(21),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.12),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
-              ),
-              AnimatedPositioned(
-                duration: duration,
-                curve: curve,
-                left: currentLeft + leftOffset,
-                top: currentTop,
-                width: width,
-                height: 32.0,
-                child: Transform.scale(
-                  scale: scale,
-                  child: DuckLiquidGlassPill(
-                    width: width,
-                    height: 32,
-                    borderRadius: 16,
-                    goldColor: _gold,
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: DuckLiquidGlassTrack(
+                    borderRadius: 21,
+                    isLight: isLight,
                     isDragging: _isDraggingPill,
+                    blurSigma: 16,
+                    fallbackColor: Colors.white.withValues(
+                      alpha: isLight ? 0.45 : 0.05,
+                    ),
+                    fallbackBorderColor: (isLight ? Colors.black : Colors.white)
+                        .withValues(alpha: 0.12),
+                    child: const SizedBox.expand(),
                   ),
                 ),
-              ),
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    _buildTabOption(
-                      _LibrarySubTab.all,
-                      isAudios ? 'SONGS' : 'ALL',
-                      activeIndex == 0,
+                AnimatedPositioned(
+                  duration: duration,
+                  curve: curve,
+                  left: currentLeft + leftOffset,
+                  top: currentTop,
+                  width: width,
+                  height: 32.0,
+                  child: Transform.scale(
+                    scale: scale,
+                    child: DuckLiquidGlassPill(
+                      width: width,
+                      height: 32,
+                      borderRadius: 16,
+                      goldColor: _gold,
+                      isDragging: _isDraggingPill,
                     ),
-                    _buildTabOption(
-                      _LibrarySubTab.folders,
-                      'FOLDERS',
-                      activeIndex == 1,
-                    ),
-                    _buildTabOption(
-                      _LibrarySubTab.favorites,
-                      'FAVORITES',
-                      activeIndex == 2,
-                    ),
-                    _buildTabOption(
-                      _LibrarySubTab.playlists,
-                      'PLAYLISTS',
-                      activeIndex == 3,
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      _buildTabOption(
+                        _LibrarySubTab.all,
+                        isAudios
+                            ? AppLocalizations.of(context).translate('songs')
+                            : AppLocalizations.of(context).translate('all'),
+                        activeIndex == 0,
+                      ),
+                      _buildTabOption(
+                        _LibrarySubTab.folders,
+                        AppLocalizations.of(context).translate('folders'),
+                        activeIndex == 1,
+                      ),
+                      _buildTabOption(
+                        _LibrarySubTab.favorites,
+                        AppLocalizations.of(context).translate('favorites'),
+                        activeIndex == 2,
+                      ),
+                      _buildTabOption(
+                        _LibrarySubTab.playlists,
+                        AppLocalizations.of(context).translate('playlists'),
+                        activeIndex == 3,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-    );
-  }
+      );
+    }
 
   Widget _buildTabOption(_LibrarySubTab tab, String label, bool active) {
     return Expanded(
@@ -4629,7 +4635,7 @@ class _ClipboardDetectorOverlay extends StatelessWidget {
                       ),
                       const SizedBox(height: 18),
                       Text(
-                        'Link Detected!',
+                        AppLocalizations.of(context).translate('linkDetectedClipboard'),
                         style: TextStyle(
                           color: _text,
                           fontSize: 20,
@@ -4660,9 +4666,9 @@ class _ClipboardDetectorOverlay extends StatelessWidget {
                                 ),
                               ),
                               onPressed: onDismiss,
-                              child: const Text(
-                                'Dismiss',
-                                style: TextStyle(fontWeight: FontWeight.bold),
+                              child: Text(
+                                AppLocalizations.of(context).translate('dismiss'),
+                                style: const TextStyle(fontWeight: FontWeight.bold),
                               ),
                             ),
                           ),
@@ -4680,9 +4686,9 @@ class _ClipboardDetectorOverlay extends StatelessWidget {
                                 ),
                               ),
                               onPressed: onAccept,
-                              child: const Text(
-                                'Extract',
-                                style: TextStyle(fontWeight: FontWeight.w900),
+                              child: Text(
+                                AppLocalizations.of(context).translate('downloadNow'),
+                                style: const TextStyle(fontWeight: FontWeight.w900),
                               ),
                             ),
                           ),
@@ -4891,7 +4897,7 @@ class _QuickShareOverlay extends StatelessWidget {
                         ],
                       ] else ...[
                         Text(
-                          'Select Download Format:',
+                          AppLocalizations.of(context).translate('selectFormat'),
                           style: TextStyle(
                             color: _textMuted,
                             fontSize: 13,
@@ -4916,9 +4922,9 @@ class _QuickShareOverlay extends StatelessWidget {
                                 onPressed: () =>
                                     onAcceptDefault(DownloadType.video),
                                 icon: const Icon(Icons.movie, size: 20),
-                                label: const Text(
-                                  'Video HD',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                label: Text(
+                                  AppLocalizations.of(context).translate('videoHD'),
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ),
@@ -4944,9 +4950,9 @@ class _QuickShareOverlay extends StatelessWidget {
                                   color: _gold,
                                   size: 20,
                                 ),
-                                label: const Text(
-                                  'Audio MP3',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                label: Text(
+                                  AppLocalizations.of(context).translate('audioMP3'),
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ),
@@ -4960,7 +4966,7 @@ class _QuickShareOverlay extends StatelessWidget {
                           onPressed: () => onAcceptDefault(DownloadType.image),
                           icon: Icon(Icons.image, color: _textMuted, size: 18),
                           label: Text(
-                            'Download Images / Photos',
+                            AppLocalizations.of(context).translate('images'),
                             style: TextStyle(color: _textMuted, fontSize: 13),
                           ),
                         ),
@@ -5789,7 +5795,10 @@ class _BottomNavBarState extends State<_BottomNavBar> {
       DuckTab.audios => 3,
     };
 
-    final defaultLeft = 4.0 + (activeIndex * tabWidth);
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final effectiveIndex = isRtl ? (3 - activeIndex) : activeIndex;
+
+    final defaultLeft = 4.0 + (effectiveIndex * tabWidth);
     final currentLeft = _isDraggingPill ? _dragPillOffset!.dx : defaultLeft;
     final currentTop = _isDraggingPill ? _dragPillOffset!.dy : 4.0;
 
@@ -5862,7 +5871,8 @@ class _BottomNavBarState extends State<_BottomNavBar> {
         onPanEnd: (details) {
           if (_dragPillOffset != null) {
             final center = _dragPillOffset!.dx + (tabWidth / 2.0);
-            final targetIndex = (center / tabWidth).floor().clamp(0, 3);
+            final rawIndex = (center / tabWidth).floor().clamp(0, 3);
+            final targetIndex = isRtl ? (3 - rawIndex) : rawIndex;
             setState(() {
               _isDraggingPill = false;
             });
@@ -6039,7 +6049,7 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
                             Icon(Icons.playlist_play, color: gold, size: 28),
                             const SizedBox(width: 8),
                             Text(
-                              'PLAYLIST DETECTED',
+                              AppLocalizations.of(context).translate('playlistDetected'),
                               style: TextStyle(
                                 color: text,
                                 fontSize: 16,
@@ -6058,7 +6068,7 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      'This link contains a single video and a full playlist. How would you like to download it?',
+                      AppLocalizations.of(context).translate('downloadLinkNow'),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: text,
@@ -6083,14 +6093,14 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
                             ),
                             onPressed: () =>
                                 controller.resolvePlaylistChoice(false),
-                            child: const Column(
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.play_circle_outline, size: 24),
-                                SizedBox(height: 4),
+                                const Icon(Icons.play_circle_outline, size: 24),
+                                const SizedBox(height: 4),
                                 Text(
-                                  'Single Video',
-                                  style: TextStyle(
+                                  AppLocalizations.of(context).translate('downloadSingle'),
+                                  style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -6113,14 +6123,14 @@ class _PlaylistChoiceOverlay extends StatelessWidget {
                             ),
                             onPressed: () =>
                                 controller.resolvePlaylistChoice(true),
-                            child: const Column(
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.playlist_add, size: 24),
-                                SizedBox(height: 4),
+                                const Icon(Icons.playlist_add, size: 24),
+                                const SizedBox(height: 4),
                                 Text(
-                                  'Full Playlist',
-                                  style: TextStyle(
+                                  AppLocalizations.of(context).translate('downloadFullPlaylist'),
+                                  style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
                                   ),

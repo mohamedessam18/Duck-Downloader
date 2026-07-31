@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
@@ -15,7 +16,7 @@ class VaultEncryptionService {
   static const _vaultDirName = '.Vault';
   static const _magic = <int>[68, 68, 86, 50]; // DDV2
   static const _chunkSize = 1024 * 1024;
-  static const _pinIterations = 80000;
+  static const _pinIterations = 10000;
   static const _legacyPinIterations = 310000;
   static const _saltKey = 'vault.pin.salt';
   static const _pinEnvelopeKey = 'vault.pin.envelope';
@@ -38,18 +39,35 @@ class VaultEncryptionService {
   static bool get isUnlocked => _sessionKey != null;
 
   static Future<void> initialize() async {
-    final salt = await _storage.read(key: _saltKey);
-    final envelope = await _storage.read(key: _pinEnvelopeKey);
-    _configured = salt != null && envelope != null;
-    final decoySalt = await _storage.read(key: _decoySaltKey);
-    final decoyEnvelope = await _storage.read(key: _decoyEnvelopeKey);
-    _decoyConfigured = decoySalt != null && decoyEnvelope != null;
+    try {
+      final salt = await _storage.read(key: _saltKey);
+      final envelope = await _storage.read(key: _pinEnvelopeKey);
+      _configured = salt != null && envelope != null;
+      final decoySalt = await _storage.read(key: _decoySaltKey);
+      final decoyEnvelope = await _storage.read(key: _decoyEnvelopeKey);
+      _decoyConfigured = decoySalt != null && decoyEnvelope != null;
+    } catch (e) {
+      // KeyPermanentlyInvalidatedException or PlatformException from Android KeyStore after app reinstall!
+      // Purge stale keys to allow fresh clean Vault setup.
+      await deleteVaultKeys();
+    }
   }
 
   static Future<void> configurePin(String pin) async {
     _validatePin(pin);
     if (_configured && !isUnlocked) {
-      throw StateError('Vault must be unlocked before changing PIN.');
+      try {
+        final salt = await _storage.read(key: _saltKey);
+        final envelope = await _storage.read(key: _pinEnvelopeKey);
+        if (salt == null || envelope == null) {
+          await deleteVaultKeys();
+        } else {
+          throw StateError('Vault must be unlocked before changing PIN.');
+        }
+      } catch (e) {
+        if (e is StateError) rethrow;
+        await deleteVaultKeys();
+      }
     }
     final salt = _randomBytes(16);
     final pinKey = await _derivePinKey(pin, salt);
@@ -78,7 +96,7 @@ class VaultEncryptionService {
       final salt = base64Url.decode(saltValue);
       final envelope = base64Url.decode(envelopeValue);
 
-      for (final iterations in [_pinIterations, _legacyPinIterations]) {
+      for (final iterations in [_pinIterations, 80000, _legacyPinIterations]) {
         try {
           final pinKey = await _derivePinKey(pin, salt, iterations: iterations);
           final masterKeyBytes = await _decryptBytes(envelope, pinKey);
@@ -141,6 +159,7 @@ class VaultEncryptionService {
 
   static void lock() {
     _sessionKey = null;
+    cleanVaultTempFiles();
   }
 
   static Future<void> deleteVaultKeys() async {
@@ -152,6 +171,7 @@ class VaultEncryptionService {
     await _storage.delete(key: _decoySaltKey);
     await _storage.delete(key: _decoyEnvelopeKey);
     _decoyConfigured = false;
+    await cleanVaultTempFiles();
   }
 
   static Future<String> encryptAndMoveToVault({
@@ -237,14 +257,35 @@ class VaultEncryptionService {
     required String originalFilename,
   }) async {
     final tempDir = await getTemporaryDirectory();
+    final safeHash = vaultPath.hashCode.abs();
     final destination = File(
       p.join(
         tempDir.path,
-        'vault_${DateTime.now().microsecondsSinceEpoch}_${_sanitizeFilename(originalFilename)}',
+        'vault_${safeHash}_${_sanitizeFilename(originalFilename)}',
       ),
     );
+    if (await destination.exists() && await destination.length() > 0) {
+      return destination.path;
+    }
     await _decryptFile(File(vaultPath), destination, deleteSource: false);
     return destination.path;
+  }
+
+  static Future<void> cleanVaultTempFiles() async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final dir = Directory(tempDir.path);
+      if (await dir.exists()) {
+        final entities = await dir.list().toList();
+        for (final entity in entities) {
+          if (entity is File && p.basename(entity.path).startsWith('vault_')) {
+            try {
+              await entity.delete();
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   static Future<void> writePrivateDownloadIndex(
@@ -404,12 +445,29 @@ class VaultEncryptionService {
     String pin,
     List<int> salt, {
     int iterations = _pinIterations,
-  }) {
-    return Pbkdf2(
+  }) async {
+    final bytes = await compute(_pbkdf2Worker, {
+      'pin': pin,
+      'salt': salt,
+      'iterations': iterations,
+    });
+    return SecretKey(bytes);
+  }
+
+  static Future<List<int>> _pbkdf2Worker(Map<String, dynamic> params) async {
+    final pin = params['pin'] as String;
+    final salt = params['salt'] as List<int>;
+    final iterations = params['iterations'] as int;
+    final pbkdf2 = Pbkdf2(
       macAlgorithm: Hmac.sha256(),
       iterations: iterations,
       bits: 256,
-    ).deriveKey(secretKey: SecretKey(utf8.encode(pin)), nonce: salt);
+    );
+    final derivedKey = await pbkdf2.deriveKey(
+      secretKey: SecretKey(utf8.encode(pin)),
+      nonce: salt,
+    );
+    return await derivedKey.extractBytes();
   }
 
   static Future<List<int>> _encryptBytes(List<int> bytes, SecretKey key) async {

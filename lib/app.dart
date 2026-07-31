@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'l10n/app_localizations.dart';
+
 import 'core/app_navigator.dart';
 import 'theme/duck_theme.dart';
 import 'screens/splash_screen.dart';
@@ -59,6 +62,22 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
       themeMode: ThemeMode.system,
       theme: DuckTheme.light,
       darkTheme: DuckTheme.dark,
+      supportedLocales: const [
+        Locale('en'),
+        Locale('ar'),
+      ],
+      localeResolutionCallback: (deviceLocale, supportedLocales) {
+        if (deviceLocale != null && deviceLocale.languageCode.startsWith('ar')) {
+          return const Locale('ar');
+        }
+        return const Locale('en');
+      },
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: SplashScreen(controller: controller),
       builder: (context, child) {
         return AnimatedBuilder(

@@ -496,7 +496,12 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   Future<void> setVaultPin(String pin) async {
-    await VaultEncryptionService.configurePin(pin);
+    try {
+      await VaultEncryptionService.configurePin(pin);
+    } catch (e) {
+      await VaultEncryptionService.deleteVaultKeys();
+      await VaultEncryptionService.configurePin(pin);
+    }
     _vaultPin = null;
     await _store.writeVaultPin(null);
     isVaultLocked = false;
@@ -3027,9 +3032,90 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<bool> _isAdultUrl(String url) async {
     try {
-      final uri = Uri.parse(url.trim());
+      final cleanUrl = url.trim();
+      final uri = Uri.parse(cleanUrl);
       final host = uri.host;
       if (host.isEmpty) return false;
+
+      // 0. Check Twitter / X adult sensitive media
+      final lowerUrl = cleanUrl.toLowerCase();
+      if (lowerUrl.contains('twitter.com') ||
+          lowerUrl.contains('x.com') ||
+          lowerUrl.contains('t.co')) {
+        final tweetIdMatch = RegExp(r'status/(\d+)').firstMatch(cleanUrl);
+        if (tweetIdMatch != null) {
+          final tweetId = tweetIdMatch.group(1);
+          try {
+            final client = HttpClient();
+            client.connectionTimeout = const Duration(seconds: 4);
+
+            // Source 1: Twitter Syndication API with Chrome User-Agent
+            final request1 = await client.getUrl(
+              Uri.parse(
+                'https://cdn.syndication.twimg.com/tweet-result?id=$tweetId',
+              ),
+            );
+            request1.headers.set(
+              'User-Agent',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            );
+            request1.headers.set('Accept', 'application/json');
+            final response1 = await request1.close();
+            if (response1.statusCode == 200) {
+              final bodyText = await response1.transform(utf8.decoder).join();
+              final data = jsonDecode(bodyText);
+              if (data is Map) {
+                final bool possiblySensitive =
+                    data['possibly_sensitive'] == true;
+                final bool sensitiveMedia = data['sensitive_media'] == true;
+                final text = (data['text'] ?? '').toString().toLowerCase();
+                final hasNsfwTag =
+                    text.contains('#nsfw') ||
+                    text.contains('#18plus') ||
+                    text.contains('#18+') ||
+                    text.contains('#adult') ||
+                    text.contains('#porn') ||
+                    text.contains('#hentai') ||
+                    text.contains('#erotic') ||
+                    text.contains('#nude');
+                if (possiblySensitive || sensitiveMedia || hasNsfwTag) {
+                  debugPrint(
+                    '⚡ Duck Downloader: Twitter/X NSFW sensitive media detected for Tweet ID: $tweetId (Syndication)',
+                  );
+                  return true;
+                }
+              }
+            }
+
+            // Source 2: FxTwitter API fallback
+            final request2 = await client.getUrl(
+              Uri.parse('https://api.fxtwitter.com/status/$tweetId'),
+            );
+            request2.headers.set(
+              'User-Agent',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            );
+            request2.headers.set('Accept', 'application/json');
+            final response2 = await request2.close();
+            if (response2.statusCode == 200) {
+              final bodyText = await response2.transform(utf8.decoder).join();
+              final data = jsonDecode(bodyText);
+              if (data is Map && data['tweet'] is Map) {
+                final tweet = data['tweet'] as Map;
+                final bool sensitive = tweet['possibly_sensitive'] == true;
+                if (sensitive) {
+                  debugPrint(
+                    '⚡ Duck Downloader: Twitter/X NSFW sensitive media detected for Tweet ID: $tweetId (FxTwitter)',
+                  );
+                  return true;
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint('Twitter NSFW check error: $e');
+          }
+        }
+      }
 
       // 1. Quick local keyword check for instant block (covering porn, hentai, and AI content)
       final lowerHost = host.toLowerCase();

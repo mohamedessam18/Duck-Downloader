@@ -92,6 +92,52 @@ class ShareActivity : AppCompatActivity() {
             }
             container.addView(urlPreview)
 
+            val lang = java.util.Locale.getDefault().language
+            val analyzingStr = when (lang) {
+                "ar" -> "جاري تحليل الجودات المتاحة... ⚡"
+                "es" -> "Analizando calidades disponibles... ⚡"
+                "fr" -> "Analyse des qualités... ⚡"
+                "de" -> "Qualitäten werden analysiert... ⚡"
+                "ru" -> "Анализ качества... ⚡"
+                "tr" -> "Kaliteler analiz ediliyor... ⚡"
+                "hi" -> "गुणवत्ता का विश्लेषण हो रहा है... ⚡"
+                "zh" -> "正在解析画质... ⚡"
+                else -> "Analyzing available qualities... ⚡"
+            }
+            val selectQualityStr = when (lang) {
+                "ar" -> "اختر جودة التحميل:"
+                "es" -> "Seleccionar calidad:"
+                "fr" -> "Sélectionner la qualité :"
+                "de" -> "Qualität auswählen:"
+                "ru" -> "Выберите качество:"
+                "tr" -> "Kalite seçin:"
+                "hi" -> "गुणवत्ता चुनें:"
+                "zh" -> "选择画质:"
+                else -> "Select Download Quality:"
+            }
+            val videoBtnStr = when (lang) {
+                "ar" -> "🎥 فيديو HD (1080p / 720p)"
+                "es" -> "🎥 Vídeo HD (1080p / 720p)"
+                "fr" -> "🎥 Vidéo HD (1080p / 720p)"
+                "de" -> "🎥 Video HD (1080p / 720p)"
+                "ru" -> "🎥 Видео HD (1080p / 720p)"
+                "tr" -> "🎥 Video HD (1080p / 720p)"
+                "hi" -> "🎥 वीडियो HD (1080p / 720p)"
+                "zh" -> "🎥 高清视频 (1080p / 720p)"
+                else -> "🎥 Video HD (1080p / 720p)"
+            }
+            val audioBtnStr = when (lang) {
+                "ar" -> "🎵 صوت MP3 (320kbps)"
+                "es" -> "🎵 Audio MP3 (320kbps)"
+                "fr" -> "🎵 Audio MP3 (320kbps)"
+                "de" -> "🎵 Audio MP3 (320kbps)"
+                "ru" -> "🎵 Аудио MP3 (320kbps)"
+                "tr" -> "🎵 Ses MP3 (320kbps)"
+                "hi" -> "🎵 ऑडियो MP3 (320kbps)"
+                "zh" -> "🎵 音频 MP3 (320kbps)"
+                else -> "🎵 Audio MP3 (320kbps)"
+            }
+
             // Loading Section
             val loadingLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -103,7 +149,7 @@ class ShareActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(dpToPx(24), dpToPx(24))
             }
             val loadingText = TextView(this).apply {
-                text = "Analyzing available qualities... ⚡"
+                text = analyzingStr
                 setTextColor(Color.parseColor("#AAAAAA"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 setPadding(dpToPx(12), 0, 0, 0)
@@ -114,7 +160,7 @@ class ShareActivity : AppCompatActivity() {
 
             // Quality Section Label
             val qualitiesLabel = TextView(this).apply {
-                text = "Select Download Quality:"
+                text = selectQualityStr
                 setTextColor(Color.parseColor("#888888"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 visibility = View.GONE
@@ -145,7 +191,7 @@ class ShareActivity : AppCompatActivity() {
 
             // Default Action Buttons
             val videoBtn = Button(this).apply {
-                text = "🎥 Video HD (1080p / 720p)"
+                text = videoBtnStr
                 setTextColor(Color.parseColor("#101112"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -168,7 +214,7 @@ class ShareActivity : AppCompatActivity() {
             container.addView(videoBtn)
 
             val audioBtn = Button(this).apply {
-                text = "🎵 Audio MP3 (320kbps)"
+                text = audioBtnStr
                 setTextColor(Color.WHITE)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -267,7 +313,19 @@ class ShareActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
             startActivity(launchIntent)
-            Toast.makeText(this, "Downloading in background... 🚀", Toast.LENGTH_LONG).show()
+            val lang = java.util.Locale.getDefault().language
+            val toastStr = when (lang) {
+                "ar" -> "جاري التحميل في الخلفية... 🚀"
+                "es" -> "Descargando en segundo plano... 🚀"
+                "fr" -> "Téléchargement en arrière-plan... 🚀"
+                "de" -> "Download im Hintergrund... 🚀"
+                "ru" -> "Скачивание в фоновом режиме... 🚀"
+                "tr" -> "Arka planda indiriliyor... 🚀"
+                "hi" -> "बैकग्राउंड में डाउनलोड हो रहा है... 🚀"
+                "zh" -> "正在后台下载... 🚀"
+                else -> "Downloading in background... 🚀"
+            }
+            Toast.makeText(this, toastStr, Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             e.printStackTrace()
         }

@@ -13,6 +13,7 @@ import '../../core/app_navigator.dart';
 import '../../models/download_models.dart';
 import '../../services/trim_service.dart';
 import '../../state/downloads_controller.dart';
+import '../../services/vault_encryption_service.dart';
 import 'audio_progress.dart';
 import 'media_colors.dart';
 import 'media_thumb.dart';
@@ -411,6 +412,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       // Fully release background audio when the player closes.
       unawaited(widget.controller.stopBackgroundVideoAudio());
     }
+    unawaited(VaultEncryptionService.cleanVaultTempFiles());
     _hideTimer?.cancel();
     _leftSeekTimer?.cancel();
     _rightSeekTimer?.cancel();
