@@ -2724,9 +2724,11 @@ class DuckDownloadsController extends ChangeNotifier
   /// screen locks we only need to unmute — no loading delay at all.
   /// Call this right after the video player starts playing.
   Future<void> preloadBackgroundAudio(DownloadItem item) async {
-    final path = item.filePath;
-    if (path == null) return;
     try {
+      final info = await _getEffectivePathAndFileName(item);
+      final path = info['path'];
+      if (path == null) return;
+
       if (!audioBackgroundReady) {
         await _ensureAudioBackgroundReady();
       }
@@ -2745,7 +2747,6 @@ class DuckDownloadsController extends ChangeNotifier
         ),
       );
 
-      // Don't play yet — we'll start it in sync when the video plays.
       _backgroundVideoPreloaded = true;
       playingItem = item;
     } catch (e) {
@@ -2755,6 +2756,17 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   bool _backgroundVideoPreloaded = false;
+
+  /// Ensures background audio is loaded and activates playback.
+  Future<void> ensureAndActivateBackgroundAudio(
+    DownloadItem item,
+    Duration position,
+  ) async {
+    if (!_backgroundVideoPreloaded) {
+      await preloadBackgroundAudio(item);
+    }
+    await activateBackgroundAudio(position);
+  }
 
   /// Activates the pre-loaded background audio player by seeking to the
   /// video's current position, unmuting, and starting playback.

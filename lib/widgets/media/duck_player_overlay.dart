@@ -485,7 +485,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     widget.controller.saveVideoResumePosition(widget.item.id, _savedPositionForHandoff);
 
     // Activate pre-loaded audio: seek + unmute + play (nearly instant)
-    await widget.controller.activateBackgroundAudio(_savedPositionForHandoff);
+    await widget.controller.ensureAndActivateBackgroundAudio(widget.item, _savedPositionForHandoff);
 
     // Now pause the video — audio is already playing from background player
     video.pause();
