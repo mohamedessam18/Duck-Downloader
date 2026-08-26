@@ -29,6 +29,7 @@ class CobaltService {
         lower.contains('tiktok.com') ||
         lower.contains('vm.tiktok.com') ||
         lower.contains('reddit.com') ||
+        lower.contains('redd.it') ||
         lower.contains('soundcloud.com') ||
         lower.contains('youtube.com') ||
         lower.contains('youtu.be');

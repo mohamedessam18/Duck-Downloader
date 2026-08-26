@@ -20,7 +20,9 @@ import UIKit
         guard let self else { return }
         switch call.method {
         case "saveVideo":
-          self.saveVideo(call: call, result: result)
+          self.savePhotoLibraryAsset(call: call, result: result, isVideo: true)
+        case "saveImage":
+          self.savePhotoLibraryAsset(call: call, result: result, isVideo: false)
         case "saveAudioToMusic":
           result(FlutterError(
             code: "unavailable",
@@ -47,12 +49,18 @@ import UIKit
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
-  private func saveVideo(call: FlutterMethodCall, result: @escaping FlutterResult) {
+  /// Saves a downloaded video or image into the user's Photos library.
+  /// Uses the `.addOnly` authorization level so iOS only asks for write access.
+  private func savePhotoLibraryAsset(
+    call: FlutterMethodCall,
+    result: @escaping FlutterResult,
+    isVideo: Bool
+  ) {
     guard
       let args = call.arguments as? [String: Any],
       let path = args["path"] as? String
     else {
-      result(FlutterError(code: "invalid_args", message: "Missing video path.", details: nil))
+      result(FlutterError(code: "invalid_args", message: "Missing file path.", details: nil))
       return
     }
 
@@ -64,7 +72,11 @@ import UIKit
 
     let completeSave: () -> Void = {
       PHPhotoLibrary.shared().performChanges({
-        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+        if isVideo {
+          PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+        } else {
+          PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+        }
       }) { success, error in
         DispatchQueue.main.async {
           if success {
@@ -72,7 +84,7 @@ import UIKit
           } else {
             result(FlutterError(
               code: "save_failed",
-              message: error?.localizedDescription ?? "Could not save video to Photos.",
+              message: error?.localizedDescription ?? "Could not save this file to Photos.",
               details: nil
             ))
           }

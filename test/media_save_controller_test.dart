@@ -38,6 +38,7 @@ class FakeMediaSaveService extends MediaSaveService {
     required String path,
     required String filename,
     required DownloadType type,
+    bool interactive = true,
   }) async {
     audioCalls++;
     if (fail) throw Exception('Music save failed.');
@@ -309,14 +310,14 @@ void main() {
     expect(controller.isVaultSetup, isFalse);
     expect(controller.isVaultLocked, isTrue);
 
-    await controller.setVaultPin('5555');
+    await controller.setVaultPin('555555');
     expect(controller.isVaultSetup, isTrue);
 
-    bool ok = await controller.checkVaultPin('1111');
+    bool ok = await controller.checkVaultPin('111111');
     expect(ok, isFalse);
     expect(controller.isVaultLocked, isTrue);
 
-    ok = await controller.checkVaultPin('5555');
+    ok = await controller.checkVaultPin('555555');
     expect(ok, isTrue);
     expect(controller.isVaultLocked, isFalse);
 
@@ -337,7 +338,7 @@ void main() {
 
       expect(controller.downloads.single.isPrivate, isFalse);
 
-      await controller.setVaultPin('5555');
+      await controller.setVaultPin('555555');
 
       await controller.moveItemToVault(controller.downloads.single);
       expect(controller.downloads.single.isPrivate, isTrue);

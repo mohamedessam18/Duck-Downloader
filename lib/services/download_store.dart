@@ -63,13 +63,55 @@ class DownloadStore {
     return _box.put('enableClipboardDetection', enabled);
   }
 
-  bool readBackgroundPlaybackEnabled() {
-    final value = _box.get('backgroundPlaybackEnabled');
+  /// False until the user has been through (or skipped) the intro.
+  ///
+  /// Defaults to *true* when the box already holds downloads: an existing user
+  /// updating the app has clearly used it before, and dropping them into a
+  /// first-run intro would be baffling.
+  bool readOnboardingCompleted() {
+    final value = _box.get('onboardingCompleted');
+    if (value is bool) return value;
+    final existing = _box.get('downloads');
+    return existing is List && existing.isNotEmpty;
+  }
+
+  Future<void> writeOnboardingCompleted(bool completed) {
+    return _box.put('onboardingCompleted', completed);
+  }
+
+  /// One-shot: set when the intro finishes, cleared the moment the offer is
+  /// shown. Kept in storage rather than in memory so the offer survives the
+  /// splash screen between the intro and the main screen.
+  bool readPendingPremiumOffer() {
+    return _box.get('pendingPremiumOffer') == true;
+  }
+
+  Future<void> writePendingPremiumOffer(bool pending) {
+    return _box.put('pendingPremiumOffer', pending);
+  }
+
+  /// Whether the one-time bulk "allow Duck to modify your media" request has
+  /// already been put to the user.
+  ///
+  /// Stored rather than kept in memory because the grant it obtains outlives
+  /// the process: re-asking on every launch would be nagging for something the
+  /// system already remembers.
+  bool readMediaWriteAccessAsked() {
+    final value = _box.get('mediaWriteAccessAsked');
+    return value is bool ? value : false;
+  }
+
+  Future<void> writeMediaWriteAccessAsked(bool asked) {
+    return _box.put('mediaWriteAccessAsked', asked);
+  }
+
+  bool readCrashReportingEnabled() {
+    final value = _box.get('crashReportingEnabled');
     return value is bool ? value : true;
   }
 
-  Future<void> writeBackgroundPlaybackEnabled(bool enabled) {
-    return _box.put('backgroundPlaybackEnabled', enabled);
+  Future<void> writeCrashReportingEnabled(bool enabled) {
+    return _box.put('crashReportingEnabled', enabled);
   }
 
   Future<DownloadItem> upsert(DownloadItem item) async {

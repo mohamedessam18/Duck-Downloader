@@ -1,7 +1,7 @@
 name: duck_downloader
 description: "Duck Downloader - Copy. Detect. Download."
 publish_to: 'none'
-version: 1.1.2+8
+version: 1.2.1+10
 
 environment:
   sdk: ^3.10.1
@@ -40,6 +40,10 @@ dependencies:
   cryptography: ^2.7.0
   flutter_secure_storage: ^9.2.4
   wakelock_plus: ^1.5.2
+  rive: ^0.14.11
+  firebase_core: ^4.13.0
+  firebase_crashlytics: ^5.2.7
+  firebase_analytics: ^12.4.6
 
 dev_dependencies:
   flutter_test:
@@ -52,15 +56,23 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: assets/images/branding/logo_launcher_square_composed.png
+  # Generated from logo_launcher_square.png by tool/generate_icons.py — the
+  # previous image_path pointed at a file that does not exist in the repo, so
+  # this config could not run at all. Regenerate after changing the artwork.
+  image_path: assets/images/branding/icon_composed_dark.png
   adaptive_icon_background: "#101112"
-  adaptive_icon_foreground: assets/images/branding/logo_launcher_square.png
+  adaptive_icon_foreground: assets/images/branding/icon_adaptive_foreground.png
+  # Android 13+ themed icon: one silhouette the launcher tints to match the
+  # user's wallpaper. Android has no light/dark icon pair — this is the
+  # mechanism that makes the launcher icon follow the system theme.
+  adaptive_icon_monochrome: assets/images/branding/icon_monochrome.png
   remove_alpha_ios: true
   background_color_ios: "#101112"
 
 flutter:
   uses-material-design: true
   assets:
+    - assets/rive/
     - assets/images/branding/
     - assets/images/branding/liquid_glass_layers/
     - assets/images/ducks/

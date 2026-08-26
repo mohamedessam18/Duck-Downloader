@@ -1,0 +1,33 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-duck-bg: #0e0e11;
+  --color-duck-surface: #17171c;
+  --color-duck-surface-hover: #1f1f26;
+  --color-duck-border: #26262f;
+  --color-duck-text: #f4f4f6;
+  --color-duck-muted: #8d8d9b;
+  --color-duck-accent: #ffc531;
+  --color-duck-danger: #ff6b6b;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--color-duck-bg);
+  color: var(--color-duck-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Chrome sizes a popup to its content, so the width has to be asserted here. */
+body {
+  width: 384px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-duck-border);
+  border-radius: 4px;
+}

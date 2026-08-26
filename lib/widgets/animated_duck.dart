@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../constants/asset_paths.dart';
 import '../models/download_models.dart';
 import '../theme/duck_theme.dart';
+import 'duck_rive_player.dart';
 import 'duck_sprite_player.dart';
 
 class AnimatedDuck extends StatefulWidget {
@@ -14,12 +15,17 @@ class AnimatedDuck extends StatefulWidget {
     required this.compact,
     required this.scale,
     required this.onTap,
+    this.progress = 0,
   });
 
   final DuckFlow flow;
   final bool compact;
   final double scale;
   final VoidCallback onTap;
+
+  /// Live download completion, 0-100. Only the Rive artwork uses it — the
+  /// sprite flipbook has no way to represent a partial state.
+  final int progress;
 
   @override
   State<AnimatedDuck> createState() => _AnimatedDuckState();
@@ -40,6 +46,14 @@ class _AnimatedDuckState extends State<AnimatedDuck>
   /// Timer that fires after a transient flow (success / error) to switch
   /// the duck back to idle.
   Timer? _idleReturnTimer;
+
+  /// Set once the Rive artwork reports it cannot load, after which the sprite
+  /// flipbook takes over for the rest of the session.
+  bool _riveUnavailable = false;
+
+  /// Bumped on every tap so [DuckRivePlayer] can fire its tap trigger without
+  /// this widget holding a reference to the Rive controller.
+  int _tapSignal = 0;
 
   /// How long to show the success / error animation before returning to idle.
   static const _idleReturnDelay = Duration(seconds: 3);
@@ -114,26 +128,44 @@ class _AnimatedDuckState extends State<AnimatedDuck>
     final ringHeight = (widget.compact ? 72.0 : 92.0) * widget.scale;
     final ringBottom = (widget.compact ? 20.0 : 30.0) * widget.scale;
 
-    final duckSprite = AnimatedSwitcher(
-      duration: const Duration(milliseconds: 280),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
-      transitionBuilder: (child, animation) {
-        return FadeTransition(opacity: animation, child: child);
-      },
-      child: DuckSpritePlayer(
-        key: ValueKey(_displayFlow),
-        sprite: _sprite,
-        size: duckSize,
-        reduceMotion: reduceMotion,
-      ),
-    );
+    // Prefer the Rive artboard when the artwork is bundled: it interpolates at
+    // the display's refresh rate and can react to live progress, neither of
+    // which a 5fps flipbook can do. _riveUnavailable flips permanently the
+    // first time the file is missing or unreadable, which is the normal state
+    // until a .riv is dropped into assets/rive/.
+    final Widget duckSprite = _riveUnavailable
+        ? AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            transitionBuilder: (child, animation) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            child: DuckSpritePlayer(
+              key: ValueKey(_displayFlow),
+              sprite: _sprite,
+              size: duckSize,
+              reduceMotion: reduceMotion,
+            ),
+          )
+        : DuckRivePlayer(
+            flow: _displayFlow,
+            size: duckSize,
+            progress: widget.progress,
+            tapSignal: _tapSignal,
+            onUnavailable: () {
+              if (mounted) setState(() => _riveUnavailable = true);
+            },
+          );
 
     return Semantics(
       button: true,
       label: 'Tap duck',
       child: GestureDetector(
-        onTap: widget.onTap,
+        onTap: () {
+          if (mounted) setState(() => _tapSignal++);
+          widget.onTap();
+        },
         onTapDown: _onTapDown,
         onTapUp: _onTapUp,
         onTapCancel: _onTapCancel,

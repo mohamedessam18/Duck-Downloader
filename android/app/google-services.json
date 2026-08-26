@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "973039141229",
+    "project_id": "duck-downloader",
+    "storage_bucket": "duck-downloader.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:973039141229:android:f4937deab2877484da9a64",
+        "android_client_info": {
+          "package_name": "com.duck.downloader"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCGfwfF7_DazzH7tht7JwP37MymJeOiYrY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,41 @@
+{
+  // build/ is 4.4 GB and ~15k files, and Pods/node_modules add thousands more.
+  // Watching them overflows the FSEvents client — VS Code logged "started
+  // ignoring events due to too many file change events at once" and stopped
+  // watching the whole workspace, which is what takes the Dart analysis server
+  // and the Run/Debug affordances down with it. Excluding them keeps the
+  // watcher inside its budget.
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/.dart_tool/**": true,
+    "**/node_modules/**": true,
+    "**/.gradle/**": true,
+    "**/ios/Pods/**": true,
+    "**/macos/Pods/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/android/.cxx/**": true,
+    "**/DerivedData/**": true
+  },
+  "search.exclude": {
+    "**/build": true,
+    "**/.dart_tool": true,
+    "**/node_modules": true,
+    "**/ios/Pods": true,
+    "**/macos/Pods": true,
+    "**/.gradle": true
+  },
+  // TEMP diagnostics — remove after we identify why the Dart extension does not
+  // start its analysis server.
+  "dart.extensionLogFile": "/tmp/dart-ext.log",
+  "dart.analyzerLogFile": "/tmp/dart-analyzer.log",
+  "dart.flutterSdkPath": "/Users/mohamedessam/Documents/flutter",
+  "dart.previewFlutterUiGuides": true,
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.rulers": [80],
+    "editor.selectionHighlight": false,
+    "editor.tabCompletion": "onlySnippets",
+    "editor.wordBasedSuggestions": "off"
+  }
+}

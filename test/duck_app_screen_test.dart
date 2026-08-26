@@ -224,15 +224,15 @@ void main() {
     await tester.pump();
 
     // Verify overlay is visible
-    expect(find.text('Link Detected!'), findsOneWidget);
+    expect(find.text('Link Detected in Clipboard'), findsOneWidget);
     expect(find.text('https://youtube.com/watch?v=123'), findsOneWidget);
 
     // Dismiss it
-    await tester.tap(find.text('Dismiss'));
+    await tester.tap(find.text('DISMISS'));
     await tester.pump();
 
     // Verify overlay is gone
-    expect(find.text('Link Detected!'), findsNothing);
+    expect(find.text('Link Detected in Clipboard'), findsNothing);
   });
 
   testWidgets('clipboard detection extract navigates and loads url', (
@@ -261,20 +261,22 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Link Detected!'), findsOneWidget);
+    expect(find.text('Link Detected in Clipboard'), findsOneWidget);
 
     // Tap extract
-    await tester.tap(find.text('Extract'));
+    await tester.tap(find.text('DOWNLOAD NOW'));
     await tester.pump();
 
     expect(api.extractCalled, isTrue);
     expect(api.extractedUrl, 'https://www.tiktok.com/@user/video/abc123/');
   });
 
-  testWidgets('YouTube URLs display Google Play policy rejection message', (
+  testWidgets('YouTube URLs extract on-device and never reach the backend', (
     tester,
   ) async {
-    // YouTube URL → must NOT call the backend API and must show Play Store policy message
+    // YouTube metadata is pulled by youtube_explode on the user's own device.
+    // Routing it through the backend gets that server bot-checked by YouTube,
+    // so the backend must stay untouched for these URLs.
     final box = FakeBox();
     final clipboard = FakeClipboardService()
       ..clipboardText = 'https://youtube.com/watch?v=dQw4w9WgXcQ';
@@ -299,14 +301,15 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Link Detected!'), findsOneWidget);
+    expect(find.text('Link Detected in Clipboard'), findsOneWidget);
 
-    await tester.tap(find.text('Extract'));
+    await tester.tap(find.text('DOWNLOAD NOW'));
     await tester.pump();
 
     // Backend must NOT be called for YouTube
     expect(api.extractCalled, isFalse);
-    expect(controller.status, 'YouTube downloads are not supported under Google Play policies.');
+    expect(ytExplode.extractMetadataCalled, isTrue);
+    expect(ytExplode.extractedUrl, 'https://youtube.com/watch?v=dQw4w9WgXcQ');
   });
 
 
@@ -333,10 +336,15 @@ void main() {
 
     // Tap IMAGES tab in bottom nav (last of the two IMAGES texts)
     await tester.tap(find.text('IMAGES').last);
+    // Advance past the tab cross-fade and the empty state's entrance
+    // animation. pumpAndSettle is unusable here: AmbientBackground runs a
+    // permanently repeating animation, so the tree never goes quiet.
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 800));
 
     expect(controller.tab, DuckTab.images);
-    expect(find.text('No downloaded images yet.'), findsOneWidget);
+    expect(find.text('No images yet'), findsOneWidget);
+    expect(find.text('Paste a link'), findsOneWidget);
   });
 }
 

@@ -1,0 +1,9 @@
+{
+  "name": "duck-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared protocol between the Duck extension, engine, bridge and desktop UI.",
+  "type": "module",
+  "main": "duck-protocol.ts",
+  "types": "duck-protocol.ts"
+}

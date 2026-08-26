@@ -103,8 +103,13 @@ class _DuckSpritePlayerState extends State<DuckSpritePlayer>
       _precached = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        final target = (widget.size * dpr).round();
         for (final frame in frames) {
-          precacheImage(AssetImage(frame), context);
+          precacheImage(
+            ResizeImage(AssetImage(frame), width: target, allowUpscaling: false),
+            context,
+          );
         }
       });
     }
@@ -113,11 +118,18 @@ class _DuckSpritePlayerState extends State<DuckSpritePlayer>
         widget.reduceMotion ? 0 : _index.clamp(0, frames.length - 1);
     final asset = frames[frameIndex];
 
+    // cacheWidth decodes to the size actually drawn instead of the source's
+    // full 512px. Twelve frames held at native size cost several megabytes of
+    // decoded bitmap per state for no visible gain.
+    final cacheWidth =
+        (widget.size * MediaQuery.devicePixelRatioOf(context)).round();
+
     return Image.asset(
       asset,
       key: ValueKey(asset),
       width: widget.size,
       height: widget.size,
+      cacheWidth: cacheWidth,
       fit: BoxFit.contain,
       gaplessPlayback: true,
       filterQuality: FilterQuality.medium,

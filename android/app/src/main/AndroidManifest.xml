@@ -5,10 +5,21 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
     <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- The in-app media folders browser lists and edits the user's own
+         images, video and audio, so full read access to each type is required.
+         Play Console will ask for a Photo and Video Permissions declaration
+         covering this feature.
+         Legacy read is capped at API 32, the last release before scoped
+         storage; legacy write at API 29, after which MediaStore handles it. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <!-- Android 14 lets the user grant access to only *some* photos. Without
+         this, "Select photos" is reported as an outright denial and the
+         browser shows an empty library with no way for the user to recover. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>

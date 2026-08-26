@@ -1,0 +1,37 @@
+{
+  "name": "duck-downloader-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Duck Downloader - Copy. Detect. Download. Browser extension.",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "npm run sync && wxt build",
+    "build:firefox": "npm run sync && wxt build -b firefox",
+    "zip": "npm run sync && wxt zip",
+    "zip:firefox": "npm run sync && wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "postinstall": "npm run sync && wxt prepare",
+    "sync:ffmpeg": "node scripts/sync-ffmpeg.mjs",
+    "sync:blocklist": "node scripts/sync-blocklist.mjs",
+    "sync": "node scripts/sync-ffmpeg.mjs && node scripts/sync-blocklist.mjs"
+  },
+  "dependencies": {
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@wxt-dev/module-react": "^1.1.3",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "wxt": "^0.20.0"
+  }
+}

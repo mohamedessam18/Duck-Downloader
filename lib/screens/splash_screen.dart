@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:just_audio_background/just_audio_background.dart';
 
 import '../constants/asset_paths.dart';
 import '../services/ad_service.dart';
@@ -11,6 +10,7 @@ import '../widgets/ambient_background.dart';
 import '../widgets/duck_mark.dart';
 import '../widgets/duck_sprite_player.dart';
 import 'duck_app_screen.dart';
+import '../services/crash_reporting_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key, required this.controller});
@@ -85,7 +85,7 @@ class _SplashScreenState extends State<SplashScreen>
         });
       }
     } catch (error, stackTrace) {
-      debugPrint('Bootstrap failed: $error\n$stackTrace');
+      reportError(error, stackTrace, reason: 'bootstrap');
       if (mounted) setState(() => _initProgress = 1.0);
     } finally {
       await _maybeNavigate();

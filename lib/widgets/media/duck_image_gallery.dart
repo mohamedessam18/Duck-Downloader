@@ -8,6 +8,7 @@ import '../../state/downloads_controller.dart';
 import 'media_colors.dart';
 import 'media_thumb.dart';
 import 'player_error.dart';
+import '../../services/crash_reporting_service.dart';
 
 class DuckImageGallery extends StatefulWidget {
   const DuckImageGallery({
@@ -108,8 +109,8 @@ class _DuckImageGalleryState extends State<DuckImageGallery> {
         _decryptedPaths[item.id] = decPath;
         _tempFilesToDelete.add(decPath);
         if (File(decPath).existsSync()) return FileImage(File(decPath));
-      } catch (e) {
-        debugPrint('Failed to decrypt vault image: $e');
+      } catch (error, stackTrace) {
+        reportError(error, stackTrace, reason: 'vault-image-decrypt');
       }
     } else {
       if (File(filePath).existsSync()) {

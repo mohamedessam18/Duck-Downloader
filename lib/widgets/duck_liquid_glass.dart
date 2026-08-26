@@ -7,9 +7,28 @@ import 'package:liquid_glass_plus/liquid_glass_plus.dart';
 class DuckLiquidGlass {
   DuckLiquidGlass._();
 
+  /// The Impeller shader-based liquid glass is iOS-only.
   static bool shouldUseLiquidGlass(BuildContext context) {
     if (Theme.of(context).platform != TargetPlatform.iOS) return false;
     return !MediaQuery.disableAnimationsOf(context);
+  }
+
+  /// Whether to render real backdrop blur at all.
+  ///
+  /// Android used to be excluded entirely, which left every "glass" surface in
+  /// the app as a flat coloured box there. Android renders `BackdropFilter`
+  /// perfectly well; only the accessibility "reduce motion / animations"
+  /// setting should fall back to an opaque surface.
+  static bool blurEnabled(BuildContext context) {
+    return !MediaQuery.disableAnimationsOf(context);
+  }
+
+  /// Backdrop blur is the most expensive thing on screen, so Android — which
+  /// covers a much wider hardware range — gets a slightly cheaper radius.
+  static double blurSigmaFor(BuildContext context, double sigma) {
+    return Theme.of(context).platform == TargetPlatform.android
+        ? sigma * 0.75
+        : sigma;
   }
 
   static LiquidGlassSettings track({
@@ -103,6 +122,7 @@ class DuckFrostedSurface extends StatelessWidget {
     this.borderColor,
     this.gradient,
     this.clipOval = false,
+    this.rimLight = true,
   });
 
   final double borderRadius;
@@ -113,20 +133,24 @@ class DuckFrostedSurface extends StatelessWidget {
   final Gradient? gradient;
   final bool clipOval;
 
+  /// Draws a soft highlight along the top edge and a shadow along the bottom,
+  /// the way light catches a real pane of glass. This is what reads as "depth"
+  /// rather than a flat translucent rectangle.
+  final bool rimLight;
+
   @override
   Widget build(BuildContext context) {
-    final clipper = clipOval
-        ? ClipOval(child: _buildFiltered(context))
+    final filtered = _buildFiltered(context);
+    return clipOval
+        ? ClipOval(child: filtered)
         : ClipRRect(
             borderRadius: BorderRadius.circular(borderRadius),
-            child: _buildFiltered(context),
+            child: filtered,
           );
-    return clipper;
   }
 
   Widget _buildFiltered(BuildContext context) {
-    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
-    final content = DecoratedBox(
+    Widget content = DecoratedBox(
       decoration: BoxDecoration(
         color: color,
         gradient: gradient,
@@ -137,12 +161,44 @@ class DuckFrostedSurface extends StatelessWidget {
       child: child,
     );
 
-    if (isAndroid) {
-      return content;
+    if (rimLight) {
+      content = Stack(
+        fit: StackFit.passthrough,
+        children: [
+          content,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: clipOval ? BoxShape.circle : BoxShape.rectangle,
+                  borderRadius:
+                      clipOval ? null : BorderRadius.circular(borderRadius),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white.withValues(alpha: 0.16),
+                      Colors.white.withValues(alpha: 0.02),
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.06),
+                    ],
+                    stops: const [0.0, 0.12, 0.6, 1.0],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
     }
 
+    if (!DuckLiquidGlass.blurEnabled(context)) return content;
+
     return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+      filter: ImageFilter.blur(
+        sigmaX: DuckLiquidGlass.blurSigmaFor(context, blurSigma),
+        sigmaY: DuckLiquidGlass.blurSigmaFor(context, blurSigma),
+      ),
       child: content,
     );
   }
@@ -220,16 +276,39 @@ class DuckLiquidGlassPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!DuckLiquidGlass.shouldUseLiquidGlass(context)) {
+      // Non-iOS fallback. A flat gold rectangle read as unfinished next to the
+      // frosted track behind it, so this builds the same sense of a lit,
+      // rounded object out of plain decoration: a vertical sheen, a bright top
+      // rim, and a coloured glow that swells while dragging.
       return Container(
         width: width,
         height: height,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(borderRadius),
-          color: goldColor,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.lerp(goldColor, Colors.white, 0.28)!,
+              goldColor,
+              Color.lerp(goldColor, Colors.black, 0.12)!,
+            ],
+            stops: const [0.0, 0.55, 1.0],
+          ),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: isDragging ? 0.55 : 0.35),
+            width: 0.8,
+          ),
           boxShadow: [
             BoxShadow(
-              color: goldColor.withValues(alpha: isDragging ? 0.5 : 0.3),
-              blurRadius: isDragging ? 14 : 8,
+              color: goldColor.withValues(alpha: isDragging ? 0.55 : 0.34),
+              blurRadius: isDragging ? 22 : 14,
+              spreadRadius: isDragging ? 1 : 0,
+              offset: const Offset(0, 3),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.22),
+              blurRadius: 8,
               offset: const Offset(0, 2),
             ),
           ],

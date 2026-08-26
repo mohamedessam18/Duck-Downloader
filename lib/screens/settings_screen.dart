@@ -1,273 +1,535 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/download_store.dart';
 import '../state/downloads_controller.dart';
+import '../theme/duck_theme.dart';
+import '../widgets/ambient_background.dart';
+import '../widgets/duck_motion.dart';
+import '../services/crash_reporting_service.dart';
+
+/// Where the published policy lives.
+///
+/// The in-app copy this screen used to render as a dialog is gone: Play needs
+/// a publicly reachable URL for the listing, it has to stay reachable for as
+/// long as the app is published, and a second copy in the binary meant the two
+/// could quietly disagree about what Duck does with your data.
+const _privacyPolicyUrl = 'https://duckdownloader.site/privacy';
+
+/// Kept in step with pubspec.yaml by hand.
+const _appVersion = '1.2.1';
+const _appBuild = '10';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key, required this.controller});
+  const SettingsScreen({super.key, required this.controller, this.store});
 
   final DuckDownloadsController controller;
 
-  static const String privacyPolicyUrl = 'https://duckdownloader.app/privacy-policy.html';
+  /// Only needed by actions that write app-level flags, such as replaying the
+  /// intro. Optional so the screen stays trivially constructible in tests.
+  final DownloadStore? store;
 
-  void _showPrivacyPolicyDialog(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final dialogBg = isDark ? const Color(0xFF1D1D1F) : Colors.white;
-    final textColor = isDark ? Colors.white : const Color(0xFF151517);
-    final mutedColor = isDark ? const Color(0xFFB8B8B8) : const Color(0xFF6F707A);
-    const goldColor = Color(0xFFFFC52F);
+  @override
+  Widget build(BuildContext context) {
+    final colors = DuckColors.of(context);
+    final topInset = MediaQuery.paddingOf(context).top;
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          backgroundColor: dialogBg,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 36),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 500),
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: goldColor.withOpacity(0.15),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.shield_outlined, color: goldColor, size: 24),
+    return Scaffold(
+      backgroundColor: colors.background,
+      body: Stack(
+        children: [
+          // The same drifting wash the library sits on, so Settings stops
+          // looking like a screen borrowed from a different app.
+          Positioned.fill(
+            child: AmbientBackground(
+              padding: EdgeInsets.only(top: topInset),
+              child: const SizedBox.expand(),
+            ),
+          ),
+          ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) {
+              return CustomScrollView(
+                slivers: [
+                  _Header(colors: colors),
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      18,
+                      4,
+                      18,
+                      28 + MediaQuery.paddingOf(context).bottom,
                     ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        'Privacy Policy',
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.close, color: mutedColor),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const Divider(height: 1),
-                const SizedBox(height: 16),
-                Flexible(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    sliver: SliverList.list(
                       children: [
-                        _buildPolicySection(
-                          title: '1. User Data & Security',
-                          content:
-                              'Duck Downloader respects your absolute privacy. All downloaded media files, images, videos, and private vault content are stored locally on your device only. No personal files are ever uploaded or transmitted to external servers.',
-                          textColor: textColor,
-                          mutedColor: mutedColor,
+                        EntranceFade(
+                          index: 0,
+                          child: _Group(
+                            colors: colors,
+                            icon: Icons.download_rounded,
+                            label: 'Downloads',
+                            children: [
+                              _Toggle(
+                                colors: colors,
+                                icon: Icons.photo_library_outlined,
+                                title: 'Auto-save to gallery',
+                                subtitle:
+                                    'Copy finished downloads into Photos and '
+                                    'Music, where your other apps can see them.',
+                                value: controller.autoSaveVideos,
+                                onChanged: controller.toggleAutoSaveVideos,
+                              ),
+                              _Line(colors: colors),
+                              _Toggle(
+                                colors: colors,
+                                icon: Icons.link_rounded,
+                                title: 'Detect copied links',
+                                subtitle:
+                                    'Offer to download a link the moment you '
+                                    'copy it somewhere else.',
+                                value: controller.enableClipboardDetection,
+                                onChanged: controller.toggleClipboardDetection,
+                              ),
+                            ],
+                          ),
                         ),
-                        _buildPolicySection(
-                          title: '2. Private Vault Encryption',
-                          content:
-                              'Files moved to the Secure Vault are encrypted and hidden from third-party gallery apps. Access is strictly guarded by your personal 4-digit PIN and optional Biometric / Face ID authentication.',
-                          textColor: textColor,
-                          mutedColor: mutedColor,
+                        const SizedBox(height: 22),
+                        EntranceFade(
+                          index: 1,
+                          child: _Group(
+                            colors: colors,
+                            icon: Icons.notifications_none_rounded,
+                            label: 'Notifications',
+                            children: [
+                              _Action(
+                                colors: colors,
+                                icon: Icons.graphic_eq_rounded,
+                                title: 'Sounds and alerts',
+                                // Android owns this from version 8 on: a
+                                // channel's sound is fixed at creation, and an
+                                // app that overrides the user's choice is
+                                // fighting the platform. So hand them the
+                                // system's own control rather than a fake one.
+                                subtitle:
+                                    'Pick a sound, or silence Duck, in Android '
+                                    'settings.',
+                                onTap: controller.openDeviceMediaSettings,
+                              ),
+                            ],
+                          ),
                         ),
-                        _buildPolicySection(
-                          title: '3. Device Permissions',
-                          content:
-                              '• Storage & Media: Required exclusively to save downloaded media files to your device gallery/music folder.\n• Notifications: Used solely to show live download progress bars.\n• Write System Settings: Required when setting trimmed audio clips as system ringtones.',
-                          textColor: textColor,
-                          mutedColor: mutedColor,
+                        const SizedBox(height: 22),
+                        EntranceFade(
+                          index: 2,
+                          child: _Group(
+                            colors: colors,
+                            icon: Icons.lock_outline_rounded,
+                            label: 'Privacy',
+                            children: [
+                              _Toggle(
+                                colors: colors,
+                                icon: Icons.bug_report_outlined,
+                                title: 'Send diagnostics',
+                                // A toggle that is on while nothing is being
+                                // sent is a lie the user cannot see through,
+                                // so say when the reporter never came up.
+                                subtitle:
+                                    CrashReportingService.instance.available
+                                        ? 'Anonymous crash reports only. Never '
+                                            'your files, your links, or '
+                                            'anything in the vault.'
+                                        : 'Unavailable on this device — crash '
+                                            'reporting could not start, so '
+                                            'nothing is being sent.',
+                                value: controller.crashReportingEnabled,
+                                onChanged: controller.toggleCrashReporting,
+                              ),
+                              _Line(colors: colors),
+                              _Action(
+                                colors: colors,
+                                icon: Icons.shield_outlined,
+                                title: 'Privacy policy',
+                                subtitle:
+                                    'What Duck collects, and what it never '
+                                    'touches.',
+                                trailing: Icons.open_in_new_rounded,
+                                onTap: () => _openPolicy(context),
+                              ),
+                            ],
+                          ),
                         ),
-                        _buildPolicySection(
-                          title: '4. Google Play Developer Compliance',
-                          content:
-                              'Duck Downloader complies strictly with Google Play Developer Policies. Background operations are limited to active media tasks, and no user tracking or telemetry data is collected.',
-                          textColor: textColor,
-                          mutedColor: mutedColor,
+                        const SizedBox(height: 22),
+                        EntranceFade(
+                          index: 3,
+                          child: _Group(
+                            colors: colors,
+                            icon: Icons.info_outline_rounded,
+                            label: 'About',
+                            children: [
+                              _Action(
+                                colors: colors,
+                                icon: Icons.replay_rounded,
+                                title: 'Show the intro again',
+                                subtitle:
+                                    'Walk through what Duck can do, from the '
+                                    'start.',
+                                onTap: () => _replayIntro(context),
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Last Updated: July 2026',
-                          style: TextStyle(color: mutedColor, fontSize: 11, fontStyle: FontStyle.italic),
-                        ),
+                        const SizedBox(height: 30),
+                        EntranceFade(index: 4, child: _Version(colors: colors)),
                       ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: goldColor,
-                      foregroundColor: const Color(0xFF151517),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('I Understand', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildPolicySection({
-    required String title,
-    required String content,
-    required Color textColor,
-    required Color mutedColor,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            content,
-            style: TextStyle(color: mutedColor, fontSize: 13, height: 1.4),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 
+  Future<void> _openPolicy(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    var opened = false;
+    try {
+      opened = await launchUrl(
+        Uri.parse(_privacyPolicyUrl),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      opened = false;
+    }
+    // A device with no browser, or one that is offline, must not be left
+    // tapping a row that silently does nothing — show the address instead.
+    if (!opened) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Open $_privacyPolicyUrl in a browser.')),
+      );
+    }
+  }
+
+  Future<void> _replayIntro(BuildContext context) async {
+    final store = this.store;
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (store == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('The intro is not available here.')),
+      );
+      return;
+    }
+    await store.writeOnboardingCompleted(false);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('The intro will show next time you open Duck.'),
+      ),
+    );
+    navigator.maybePop();
+  }
+}
+
+// ── Header ──────────────────────────────────────────────────────────────────
+
+class _Header extends StatelessWidget {
+  const _Header({required this.colors});
+
+  final DuckColors colors;
+
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final backgroundColor = isDark ? const Color(0xFF101112) : const Color(0xFFF5F6F8);
-    final cardColor = isDark ? const Color(0xFF1D1D1F) : Colors.white;
-    final textColor = isDark ? Colors.white : const Color(0xFF151517);
-    final mutedColor = isDark ? const Color(0xFFB8B8B8) : const Color(0xFF6F707A);
-    const goldColor = Color(0xFFFFC52F);
-
-    return Scaffold(
-      backgroundColor: backgroundColor,
-      appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF171819) : Colors.white,
-        elevation: 0,
+    return SliverAppBar(
+      pinned: true,
+      expandedHeight: 132,
+      backgroundColor: colors.background,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      iconTheme: IconThemeData(color: colors.text),
+      flexibleSpace: FlexibleSpaceBar(
+        titlePadding: const EdgeInsetsDirectional.only(start: 56, bottom: 14),
         title: Text(
-          'Settings & Compliance',
+          'Settings',
           style: TextStyle(
-            color: textColor,
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
+            color: colors.text,
+            fontSize: 21,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
           ),
         ),
-        iconTheme: IconThemeData(color: textColor),
+        background: Align(
+          alignment: Alignment.bottomRight,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 22, bottom: 10),
+            child: Icon(
+              Icons.tune_rounded,
+              size: 62,
+              color: colors.gold.withValues(alpha: 0.13),
+            ),
+          ),
+        ),
       ),
-      body: ListenableBuilder(
-        listenable: controller,
-        builder: (context, _) {
-          return ListView(
-            padding: const EdgeInsets.all(16),
+    );
+  }
+}
+
+// ── Group ───────────────────────────────────────────────────────────────────
+
+class _Group extends StatelessWidget {
+  const _Group({
+    required this.colors,
+    required this.icon,
+    required this.label,
+    required this.children,
+  });
+
+  final DuckColors colors;
+  final IconData icon;
+  final String label;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Row(
             children: [
-              Card(
-                color: cardColor,
-                elevation: 1,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Column(
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.privacy_tip_outlined, color: goldColor),
-                      title: Text(
-                        'Privacy Policy',
-                        style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Text(
-                        'Read our Google Play compliant Privacy Policy & disclosures',
-                        style: TextStyle(color: mutedColor, fontSize: 13),
-                      ),
-                      trailing: Icon(Icons.chevron_right, color: mutedColor, size: 22),
-                      onTap: () => _showPrivacyPolicyDialog(context),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                color: cardColor,
-                elevation: 1,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Column(
-                  children: [
-                    SwitchListTile(
-                      secondary: const Icon(Icons.save_alt, color: goldColor),
-                      title: Text(
-                        'Auto Save Media',
-                        style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Text(
-                        'Automatically save completed downloads to Gallery / Music',
-                        style: TextStyle(color: mutedColor, fontSize: 13),
-                      ),
-                      value: controller.autoSaveVideos,
-                      activeColor: goldColor,
-                      onChanged: (val) => controller.toggleAutoSaveVideos(val),
-                    ),
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      secondary: const Icon(Icons.content_paste, color: goldColor),
-                      title: Text(
-                        'Clipboard Link Detection',
-                        style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Text(
-                        'Prompt to download when media links are copied',
-                        style: TextStyle(color: mutedColor, fontSize: 13),
-                      ),
-                      value: controller.enableClipboardDetection,
-                      activeColor: goldColor,
-                      onChanged: (val) => controller.toggleClipboardDetection(val),
-                    ),
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      secondary: const Icon(Icons.music_note, color: goldColor),
-                      title: Text(
-                        'Background Playback',
-                        style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Text(
-                        'Continue audio playback when screen is off or in background',
-                        style: TextStyle(color: mutedColor, fontSize: 13),
-                      ),
-                      value: controller.backgroundPlaybackEnabled,
-                      activeColor: goldColor,
-                      onChanged: (val) => controller.toggleBackgroundPlaybackEnabled(val),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              Center(
-                child: Text(
-                  'Duck Downloader v1.0.0+1\nGoogle Play Compliant Build (Target SDK 34)',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: mutedColor, fontSize: 12, height: 1.5),
+              Icon(icon, size: 15, color: colors.gold),
+              const SizedBox(width: 7),
+              Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  color: colors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.3,
                 ),
               ),
             ],
-          );
-        },
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: colors.panel.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(DuckColors.radiusLg),
+            border: Border.all(color: colors.border),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(children: children),
+        ),
+      ],
+    );
+  }
+}
+
+class _Line extends StatelessWidget {
+  const _Line({required this.colors});
+
+  final DuckColors colors;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(left: 62),
+        child: Divider(height: 1, thickness: 1, color: colors.divider),
+      );
+}
+
+/// The gold-tinted rounded square every row leads with.
+class _Glyph extends StatelessWidget {
+  const _Glyph({required this.colors, required this.icon});
+
+  final DuckColors colors;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: colors.gold.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Icon(icon, color: colors.gold, size: 18),
+    );
+  }
+}
+
+class _RowText extends StatelessWidget {
+  const _RowText({
+    required this.colors,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final DuckColors colors;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: colors.text,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.1,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          subtitle,
+          style: TextStyle(
+            color: colors.textMuted,
+            fontSize: 12.5,
+            height: 1.38,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Toggle extends StatelessWidget {
+  const _Toggle({
+    required this.colors,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final DuckColors colors;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      pressedScale: 1,
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _Glyph(colors: colors, icon: icon),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _RowText(
+                colors: colors,
+                title: title,
+                subtitle: subtitle,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Switch(
+              value: value,
+              // activeColor was deprecated after 3.31; activeThumbColor is the
+              // replacement the analyzer asks for.
+              activeThumbColor: colors.gold,
+              onChanged: onChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Action extends StatelessWidget {
+  const _Action({
+    required this.colors,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.trailing = Icons.chevron_right_rounded,
+  });
+
+  final DuckColors colors;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final IconData trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      pressedScale: 1,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _Glyph(colors: colors, icon: icon),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _RowText(
+                colors: colors,
+                title: title,
+                subtitle: subtitle,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Icon(trailing, size: 19, color: colors.textMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Version extends StatelessWidget {
+  const _Version({required this.colors});
+
+  final DuckColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: colors.gold.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(DuckColors.radiusPill),
+              border: Border.all(color: colors.gold.withValues(alpha: 0.22)),
+            ),
+            child: Text(
+              'v$_appVersion  ·  build $_appBuild',
+              style: TextStyle(
+                color: colors.gold,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Made for people who keep their own files.',
+            style: TextStyle(color: colors.textMuted, fontSize: 11.5),
+          ),
+        ],
       ),
     );
   }

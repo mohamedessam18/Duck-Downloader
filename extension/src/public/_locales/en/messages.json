@@ -1,0 +1,12 @@
+{
+  "extName": {
+    "message": "Duck Downloader",
+    "description": "Extension name shown in the store and the browser."
+  },
+  "extShortName": {
+    "message": "Duck"
+  },
+  "extDescription": {
+    "message": "Copy. Detect. Download. Save video and audio from the page you are on."
+  }
+}

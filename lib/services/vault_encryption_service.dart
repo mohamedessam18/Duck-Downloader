@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/download_models.dart';
+import './crash_reporting_service.dart';
 
 class VaultEncryptionService {
   VaultEncryptionService._();
@@ -16,8 +17,16 @@ class VaultEncryptionService {
   static const _vaultDirName = '.Vault';
   static const _magic = <int>[68, 68, 86, 50]; // DDV2
   static const _chunkSize = 1024 * 1024;
-  static const _pinIterations = 10000;
-  static const _legacyPinIterations = 310000;
+  /// PBKDF2-HMAC-SHA256 work factor for new and re-wrapped PIN envelopes.
+  ///
+  /// This was 10,000 while an older 310,000 constant sat beside it, and
+  /// unlockWithPin re-wrapped anyone it found on the stronger setting down to
+  /// the weaker one. Migration now only ever moves *up*.
+  static const _pinIterations = 310000;
+
+  /// Work factors accepted when opening an existing envelope, strongest first.
+  /// Anything below [_pinIterations] is re-wrapped on a successful unlock.
+  static const _acceptedIterations = <int>[310000, 80000, 10000];
   static const _saltKey = 'vault.pin.salt';
   static const _pinEnvelopeKey = 'vault.pin.envelope';
   static const _deviceKey = 'vault.device.master-key';
@@ -28,6 +37,15 @@ class VaultEncryptionService {
   static final _cipher = AesGcm.with256bits();
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    // `first_unlock_this_device` keeps the master key out of iCloud Keychain
+    // and off any restored device: without it the default policy lets an
+    // encrypted backup carry the vault key onto a completely different phone,
+    // which defeats the point of a local vault. `first_unlock` rather than
+    // `unlocked` so background audio handoff can still read it while the
+    // screen is locked.
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock_this_device,
+    ),
   );
 
   static SecretKey? _sessionKey;
@@ -53,8 +71,19 @@ class VaultEncryptionService {
     }
   }
 
-  static Future<void> configurePin(String pin) async {
-    _validatePin(pin);
+  /// Sets (or re-wraps) the vault PIN.
+  ///
+  /// Returns true when a **brand-new master key** was minted, which happens
+  /// whenever no session was already unlocked. That distinction matters: a new
+  /// master key makes every previously encrypted vault file and the metadata
+  /// index permanently unreadable, so callers know it is safe — and necessary —
+  /// to discard the leftovers. Changing the PIN of an unlocked vault re-wraps
+  /// the *same* master key and returns false, leaving existing content intact.
+  /// [validate] is only ever false for the internal re-wrap that strengthens
+  /// an existing envelope: the PIN is already the user's, so the newer minimum
+  /// length must not lock them out of their own vault mid-upgrade.
+  static Future<bool> configurePin(String pin, {bool validate = true}) async {
+    if (validate) _validatePin(pin);
     if (_configured && !isUnlocked) {
       try {
         final salt = await _storage.read(key: _saltKey);
@@ -71,6 +100,7 @@ class VaultEncryptionService {
     }
     final salt = _randomBytes(16);
     final pinKey = await _derivePinKey(pin, salt);
+    final isNewVault = _sessionKey == null;
     final masterKey = _sessionKey ?? await _cipher.newSecretKey();
     final masterKeyBytes = await masterKey.extractBytes();
     final envelope = await _encryptBytes(masterKeyBytes, pinKey);
@@ -86,6 +116,30 @@ class VaultEncryptionService {
     );
     _sessionKey = SecretKey(masterKeyBytes);
     _configured = true;
+    return isNewVault;
+  }
+
+  /// Deletes the encrypted metadata index and its backup.
+  ///
+  /// Only safe when the key that wrote them is gone for good — see
+  /// [configurePin]'s return value.
+  static Future<void> resetPrivateDownloadIndex() async {
+    try {
+      final root = await getApplicationDocumentsDirectory();
+      final vaultFolder = Directory(
+        p.join(root.path, 'Duck Downloader', _vaultDirName),
+      );
+      for (final name in [
+        '.private-index',
+        '.private-index.backup',
+        '.private-index.partial',
+      ]) {
+        final file = File(p.join(vaultFolder.path, name));
+        if (await file.exists()) await file.delete();
+      }
+    } catch (_) {
+      // Nothing to clear.
+    }
   }
 
   static Future<bool> unlockWithPin(String pin) async {
@@ -96,14 +150,24 @@ class VaultEncryptionService {
       final salt = base64Url.decode(saltValue);
       final envelope = base64Url.decode(envelopeValue);
 
-      for (final iterations in [_pinIterations, 80000, _legacyPinIterations]) {
+      for (final iterations in _acceptedIterations) {
         try {
           final pinKey = await _derivePinKey(pin, salt, iterations: iterations);
           final masterKeyBytes = await _decryptBytes(envelope, pinKey);
           if (masterKeyBytes.length != 32) continue;
           _sessionKey = SecretKey(masterKeyBytes);
           _configured = true;
-          if (iterations != _pinIterations) await configurePin(pin);
+          // Re-wrap only when the stored envelope is weaker than current
+          // policy. The session key is already set, so configurePin re-wraps
+          // the same master key and leaves vault contents readable. A failure
+          // here must never turn a valid unlock into a rejection.
+          if (iterations < _pinIterations) {
+            try {
+              await configurePin(pin, validate: false);
+            } catch (error, stackTrace) {
+              reportError(error, stackTrace, reason: 'vault-pin-upgrade');
+            }
+          }
           return true;
         } catch (_) {}
       }
@@ -538,9 +602,21 @@ class VaultEncryptionService {
     return sanitized.isEmpty ? 'duck-download' : sanitized;
   }
 
+  /// Shortest PIN accepted for a *new* vault.
+  ///
+  /// Four digits is only 10,000 possibilities — small enough that no KDF work
+  /// factor saves it once an attacker has the envelope. Six raises that to a
+  /// million, which combined with the unlock throttling in the controller puts
+  /// brute force out of reach. Existing four-digit vaults keep working.
+  static const minimumPinLength = 6;
+
   static void _validatePin(String pin) {
-    if (!RegExp(r'^\d{4,12}$').hasMatch(pin)) {
-      throw ArgumentError('Vault PIN must contain 4 to 12 digits.');
+    if (!RegExp(r'^\d+$').hasMatch(pin) ||
+        pin.length < minimumPinLength ||
+        pin.length > 12) {
+      throw ArgumentError(
+        'Vault PIN must contain $minimumPinLength to 12 digits.',
+      );
     }
   }
 }

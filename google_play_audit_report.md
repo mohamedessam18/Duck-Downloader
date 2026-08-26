@@ -58,7 +58,7 @@ Google Play requires prominent in-app privacy policy access prior to app usage a
 
 ### 4.2 Implementation
 - Added a dedicated `SettingsScreen` accessible directly from the app header top bar (`_SettingsButton`).
-- Prominent `Privacy Policy` tile configured with `url_launcher` targeting `https://duckdownloader.app/privacy-policy.html` (and local fallback `privacy-policy.html`).
+- Prominent `Privacy Policy` tile that opens the full policy in an in-app dialog, so it stays readable with no network access and cannot break if a hosted copy moves.
 - Clear in-app disclosures regarding data privacy, device storage, and local encryption handling (Secure Vault).
 
 ---

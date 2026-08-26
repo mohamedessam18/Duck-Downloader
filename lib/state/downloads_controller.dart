@@ -10,12 +10,18 @@ import 'package:just_audio_background/just_audio_background.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../constants/asset_paths.dart';
+import '../core/duck_media_channel.dart';
+import '../core/haptics.dart';
+import '../services/camera_service.dart';
 import '../core/notifications/notification_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+
 import '../core/permissions/permission_service.dart';
 import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/api_client.dart';
 import '../services/clipboard_service.dart';
+import '../services/crash_reporting_service.dart';
 import '../services/download_store.dart';
 import '../services/file_service.dart';
 import '../services/premium_entitlement.dart';
@@ -26,6 +32,7 @@ import '../services/youtube_explode_service.dart';
 import '../services/vault_encryption_service.dart';
 import '../services/conversion_service.dart';
 import '../services/cobalt_service.dart';
+import '../services/reddit_service.dart';
 import '../services/device_media_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -64,7 +71,7 @@ class DuckDownloadsController extends ChangeNotifier
     _videoResumePositions = _store.readVideoResumePositions();
     autoSaveVideos = _store.readAutoSaveVideos();
     enableClipboardDetection = _store.readEnableClipboardDetection();
-    backgroundPlaybackEnabled = _store.readBackgroundPlaybackEnabled();
+    crashReportingEnabled = _store.readCrashReportingEnabled();
     _playlists = _store.readPlaylists();
     _vaultPin = _store.readVaultPin();
     _decoyVaultPin = _store.readDecoyVaultPin();
@@ -223,6 +230,7 @@ class DuckDownloadsController extends ChangeNotifier
   final NotificationService _notifications;
   final PermissionService _permissions;
   final TrimService _trimService = TrimService();
+  final RedditService _reddit = RedditService();
   final YouTubeExplodeService _ytExplode;
 
   List<DownloadItem> _downloads = [];
@@ -260,7 +268,7 @@ class DuckDownloadsController extends ChangeNotifier
   bool _justReturnedFromLockedBrowser = false;
   bool autoSaveVideos = true;
   bool enableClipboardDetection = true;
-  bool backgroundPlaybackEnabled = true;
+  bool crashReportingEnabled = true;
   String? detectedClipboardUrl;
   String? _lastDetectedUrl;
 
@@ -370,17 +378,230 @@ class DuckDownloadsController extends ChangeNotifier
   List<DeviceMediaFolder> imageFolders = [];
   List<DeviceMediaFolder> audioFolders = [];
 
+  /// True once a scan has run and the user has refused media access.
+  ///
+  /// Distinguishing this from "scanned and found nothing" is what lets the
+  /// folders tab offer a way forward instead of an empty screen the user
+  /// cannot act on.
+  bool deviceMediaAccessDenied = false;
+
+  /// True while a library read is in flight, so the browser can show progress
+  /// instead of an empty state it would otherwise mistake for "no files".
+  bool deviceFoldersLoading = false;
+
+  /// When the folder lists were last read, so they can go stale.
+  DateTime? _deviceFoldersReadAt;
+
+  /// How long a listing is trusted before the browser re-reads it.
+  ///
+  /// Short, because the whole point is noticing files and folders that other
+  /// apps created while Duck was open — a camera shot, a WhatsApp download.
+  /// The read itself is one MediaStore query, so this is cheap.
+  static const _deviceFoldersFreshFor = Duration(seconds: 20);
+
+  /// Loads folders when the browser opens, and again once they go stale.
+  ///
+  /// This used to return early forever after the first successful read, which
+  /// meant a folder created after launch never showed up until the app was
+  /// restarted. Staleness is time-based instead.
+  /// Whether this session has already put the system permission prompt up.
+  bool _deviceMediaPermissionAsked = false;
+
+  Future<void> ensureDeviceFolders() async {
+    if (deviceFoldersLoading) return;
+    final readAt = _deviceFoldersReadAt;
+    // Deliberately keyed on the last *attempt*, not the last success. Keying
+    // it on success meant a denied permission never marked anything, so the
+    // folders tab — which calls this after every frame — re-entered on every
+    // rebuild, and each pass raised the permission dialog again. That storm is
+    // what made the browser look completely dead rather than merely empty.
+    if (readAt != null &&
+        DateTime.now().difference(readAt) < _deviceFoldersFreshFor) {
+      return;
+    }
+    // Prompt once per session. The intro can be skipped, so arriving here
+    // having never been asked is a normal path — but asking again on every
+    // refresh is not.
+    final shouldAsk = !_deviceMediaPermissionAsked;
+    _deviceMediaPermissionAsked = true;
+    await refreshDeviceFolders(requestPermission: shouldAsk);
+    await ensureDeviceWriteAccess();
+  }
+
+  /// Whether this session has already put the bulk write-consent dialog up.
+  bool _deviceWriteAccessAsked = false;
+
+  /// Asks once for permission to modify the user's own media.
+  ///
+  /// READ_MEDIA_* covers reading and nothing else; every rename, move and
+  /// delete of a file Duck did not create needs the user's consent, and
+  /// Android will only take that consent through its own dialog. What it does
+  /// allow is asking about a whole batch at once, so the browser asks for the
+  /// library the first time it opens and every edit after that is silent.
+  ///
+  /// Deliberately best-effort. If the user says no, or the dialog never
+  /// appears, nothing breaks — each edit falls back to asking for itself.
+  Future<void> ensureDeviceWriteAccess() async {
+    if (_deviceWriteAccessAsked) return;
+    // Persisted, because the grant the dialog obtains outlives the process.
+    // Re-asking every launch would be nagging for something already held.
+    if (_store.readMediaWriteAccessAsked()) {
+      _deviceWriteAccessAsked = true;
+      return;
+    }
+    // No read access means no library to ask about, and asking to modify
+    // files the user has not agreed to let us see reads as a trick.
+    if (deviceMediaAccessDenied) return;
+
+    _deviceWriteAccessAsked = true;
+    // Written before the dialog goes up, so a crash or a force-stop while it
+    // is on screen cannot turn this into a prompt on every launch.
+    await _store.writeMediaWriteAccessAsked(true);
+
+    final paths = await _deviceMediaService.libraryPaths();
+    if (paths.isEmpty) return;
+    await _deviceMediaService.requestWriteAccess(paths);
+  }
+
   Future<void> refreshDeviceFolders({bool requestPermission = true}) async {
+    if (deviceFoldersLoading) return;
+    deviceFoldersLoading = true;
+    notifyListeners();
     try {
-      if (requestPermission) await _permissions.requestStoragePermission();
-      videoFolders = await _deviceMediaService.getVideoFolders(_downloads);
-      imageFolders = await _deviceMediaService.getImageFolders(_downloads);
-      audioFolders = await _deviceMediaService.getAudioFolders(_downloads);
+      final granted = requestPermission
+          ? await _permissions.requestMediaLibraryAccess()
+          : await _permissions.hasMediaLibraryAccess();
+      deviceMediaAccessDenied = !granted;
+      if (!granted) {
+        videoFolders = const [];
+        imageFolders = const [];
+        audioFolders = const [];
+        return;
+      }
+
+      // Always re-read. This method only runs when the listing is already
+      // stale or the user explicitly asked, so honouring the service's own
+      // cache here would just stack a second expiry on top of the first and
+      // hand back the very data we came to replace. The service cache still
+      // does its job below: it turns the three foldersFor calls into one
+      // MediaStore query.
+      _deviceMediaService.invalidate();
+      videoFolders = await _deviceMediaService.foldersFor(DownloadType.video);
+      imageFolders = await _deviceMediaService.foldersFor(DownloadType.image);
+      audioFolders = await _deviceMediaService.foldersFor(DownloadType.audio);
+      debugPrint(
+        'FOLDERS: ${videoFolders.length} video, ${imageFolders.length} image, '
+        '${audioFolders.length} audio',
+      );
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'device-media-scan');
+    } finally {
+      // In the finally, so a denial or a thrown read still counts as an
+      // attempt and cannot spin the caller.
+      _deviceFoldersReadAt = DateTime.now();
+      deviceFoldersLoading = false;
       notifyListeners();
-    } catch (e) {
-      debugPrint('Error scanning device media folders: $e');
     }
   }
+
+  // ── Back navigation ───────────────────────────────────────────────────────
+
+  /// Layers that get first refusal on the back gesture, innermost last.
+  ///
+  /// Back used to be a single if-chain in the root screen's PopScope, which
+  /// could only reason about state that screen happened to hold. Anything
+  /// owning a dismissible layer of its own — the player's option panels, a
+  /// folder sheet in selection mode — was invisible to it, so back sailed past
+  /// them and tore down the whole screen instead of closing the one thing the
+  /// user was looking at. Layers register as they appear and unregister as
+  /// they go, and the chain is walked from the innermost outwards.
+  final List<bool Function()> _backInterceptors = [];
+
+  /// True while some layer wants a say in the back gesture.
+  bool get hasBackInterceptors => _backInterceptors.isNotEmpty;
+
+  void addBackInterceptor(bool Function() handler) {
+    _backInterceptors.add(handler);
+  }
+
+  void removeBackInterceptor(bool Function() handler) {
+    _backInterceptors.remove(handler);
+  }
+
+  /// Offers the back gesture to each layer, innermost first.
+  ///
+  /// Returns true as soon as one consumes it. Iterating over a copy because a
+  /// handler is free to unregister itself as it closes.
+  bool handleBackIntercept() {
+    for (final handler in _backInterceptors.reversed.toList()) {
+      if (handler()) return true;
+    }
+    return false;
+  }
+
+  /// Destination candidates for a move.
+  Future<List<DeviceMediaFolder>> deviceDestinationFolders() =>
+      _deviceMediaService.destinationFolders();
+
+  /// Re-reads a single folder after an edit.
+  Future<DeviceMediaFolder?> refreshDeviceFolder({
+    required String path,
+    required DownloadType type,
+  }) => _deviceMediaService.refreshFolder(path, type);
+
+  /// Every device-media edit goes through here.
+  ///
+  /// Two things used to be left to each call site and were forgotten at half
+  /// of them: renaming through a *second* `DeviceMediaService` instance, whose
+  /// cache invalidation nobody read, and never refreshing the folder grid — so
+  /// a rename the user had just confirmed kept showing the old name until the
+  /// 20-second staleness window happened to expire.
+  Future<DeviceMediaEditOutcome> _runDeviceEdit(
+    Future<DeviceMediaEditOutcome> Function() edit,
+  ) async {
+    final outcome = await edit();
+    if (outcome.result == DeviceMediaEditResult.success) {
+      // Permission is already granted — anything else would have failed long
+      // before here — so re-read without putting the system prompt back up.
+      await refreshDeviceFolders(requestPermission: false);
+    }
+    return outcome;
+  }
+
+  Future<DeviceMediaEditOutcome> renameDeviceMedia({
+    required String path,
+    required String newName,
+  }) => _runDeviceEdit(
+    () => _deviceMediaService.rename(path: path, newName: newName),
+  );
+
+  Future<DeviceMediaEditOutcome> deleteDeviceMedia(List<String> paths) =>
+      _runDeviceEdit(() => _deviceMediaService.delete(paths));
+
+  Future<DeviceMediaEditOutcome> moveDeviceMedia({
+    required List<String> paths,
+    required String targetFolder,
+  }) => _runDeviceEdit(
+    () => _deviceMediaService.move(paths: paths, targetFolder: targetFolder),
+  );
+
+  Future<DeviceMediaEditOutcome> updateDeviceMediaTags({
+    required String path,
+    String? title,
+    String? artist,
+    String? album,
+  }) => _runDeviceEdit(
+    () => _deviceMediaService.updateTags(
+      path: path,
+      title: title,
+      artist: artist,
+      album: album,
+    ),
+  );
+
+  /// Opens the system settings page so the user can grant access after a
+  /// permanent denial, where an in-app prompt would no longer appear.
+  Future<void> openDeviceMediaSettings() => openAppSettings();
 
   List<DownloadItem> get privateDownloads {
     if (isVaultLocked || isDecoySession) {
@@ -432,6 +653,9 @@ class DuckDownloadsController extends ChangeNotifier
 
   void setTab(DuckTab next) {
     if (tab != next) {
+      // Here rather than in the nav bar, so tapping, dragging the pill and
+      // programmatic jumps (notification taps, clipboard accept) all tick.
+      DuckHaptics.selection();
       if (tabHistory.isEmpty || tabHistory.last != tab) {
         tabHistory.add(tab);
       }
@@ -454,7 +678,42 @@ class DuckDownloadsController extends ChangeNotifier
     return false;
   }
 
+  /// How long the vault stays closed after too many wrong PINs.
+  ///
+  /// A numeric PIN has a small keyspace, so the work factor of the key
+  /// derivation alone cannot stop an attacker who can keep guessing. Making
+  /// each additional wrong guess cost real time is what actually does — the
+  /// delay doubles from 5 seconds and caps at five minutes.
+  Duration get vaultLockoutRemaining {
+    final until = _vaultLockedOutUntil;
+    if (until == null) return Duration.zero;
+    final remaining = until.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  bool get isVaultLockedOut => vaultLockoutRemaining > Duration.zero;
+
+  DateTime? _vaultLockedOutUntil;
+  static const _vaultAttemptsBeforeThrottle = 3;
+  static const _vaultMaxLockout = Duration(minutes: 5);
+
+  void _applyVaultLockout() {
+    if (_failedPinAttempts < _vaultAttemptsBeforeThrottle) return;
+    final overshoot = _failedPinAttempts - _vaultAttemptsBeforeThrottle;
+    final seconds = 5 * (1 << overshoot.clamp(0, 6));
+    final delay = Duration(seconds: seconds) > _vaultMaxLockout
+        ? _vaultMaxLockout
+        : Duration(seconds: seconds);
+    _vaultLockedOutUntil = DateTime.now().add(delay);
+  }
+
   Future<bool> checkVaultPin(String pin) async {
+    if (isVaultLockedOut) {
+      final seconds = vaultLockoutRemaining.inSeconds + 1;
+      status = 'Too many attempts. Try again in ${seconds}s.';
+      notifyListeners();
+      return false;
+    }
     var unlocked = await VaultEncryptionService.unlockWithPin(pin);
     if (!unlocked && pin == _vaultPin) {
       // One-time migration from the legacy plaintext PIN storage.
@@ -467,8 +726,10 @@ class DuckDownloadsController extends ChangeNotifier
     if (unlocked) {
       await _restorePrivateMetadata();
       isVaultLocked = false;
+      touchVault();
       isDecoySession = false;
       _failedPinAttempts = 0;
+      _vaultLockedOutUntil = null;
       notifyListeners();
       return true;
     }
@@ -481,8 +742,10 @@ class DuckDownloadsController extends ChangeNotifier
     }
     if (decoyUnlocked) {
       isVaultLocked = false;
+      touchVault();
       isDecoySession = true;
       _failedPinAttempts = 0;
+      _vaultLockedOutUntil = null;
       notifyListeners();
       return true;
     }
@@ -490,24 +753,87 @@ class DuckDownloadsController extends ChangeNotifier
     isVaultLocked = true;
     isDecoySession = false;
     _failedPinAttempts++;
-    if (_failedPinAttempts >= 3) _failedPinAttempts = 0;
+    if (_failedPinAttempts == _vaultAttemptsBeforeThrottle) {
+      unawaited(VaultCameraService.captureIntruderSelfie());
+    }
+    _applyVaultLockout();
+    if (isVaultLockedOut) {
+      status =
+          'Too many attempts. Try again in '
+          '${vaultLockoutRemaining.inSeconds + 1}s.';
+    }
     notifyListeners();
     return false;
   }
 
   Future<void> setVaultPin(String pin) async {
+    bool isNewVault;
     try {
-      await VaultEncryptionService.configurePin(pin);
+      isNewVault = await VaultEncryptionService.configurePin(pin);
     } catch (e) {
       await VaultEncryptionService.deleteVaultKeys();
-      await VaultEncryptionService.configurePin(pin);
+      isNewVault = await VaultEncryptionService.configurePin(pin);
     }
+
+    // A brand-new master key leaves any previous metadata index encrypted with
+    // a key that no longer exists anywhere. Keeping it around meant
+    // _restorePrivateMetadata failed to decrypt it, flagged the index unhealthy
+    // and then refused every future vault write — bricking the vault with no
+    // way back. Clearing it here is safe precisely because nothing can read it.
+    if (isNewVault) {
+      await VaultEncryptionService.resetPrivateDownloadIndex();
+      _privateMetadata.clear();
+    }
+
     _vaultPin = null;
     await _store.writeVaultPin(null);
     isVaultLocked = false;
     isDecoySession = false;
+    touchVault();
     await _restorePrivateMetadata();
     notifyListeners();
+  }
+
+  /// Whether the encrypted metadata index failed to load this session.
+  ///
+  /// While false, vault writes are refused so a half-readable index is never
+  /// overwritten. [recoverVaultMetadataIndex] is the way out.
+  bool get vaultMetadataNeedsRecovery => !_privateMetadataIndexHealthy;
+
+  /// Rebuilds the metadata index from what is currently known and re-enables
+  /// vault writes.
+  ///
+  /// This is deliberately explicit rather than automatic: it discards whatever
+  /// the unreadable index held, so it belongs behind a user action once they
+  /// accept that some vault entries may lose their title/thumbnail. The
+  /// encrypted media files themselves are never touched.
+  Future<bool> recoverVaultMetadataIndex() async {
+    if (!VaultEncryptionService.isUnlocked) {
+      status = 'Unlock the Secure Vault first.';
+      notifyListeners();
+      return false;
+    }
+    try {
+      await VaultEncryptionService.resetPrivateDownloadIndex();
+      _privateMetadataIndexHealthy = true;
+      // Re-seed from the downloads still marked private so nothing recoverable
+      // is thrown away.
+      for (final item in _downloads.where((item) => item.isPrivate)) {
+        if (item.url.isNotEmpty) {
+          _privateMetadata.putIfAbsent(item.id, () => item);
+        }
+      }
+      await _persistPrivateMetadata();
+      status = 'Secure Vault index rebuilt';
+      notifyListeners();
+      return true;
+    } catch (error) {
+      _privateMetadataIndexHealthy = false;
+      status = 'Could not rebuild the Vault index: ${_cleanError(error)}';
+      flow = DuckFlow.error;
+      notifyListeners();
+      return false;
+    }
   }
 
   Future<void> _restorePrivateMetadata() async {
@@ -516,9 +842,9 @@ class DuckDownloadsController extends ChangeNotifier
       encryptedEntries =
           await VaultEncryptionService.readPrivateDownloadIndex();
       _privateMetadataIndexHealthy = true;
-    } catch (error) {
+    } catch (error, stackTrace) {
       _privateMetadataIndexHealthy = false;
-      debugPrint('Vault metadata index could not be restored: $error');
+      reportError(error, stackTrace, reason: 'vault-index-restore');
     }
     for (final entry in encryptedEntries) {
       try {
@@ -537,8 +863,8 @@ class DuckDownloadsController extends ChangeNotifier
     if (_privateMetadataIndexHealthy) {
       try {
         await _persistPrivateMetadata();
-      } catch (error) {
-        debugPrint('Vault metadata index could not be saved: $error');
+      } catch (error, stackTrace) {
+        reportError(error, stackTrace, reason: 'vault-index-save');
       }
     }
   }
@@ -591,7 +917,33 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
+  /// How long the vault may sit unused before it locks itself.
+  ///
+  /// Backgrounding the app already locks it. This covers the other way a vault
+  /// is left open: the phone is put down, face up, on a table.
+  static const vaultIdleTimeout = Duration(minutes: 2);
+
+  Timer? _vaultIdleTimer;
+
+  /// Restarts the idle countdown. Called whenever the user touches the vault.
+  void touchVault() {
+    _vaultIdleTimer?.cancel();
+    if (isVaultLocked) return;
+    _vaultIdleTimer = Timer(vaultIdleTimeout, () {
+      // Never lock out from under something that is playing. Watching a long
+      // video is not idleness, and a vault that locks mid-scene is worse than
+      // one that stays open a few minutes longer.
+      if (playerItem != null || audioPlayer.playing) {
+        touchVault();
+        return;
+      }
+      lockVault();
+    });
+  }
+
   void lockVault() {
+    _vaultIdleTimer?.cancel();
+    _vaultIdleTimer = null;
     VaultEncryptionService.lock();
     isVaultLocked = true;
     isDecoySession = false;
@@ -603,11 +955,13 @@ class DuckDownloadsController extends ChangeNotifier
     await _restorePrivateMetadata();
     isVaultLocked = false;
     isDecoySession = false;
+    touchVault();
     notifyListeners();
     return true;
   }
 
   Future<void> toggleFavorite(DownloadItem item) async {
+    DuckHaptics.toggle();
     final next = item.copyWith(favorite: !item.favorite);
     await _saveItem(next);
     if (playingItem?.id == item.id) {
@@ -992,6 +1346,21 @@ class DuckDownloadsController extends ChangeNotifier
       return;
     }
 
+    // Only vault media needs decrypting to a temp file first. Everything else
+    // opens on this frame rather than a microtask later: awaiting here meant
+    // playerItem was still null immediately after the call, which delayed the
+    // player by a frame and left callers unable to rely on it synchronously.
+    // (_clearPlayerTemp nulls _playerTempPath synchronously, so letting the
+    // delete finish in the background is safe.)
+    if (!(item.isPrivate && !item.isImage)) {
+      unawaited(_clearPlayerTemp());
+      playerItem = item;
+      playerGalleryItems = galleryItems;
+      _audioQueueSource = queueItems;
+      notifyListeners();
+      return;
+    }
+
     await _clearPlayerTemp();
     var playableItem = item;
     if (item.isPrivate && !item.isImage) {
@@ -1134,6 +1503,71 @@ class DuckDownloadsController extends ChangeNotifier
         throw Exception('Copy a public social media link first.');
       }
 
+      // ── YouTube: extract on-device, never through the backend ─────────────
+      // The backend runs from a datacentre IP, which YouTube bot-checks almost
+      // immediately. youtube_explode runs on the user's own connection, so it
+      // keeps working and it also returns the real quality ladder rather than
+      // whatever the server managed to negotiate.
+      if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
+        flow = DuckFlow.extracting;
+        status = 'Fetching YouTube info...';
+        notifyListeners();
+        try {
+          final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
+          if (ytMeta != null && ytMeta.qualities.isNotEmpty) {
+            metadata = ytMeta;
+            selectedType = _selectDefaultDownloadType(ytMeta, cleanUrl);
+            quality = _firstQuality(ytMeta, selectedType);
+            flow = DuckFlow.ready;
+            status = selectedType == DownloadType.audio
+                ? 'Choose audio format'
+                : 'Choose video or audio';
+            return;
+          }
+          throw Exception(
+            'Could not load YouTube video. It may be private, age-restricted, '
+            'or unavailable in your region.',
+          );
+        } catch (error) {
+          if (_shouldUseLockedBrowserFallback(cleanUrl, error)) {
+            _requestLockedBrowser(cleanUrl, _browserPlatformFor(cleanUrl));
+            return;
+          }
+          rethrow;
+        }
+      }
+
+      // ── Reddit: resolve on-device from the public JSON endpoint ──────────
+      // v.redd.it serves DASH, so the post's own metadata is the only place
+      // the matching audio track is discoverable. Doing it here also means the
+      // NSFW flag has already been checked by _isAdultUrl above.
+      if (RedditService.isRedditUrl(cleanUrl)) {
+        try {
+          final post = await _reddit.fetchPost(cleanUrl);
+          final media = post == null
+              ? null
+              : _reddit.buildMetadata(cleanUrl, post);
+          if (media != null) {
+            metadata = media;
+            if (post!.isVideo) {
+              selectedType = DownloadType.video;
+              quality = _firstQuality(media, DownloadType.video);
+              flow = DuckFlow.ready;
+              status = 'Choose video or audio';
+            } else {
+              selectedType = DownloadType.image;
+              quality = _firstQuality(media, DownloadType.image);
+              flow = DuckFlow.ready;
+              status = 'Tap download to save image';
+            }
+            return;
+          }
+        } catch (error) {
+          debugPrint('Reddit extraction failed, falling back: $error');
+        }
+        // Fall through to the backend for galleries and text posts.
+      }
+
       if (cleanUrl.contains('instagram.com')) {
         try {
           final playlist = await _api.extractPlaylist(cleanUrl);
@@ -1217,6 +1651,7 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<void> pasteAndExtract() async {
     if (busy) return;
+    DuckHaptics.tap();
     unawaited(_playQuack());
     busy = true;
     flow = DuckFlow.extracting;
@@ -1363,12 +1798,7 @@ class DuckDownloadsController extends ChangeNotifier
         onProgress: (received, total) async {
           if (total <= 0) return;
           final progress = ((received / total) * 100).clamp(0, 100).toInt();
-          final updated = item.copyWith(
-            progress: progress,
-            status: DownloadStatus.downloading,
-          );
-          await _saveItem(updated);
-          notifyListeners();
+          await _publishProgress(item, progress);
         },
       );
 
@@ -1488,10 +1918,6 @@ class DuckDownloadsController extends ChangeNotifier
       );
     }
 
-    // For audio: default to webm (YouTube's native Opus container) so the
-    // transcode step always fires and produces a playable .m4a
-    final ext =
-        format.ext ?? (selectedType == DownloadType.audio ? 'webm' : 'mp4');
     final itemId = DateTime.now().millisecondsSinceEpoch.toString();
 
     var item = DownloadItem(
@@ -1524,21 +1950,15 @@ class DuckDownloadsController extends ChangeNotifier
           onProgress: (received, total) async {
             if (total <= 0) return;
             final progress = ((received / total) * 99).clamp(0, 99).toInt();
-            final updated = item.copyWith(
-              progress: progress,
-              status: DownloadStatus.downloading,
-            );
-            await _saveItem(updated);
-            notifyListeners();
+            await _publishProgress(item, progress);
           },
           onTranscoding: () async {
             status = 'Converting to M4A...';
-            final updated = item.copyWith(
-              progress: 99,
+            await _publishProgress(
+              item,
+              99,
               status: DownloadStatus.processing,
             );
-            await _saveItem(updated);
-            notifyListeners();
           },
         );
       } else {
@@ -1553,12 +1973,7 @@ class DuckDownloadsController extends ChangeNotifier
           onProgress: (received, total) async {
             if (total <= 0) return;
             final progress = ((received / total) * 99).clamp(0, 99).toInt();
-            final updated = item.copyWith(
-              progress: progress,
-              status: DownloadStatus.downloading,
-            );
-            await _saveItem(updated);
-            notifyListeners();
+            await _publishProgress(item, progress);
           },
         );
       }
@@ -1650,8 +2065,6 @@ class DuckDownloadsController extends ChangeNotifier
                 candidate.label == preferredFormat.label,
             orElse: () => allFormats.first,
           );
-    final ext = format.ext ?? (type == DownloadType.audio ? 'webm' : 'mp4');
-
     // 3. Create download item
     final itemId = '${DateTime.now().millisecondsSinceEpoch}_${url.hashCode}';
     var item = DownloadItem(
@@ -1682,20 +2095,14 @@ class DuckDownloadsController extends ChangeNotifier
             onProgress: (received, total) async {
               if (total <= 0) return;
               final progress = ((received / total) * 99).clamp(0, 99).toInt();
-              final updated = item.copyWith(
-                progress: progress,
-                status: DownloadStatus.downloading,
-              );
-              await _saveItem(updated);
-              notifyListeners();
+              await _publishProgress(item, progress);
             },
             onTranscoding: () async {
-              final updated = item.copyWith(
-                progress: 99,
+              await _publishProgress(
+                item,
+                99,
                 status: DownloadStatus.processing,
               );
-              await _saveItem(updated);
-              notifyListeners();
             },
           );
         } else {
@@ -1707,12 +2114,7 @@ class DuckDownloadsController extends ChangeNotifier
             onProgress: (received, total) async {
               if (total <= 0) return;
               final progress = ((received / total) * 99).clamp(0, 99).toInt();
-              final updated = item.copyWith(
-                progress: progress,
-                status: DownloadStatus.downloading,
-              );
-              await _saveItem(updated);
-              notifyListeners();
+              await _publishProgress(item, progress);
             },
           );
         }
@@ -1908,22 +2310,29 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
-  Future<void> toggleBackgroundPlayback(bool enabled) async {
-    backgroundPlaybackEnabled = enabled;
-    await _store.writeBackgroundPlaybackEnabled(enabled);
+  /// Returns true once, the first time the main screen appears after the
+  /// intro. Clearing it here rather than at the call site means a crash while
+  /// the sheet is opening cannot make the offer reappear on every launch.
+  bool consumePendingPremiumOffer() {
+    if (!_store.readPendingPremiumOffer()) return false;
+    _store.writePendingPremiumOffer(false);
+    return true;
+  }
+
+  /// User-facing opt-out for anonymous crash reports.
+  Future<void> toggleCrashReporting(bool enabled) async {
+    crashReportingEnabled = enabled;
+    await _store.writeCrashReportingEnabled(enabled);
+    await CrashReportingService.instance.setEnabled(enabled);
     status = enabled
-        ? 'Background playback enabled'
-        : 'Background playback disabled';
+        ? 'Crash reports enabled'
+        : 'Crash reports disabled';
     notifyListeners();
   }
 
   void toggleClipboardDetection(bool value) {
     enableClipboardDetection = value;
     notifyListeners();
-  }
-
-  void toggleBackgroundPlaybackEnabled(bool value) {
-    toggleBackgroundPlayback(value);
   }
 
   Future<void> saveVideoExternally(DownloadItem item) async {
@@ -2152,6 +2561,73 @@ class DuckDownloadsController extends ChangeNotifier
         );
   }
 
+  // ── Progress reporting ────────────────────────────────────────────────────
+
+  /// Percent last published per download, so unchanged ticks cost nothing.
+  final Map<String, int> _lastPublishedProgress = {};
+
+  /// When each download last wrote its progress to disk.
+  final Map<String, DateTime> _lastProgressPersist = {};
+
+  /// How often an in-flight download checkpoints to storage.
+  ///
+  /// Only so a crash mid-download does not rewind the bar to zero. The value
+  /// on screen comes from memory, so this has nothing to do with smoothness.
+  static const _progressCheckpoint = Duration(seconds: 5);
+
+  /// Publishes download progress without paying for a full save.
+  ///
+  /// Progress ticks arrive once per network chunk — hundreds to thousands per
+  /// download. Routing each one through _saveItem meant two disk writes, a
+  /// re-read and full JSON re-parse of every download in history, and a
+  /// rebuild of the entire list, all before the next chunk landed. With a few
+  /// hundred items in history that is the whole frame budget spent on
+  /// bookkeeping, which is why the bar stuttered rather than moved.
+  ///
+  /// So: skip ticks that do not change the whole percent, update the item in
+  /// memory, and let storage lag behind on a timer.
+  Future<void> _publishProgress(
+    DownloadItem item,
+    int progress, {
+    DownloadStatus status = DownloadStatus.downloading,
+  }) async {
+    final index = _downloads.indexWhere((entry) => entry.id == item.id);
+    if (index < 0) return;
+
+    final unchanged = _lastPublishedProgress[item.id] == progress &&
+        _downloads[index].status == status;
+    if (unchanged) return;
+    _lastPublishedProgress[item.id] = progress;
+
+    final updated = _downloads[index].copyWith(
+      progress: progress,
+      status: status,
+    );
+    _downloads[index] = updated;
+    if (updated.isPrivate) _privateMetadata[item.id] = updated;
+    notifyListeners();
+
+    final lastWrite = _lastProgressPersist[item.id];
+    if (lastWrite != null &&
+        DateTime.now().difference(lastWrite) < _progressCheckpoint) {
+      return;
+    }
+    _lastProgressPersist[item.id] = DateTime.now();
+    try {
+      await _store.upsert(updated);
+    } catch (error) {
+      // A failed checkpoint costs nothing the user can see — the download
+      // keeps running and the final save is what actually matters.
+      reportError(error, StackTrace.current, reason: 'progress-checkpoint');
+    }
+  }
+
+  /// Clears the per-download progress bookkeeping once it is no longer live.
+  void _forgetProgress(String id) {
+    _lastPublishedProgress.remove(id);
+    _lastProgressPersist.remove(id);
+  }
+
   Future<void> _saveItem(DownloadItem item) async {
     if (item.isPrivate && !VaultEncryptionService.isUnlocked) {
       throw StateError(
@@ -2166,6 +2642,13 @@ class DuckDownloadsController extends ChangeNotifier
       await _persistPrivateMetadata();
     }
     await _store.upsert(item);
+    // Once a download reaches a terminal state its throttling state is dead
+    // weight — and keeping it would make a later retry of the same id skip
+    // its first ticks as "unchanged".
+    if (item.status != DownloadStatus.downloading &&
+        item.status != DownloadStatus.processing) {
+      _forgetProgress(item.id);
+    }
     _downloads = _store.readDownloads();
     _mergePrivateMetadata();
     _syncActiveFlow();
@@ -2617,14 +3100,16 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> _initializePlatformServices() async {
     await _requestPermissionsSafely();
     await loadCookiesStatus();
-    await refreshDeviceFolders(requestPermission: false);
+    // Deliberately no folder scan here. It used to run on every cold start,
+    // and most sessions never open the browser at all — the user pastes a link
+    // and leaves. The browser now asks for it when it opens.
   }
 
   Future<void> _requestPermissionsSafely() async {
     try {
       await _permissions.requestAllRequiredPermissions();
-    } catch (error) {
-      debugPrint('Permission request failed: $error');
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'permission-request');
     }
   }
 
@@ -2747,11 +3232,31 @@ class DuckDownloadsController extends ChangeNotifier
         ),
       );
 
+      // Start the media session while the app is still in the foreground.
+      //
+      // This is the whole reason background playback was failing. Since
+      // Android 12 an app in the background may not *start* a foreground
+      // service, and `just_audio_background` needs one. Locking the screen
+      // put the app in the background first, so the play() that followed threw
+      // ForegroundServiceStartNotAllowedException and the audio never came.
+      //
+      // Playing for an instant here starts that service while it is still
+      // legal to, and pausing immediately leaves it alive and idle — the
+      // notification is ongoing, so the service is not torn down. By the time
+      // the screen locks there is nothing left to start: the handoff only has
+      // to seek and unmute, which is why it is instant.
+      await audioPlayer.play();
+      await audioPlayer.pause();
+      await audioPlayer.seek(Duration.zero);
+
       _backgroundVideoPreloaded = true;
       playingItem = item;
+      backgroundAudioError = null;
+      debugPrint('BG AUDIO: preloaded and session started for ${item.title}');
     } catch (e) {
       _backgroundVideoPreloaded = false;
-      debugPrint('Failed to preload background audio: $e');
+      backgroundAudioError = 'preload failed: $e';
+      debugPrint('BG AUDIO: preload failed — $e');
     }
   }
 
@@ -2771,18 +3276,33 @@ class DuckDownloadsController extends ChangeNotifier
   /// Activates the pre-loaded background audio player by seeking to the
   /// video's current position, unmuting, and starting playback.
   /// Because the audio source is already loaded, this is nearly instant.
+  /// Last reason background audio failed to start, for diagnostics.
+  String? backgroundAudioError;
+
   Future<void> activateBackgroundAudio(Duration position) async {
-    if (!_backgroundVideoPreloaded) return;
+    if (!_backgroundVideoPreloaded) {
+      backgroundAudioError = 'audio source was never preloaded';
+      debugPrint('BG AUDIO: $backgroundAudioError');
+      return;
+    }
     if (_backgroundVideoActive) return;
     try {
       _backgroundVideoActive = true;
       await audioPlayer.seek(position);
       await audioPlayer.setVolume(1.0); // unmute — instant!
       await audioPlayer.play();
+      backgroundAudioError = null;
+      debugPrint('BG AUDIO: playing from $position');
       notifyListeners();
     } catch (e) {
       _backgroundVideoActive = false;
-      debugPrint('Failed to activate background audio: $e');
+      backgroundAudioError = e.toString();
+      // Should no longer be reachable for the Android 12+ foreground-service
+      // restriction — preloadBackgroundAudio starts that service while the app
+      // is still on screen. Kept because a decode error or a file that moved
+      // out from under us can still land here, and silence with no explanation
+      // is the worst outcome.
+      debugPrint('BG AUDIO: activation failed — $e');
     }
   }
 
@@ -2885,7 +3405,7 @@ class DuckDownloadsController extends ChangeNotifier
       final partialMatch = formats.firstWhere(
         (f) =>
             f.label.toLowerCase().contains(savedPreference!.toLowerCase()) ||
-            savedPreference!.toLowerCase().contains(f.label.toLowerCase()),
+            savedPreference.toLowerCase().contains(f.label.toLowerCase()),
         orElse: () => formats.first,
       );
       return partialMatch.label;
@@ -3048,6 +3568,15 @@ class DuckDownloadsController extends ChangeNotifier
       final uri = Uri.parse(cleanUrl);
       final host = uri.host;
       if (host.isEmpty) return false;
+
+      // Reddit needs the post itself checked, not the domain: reddit.com is
+      // mainstream, but individual posts and whole subreddits are marked adult.
+      // `over_18` is Reddit's own flag, so it is authoritative where a
+      // hostname keyword or DNS filter would wave the link straight through.
+      if (RedditService.isRedditUrl(cleanUrl)) {
+        final post = await _reddit.fetchPost(cleanUrl);
+        if (post != null) return post.isNsfw;
+      }
 
       // 0. Check Twitter / X adult sensitive media
       final lowerUrl = cleanUrl.toLowerCase();
@@ -3276,11 +3805,33 @@ class DuckDownloadsController extends ChangeNotifier
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
+    if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
+      // Locking the vault on the way out is what keeps private media off the
+      // recents thumbnail — that part stays.
+      //
+      // `inactive` used to be in this list and should never have been. It does
+      // not mean "the app is leaving": it fires on a rotation, on the
+      // notification shade being pulled down, on any system dialog, and on the
+      // way into and out of Picture-in-Picture. Opening a vault video rotates
+      // the screen, so the vault locked itself while the user was still in it,
+      // and going back showed an empty list. `paused` is the state that
+      // actually precedes the recents snapshot, so the protection is intact.
       lockVault();
-      closePlayer();
+
+      // Tearing the player down as well used to happen here, which made
+      // Picture-in-Picture and background audio impossible: closePlayer()
+      // clears playerItem, the overlay leaves the tree, and its dispose()
+      // releases the video controller — all in the same frame the platform is
+      // trying to hand the video to a PiP window. `inactive` also fires on a
+      // simple rotation, so turning the phone sideways closed the video too.
+      //
+      // The player now decides for itself what backgrounding means (see
+      // DuckPlayerOverlay.didChangeAppLifecycleState), and only vault media
+      // still has to disappear, because the vault above just locked.
+      if (playerItem?.isPrivate == true) {
+        closePlayer();
+      }
     }
     if (state == AppLifecycleState.resumed) {
       _checkClipboardOnResume();
@@ -3289,6 +3840,7 @@ class DuckDownloadsController extends ChangeNotifier
 
   @override
   void dispose() {
+    _vaultIdleTimer?.cancel();
     _intentSub?.cancel();
     _sfxPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -3299,6 +3851,8 @@ class DuckDownloadsController extends ChangeNotifier
       sub.cancel();
     }
     _downloadSubscriptions.clear();
+    DuckMediaChannel.instance.removeHandler(_handleNativeMediaCall);
+    _reddit.dispose();
     audioPlayer.dispose();
     super.dispose();
   }
@@ -3748,22 +4302,22 @@ class DuckDownloadsController extends ChangeNotifier
       }
     });
 
-    const MethodChannel('duck_downloader/media').setMethodCallHandler((
-      call,
-    ) async {
-      if (call.method == 'startDirectQuickDownload') {
-        final String? url = call.arguments['url'];
-        final String? typeStr = call.arguments['type'];
-        if (url != null) {
-          showAdOnOpen = true; // Trigger ad on next app open
-          DownloadType type = DownloadType.video;
-          if (typeStr == 'audio') type = DownloadType.audio;
-          if (typeStr == 'image') type = DownloadType.image;
-          selectedType = type;
-          unawaited(autoExtractAndDownload(url));
-        }
-      }
-    });
+    DuckMediaChannel.instance.addHandler(_handleNativeMediaCall);
+  }
+
+  /// Native calls the controller owns. Everything else is ignored so other
+  /// listeners on the shared channel still get their turn.
+  Future<void> _handleNativeMediaCall(MethodCall call) async {
+    if (call.method != 'startDirectQuickDownload') return;
+    final String? url = call.arguments['url'];
+    final String? typeStr = call.arguments['type'];
+    if (url == null) return;
+    showAdOnOpen = true; // Trigger ad on next app open
+    var type = DownloadType.video;
+    if (typeStr == 'audio') type = DownloadType.audio;
+    if (typeStr == 'image') type = DownloadType.image;
+    selectedType = type;
+    unawaited(autoExtractAndDownload(url));
   }
 
   String? sharedQuickDownloadUrl;
@@ -3853,8 +4407,8 @@ class DuckDownloadsController extends ChangeNotifier
           quickShareVideoQualities = meta.qualities;
           quickShareAudioQualities = meta.audioFormats;
         }
-      } catch (e) {
-        debugPrint('Quick share metadata extraction error: $e');
+      } catch (error, stackTrace) {
+        reportError(error, stackTrace, reason: 'quick-share-metadata');
       } finally {
         isQuickShareExtracting = false;
         notifyListeners();
