@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { GeistSans } from "geist/font/sans";
 import "./styles.css";
 import { siteConfig } from "./site-config";
 
@@ -14,9 +15,8 @@ export const metadata: Metadata = {
     "Duck Downloader",
     "social media downloader",
     "video downloader",
-    "audio downloader",
-    "Android downloader",
-    "Windows downloader"
+    "private vault",
+    "Android downloader"
   ],
   openGraph: {
     title: `${siteConfig.name} - ${siteConfig.tagline}`,
@@ -24,12 +24,7 @@ export const metadata: Metadata = {
     url: siteConfig.url,
     siteName: siteConfig.name,
     images: [
-      {
-        url: "/duck-logo.png",
-        width: 1200,
-        height: 630,
-        alt: "Duck Downloader logo"
-      }
+      { url: "/duck-logo.png", width: 1200, height: 630, alt: "Duck Downloader" }
     ],
     locale: "en_US",
     type: "website"
@@ -40,25 +35,21 @@ export const metadata: Metadata = {
     description: siteConfig.description,
     images: ["/duck-logo.png"]
   },
-  icons: {
-    icon: "/duck-idle.png",
-    apple: "/duck-idle.png"
-  }
+  icons: { icon: "/duck-idle.png", apple: "/duck-idle.png" }
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#020618"
+  // Matches --bg so the status bar does not band against the page on mobile.
+  themeColor: "#08090B"
 };
 
 export default function RootLayout({
   children
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={GeistSans.className}>
       <body>{children}</body>
     </html>
   );

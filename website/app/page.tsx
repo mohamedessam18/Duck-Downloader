@@ -1,425 +1,421 @@
 import Image from "next/image";
+import Link from "next/link";
+import {
+  ClipboardTextIcon,
+  DownloadSimpleIcon,
+  FoldersIcon,
+  GooglePlayLogoIcon,
+  LockKeyIcon,
+  PlayCircleIcon,
+  PlusIcon,
+  SlidersHorizontalIcon,
+  WhatsappLogoIcon,
+  WifiSlashIcon
+} from "@phosphor-icons/react/dist/ssr";
+import { Reveal } from "./components/Reveal";
 import { SoftwareJsonLd } from "./seo";
 import { siteConfig } from "./site-config";
 
-const features = [
-  {
-    title: "1-Second Extraction",
-    text: "Instant URL parsing and direct stream delivery powered by a high-speed multi-platform engine.",
-    icon: "play"
-  },
-  {
-    title: "Complete Social Support",
-    text: "Seamlessly save high-quality media from YouTube, Instagram, Facebook, TikTok, X (Twitter), and SoundCloud.",
-    icon: "link"
-  },
-  {
-    title: "Secure Private Vault",
-    text: "Protect your personal downloads inside a passcode-secured, local-first folder with filename obfuscation.",
-    icon: "shield"
-  },
-  {
-    title: "Active Download Queue",
-    text: "Queue multiple media files simultaneously with real-time progress bars, speed metrics, and status updates.",
-    icon: "queue"
-  }
-];
-
-const steps = [
-  "Copy a public video, audio, or photo link.",
-  "Tap the central Duck button to trigger 1-second extraction.",
-  "Select your desired video quality (1080p, 2K, 4K) or audio format.",
-  "Watch progress live and access files instantly in your local library."
-];
+/**
+ * Screenshots are the real app, captured over adb on a real device.
+ *
+ * The page this replaced built its hero "preview" out of styled divs: a fake
+ * clipboard toast, a fake progress row, a fake download list. That is a
+ * promise the product has to keep, made by markup that cannot keep it. These
+ * are the screens themselves, so what the page shows and what the app does
+ * cannot drift apart.
+ */
+const shot = (name: string) => `/shots/${name}.jpg`;
 
 const faqs = [
   {
-    question: "How does the 1-second download work?",
-    answer:
-      "Duck integrates a high-speed, direct-to-device streaming client that bypasses traditional server-side scraping queues, allowing downloads to start instantly at maximum residential bandwidth."
+    q: "Which links does it handle?",
+    a: "Public posts on the major social platforms. Private accounts, paid or DRM-protected content, and anything behind a login are out of scope by design."
   },
   {
-    question: "Is Duck really secure and private?",
-    answer:
-      "Yes. Duck is designed local-first. We do not track your downloads, search history, or personal data. The optional secure vault obfuscates files and locks them behind a device-level passcode."
+    q: "Do my files or links leave the device?",
+    a: "No. Downloads are written straight to your storage, and the vault is encrypted on the device itself. Nothing about what you save reaches a server."
   },
   {
-    question: "Does Duck require a paid subscription?",
-    answer:
-      "No. Duck is fully functional for free with basic ads. Users can optionally upgrade to Duck Pro for a completely ad-free experience, unlimited background conversions, and advanced premium features."
+    q: "What happens if I forget the vault passcode?",
+    a: "The files stay encrypted and cannot be recovered. That is what makes the vault a vault: the key exists only on your device, and only you have it."
   },
   {
-    question: "Can I download my own private social media posts?",
-    answer:
-      "Duck is optimized for public media. However, if a video is age-restricted or private to your account, you can use Duck's built-in secure WebView browser to log in and sync local session cookies on-device."
+    q: "Is there a free version?",
+    a: `Yes. ${siteConfig.name} is free with ads. Premium removes them and adds faster processing.`
+  },
+  {
+    q: "Can I use it offline?",
+    a: "Everything you have already saved plays offline. Fetching a new link needs a connection."
   }
 ];
 
-function Icon({ name, className }: { name: "android" | "windows" | "link" | "shield" | "queue" | "play" | "arrow"; className?: string }) {
-  const common = {
-    width: 22,
-    height: 22,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    className: className,
-    "aria-hidden": true
-  };
+export default function HomePage() {
+  const play = siteConfig.play;
 
-  if (name === "android") {
-    return (
-      <svg {...common}>
-        <path d="M7 8h10v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V8Z" />
-        <path d="m8 4 2 3" />
-        <path d="m16 4-2 3" />
-        <path d="M9 12h.01" />
-        <path d="M15 12h.01" />
-        <path d="M5 10v5" />
-        <path d="M19 10v5" />
-      </svg>
-    );
-  }
-
-  if (name === "windows") {
-    return (
-      <svg {...common}>
-        <path d="M4 5.5 11 4v7H4V5.5Z" />
-        <path d="M13 3.6 20 2v9h-7V3.6Z" />
-        <path d="M4 13h7v7l-7-1.5V13Z" />
-        <path d="M13 13h7v9l-7-1.6V13Z" />
-      </svg>
-    );
-  }
-
-  if (name === "link") {
-    return (
-      <svg {...common}>
-        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-      </svg>
-    );
-  }
-
-  if (name === "shield") {
-    return (
-      <svg {...common}>
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-        <path d="m9 12 2 2 4-4" />
-      </svg>
-    );
-  }
-
-  if (name === "queue") {
-    return (
-      <svg {...common}>
-        <path d="M4 7h16" />
-        <path d="M4 12h12" />
-        <path d="M4 17h8" />
-      </svg>
-    );
-  }
-
-  if (name === "arrow") {
-    return (
-      <svg {...common} strokeWidth={2.5}>
-        <path d="M5 12h14" />
-        <path d="m12 5 7 7-7 7" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg {...common}>
-      <path d="m8 5 11 7-11 7V5Z" />
-    </svg>
-  );
-}
-
-function AppPreview() {
-  return (
-    <div className="app-window-wrapper">
-      <div className="glow-effect" />
-      <div className="app-window" aria-label="Duck Downloader app preview">
-        <div className="window-bar">
-          <div className="window-dots" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <span>Duck Downloader - Mobile Preview</span>
-        </div>
-        <div className="window-body">
-          <div className="preview-logo">
-            <Image src="/duck-idle.png" alt="Duck Downloader logo" width={48} height={48} priority />
-            <span className="logo-text">Duck Downloader</span>
-          </div>
-
-          <div className="hint-pill">
-            <Icon name="link" className="pulse-icon" />
-            <span>Link detected from clipboard! Tap the duck to save.</span>
-          </div>
-
-          <div className="duck-stage">
-            <div className="stage-glow" />
-            <Image src="/duck-loading.png" alt="Duck loading state" width={170} height={170} className="floating-duck" />
-            <div className="stage-ring" aria-hidden="true" />
-          </div>
-
-          <div className="progress-preview">
-            <strong className="glitch-text">Downloading...</strong>
-            <div className="progress-track">
-              <span className="progress-bar-fill" />
-            </div>
-            <div className="progress-meta">
-              <small>74% - High-speed Stream</small>
-              <small className="speed-badge">12.4 MB/s</small>
-            </div>
-          </div>
-
-          <div className="queue-preview">
-            <div className="queue-head">
-              <strong>Active Downloads</strong>
-              <span className="count-badge">2</span>
-            </div>
-            {[
-              ["Video (1080p)", "Instagram Reel - Tech Setup", "92%"],
-              ["Audio (MP3)", "SoundCloud Track - Chill Mix", "40%"]
-            ].map(([type, title, progress]) => (
-              <div className="queue-row" key={title}>
-                <div className="thumb">
-                  <Icon name="play" />
-                </div>
-                <div className="queue-meta-text">
-                  <span className="row-title">{title}</span>
-                  <div className="mini-track">
-                    <i className="mini-fill" style={{ width: progress }} />
-                  </div>
-                </div>
-                <b className="row-percentage">{progress}</b>
-                <em className="row-type">{type}</em>
-              </div>
-            ))}
-          </div>
-
-          <nav className="preview-tabs" aria-label="Preview app tabs">
-            <span className="tab-item active">HOME</span>
-            <span className="tab-item">VIDEOS</span>
-            <span className="tab-item">AUDIOS</span>
-          </nav>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Home() {
   return (
     <>
       <SoftwareJsonLd />
-      <header className="site-header">
-        <a className="brand-logo" href="#top" aria-label="Duck Downloader home">
-          <Image src="/duck-idle.png" alt="" width={36} height={36} className="header-duck" />
-          <span>Duck Downloader</span>
-        </a>
-        <nav className="header-nav" aria-label="Primary navigation">
-          <a href="#features" className="nav-link">Features</a>
-          <a href="#workflow" className="nav-link">Workflow</a>
-          <a href="#platforms" className="nav-link">Platforms</a>
-          <a href="#faq" className="nav-link">FAQ</a>
-        </nav>
-        <a className="header-cta" href="#platforms">
-          <span>Get App</span>
-          <Icon name="arrow" className="cta-arrow" />
-        </a>
+      <header className="nav">
+        <div className="nav-inner">
+          <Link className="brand" href="/">
+            <Image src="/duck-idle.png" alt="" width={26} height={26} priority />
+            <span>{siteConfig.name}</span>
+          </Link>
+          <nav className="nav-links" aria-label="Primary">
+            <a className="nav-link" href="#features">Features</a>
+            <a className="nav-link" href="#vault">Vault</a>
+            <a className="nav-link" href="#how">How it works</a>
+            <a className="nav-link" href="#faq">FAQ</a>
+          </nav>
+          <PlayButton small />
+        </div>
       </header>
 
-      <main id="top">
-        <section className="hero-section">
-          <div className="hero-grid">
-            <div className="hero-content">
-              <div className="badge-new">Version {siteConfig.version} Now Available</div>
-              <h1 className="hero-title">
-                Save Media <br />
-                <span className="text-gradient">In Under A Second</span>
+      <main>
+        {/* 1. Hero - asymmetric split */}
+        <section className="hero">
+          <div className="hero-bg" aria-hidden />
+          <div className="wrap hero-grid">
+            <div className="hero-copy">
+              <h1 className="display">
+                Copy a link.
+                <br />
+                Keep the file.
               </h1>
-              <p className="hero-description">
-                A calm, ultra-fast download manager for public social links. Just copy a link, tap the duck, and store high-quality video or audio directly on your device.
+              <p className="lede">
+                Duck saves video, photos and audio from public social links to
+                your phone. Files stay on your device.
               </p>
-              <div className="hero-cta-group">
-                <a href="#platforms" className="btn btn-primary">
-                  <Icon name="android" />
-                  <span>Download APK</span>
-                </a>
-                <a href="#platforms" className="btn btn-secondary">
-                  <Icon name="windows" />
-                  <span>Windows Installer</span>
-                </a>
-              </div>
-              <div className="hero-features-preview">
-                <span className="feature-pill">
-                  <Icon name="shield" /> Safe & Local-first
-                </span>
-                <span className="feature-pill">
-                  <Icon name="queue" /> Multi-item Queue
-                </span>
-                <span className="feature-pill">
-                  <Icon name="play" /> High-quality Muxing
-                </span>
+              <div className="hero-actions">
+                <PlayButton />
+                <a className="btn btn-ghost" href="#features">See what it does</a>
               </div>
             </div>
-            <div className="hero-preview-container">
-              <AppPreview />
+            <div className="hero-device">
+              <div className="phone">
+                <div className="phone-glow" aria-hidden />
+                <Image
+                  src={shot("hero-home")}
+                  alt="Duck Downloader home screen after a completed download"
+                  width={1080}
+                  height={2400}
+                  priority
+                  sizes="(max-width: 900px) 78vw, 300px"
+                />
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="section-container" id="features">
-          <div className="section-header text-center">
-            <span className="pre-title">Core Capability</span>
-            <h2 className="section-title">Built For Speed, Privacy & Simplicity</h2>
-            <p className="section-subtitle">
-              We stripped away all unnecessary forms, complicated settings, and bloated dependencies to give you the cleanest possible download experience.
-            </p>
-          </div>
-          <div className="features-grid-container">
-            {features.map((feature) => (
-              <div className="feature-card-wrapper" key={feature.title}>
-                <div className="feature-card-glow" />
-                <article className="feature-card-body">
-                  <div className="feature-card-icon">
-                    <Icon name={feature.icon as any} />
-                  </div>
-                  <h3 className="feature-card-title">{feature.title}</h3>
-                  <p className="feature-card-text">{feature.text}</p>
-                </article>
+        {/* 2. Clipboard - split */}
+        <section className="section">
+          <div className="wrap split">
+            <div className="split-copy">
+              <Reveal>
+                <h2 className="h2">It notices before you ask</h2>
+              </Reveal>
+              <Reveal delay={70}>
+                <p className="body">
+                  Copy a link anywhere on your phone and Duck offers to save it.
+                  No pasting, no switching apps first, no hunting for a download
+                  button that moved.
+                </p>
+              </Reveal>
+              <Reveal delay={120}>
+                <p className="small">
+                  Detection can be switched off in Settings at any time.
+                </p>
+              </Reveal>
+            </div>
+            <Reveal className="split-media">
+              <div className="phone">
+                <Image
+                  src={shot("clipboard")}
+                  alt="A notification offering to download a link that was just copied"
+                  width={1080}
+                  height={2400}
+                  sizes="(max-width: 860px) 74vw, 280px"
+                />
               </div>
-            ))}
+            </Reveal>
           </div>
         </section>
 
-        <section className="section-container workflow-section" id="workflow">
-          <div className="workflow-grid">
-            <div className="workflow-info">
-              <span className="pre-title">How it works</span>
-              <h2 className="section-title">From clipboard to storage in 4 simple steps.</h2>
-              <p className="section-subtitle">
-                The interface is built dynamically around the central Duck action. Paste links instantly and choose your qualities in a clean, overlay card.
-              </p>
-            </div>
-            <div className="workflow-steps-list">
-              <ol className="styled-steps-ol">
-                {steps.map((step, index) => (
-                  <li className="step-item" key={step}>
-                    <div className="step-number">{String(index + 1).padStart(2, "0")}</div>
-                    <div className="step-content-body">
-                      <p className="step-text">{step}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          </div>
-        </section>
+        {/* 3. Features - bento, five cells for five features */}
+        <section className="section" id="features">
+          <div className="wrap">
+            <Reveal>
+              <p className="eyebrow">What it does</p>
+              <h2 className="h2" style={{ marginBottom: "44px" }}>
+                A library, not a downloads folder
+              </h2>
+            </Reveal>
 
-        <section className="section-container" id="platforms">
-          <div className="section-header text-center">
-            <span className="pre-title">Available Platforms</span>
-            <h2 className="section-title">Get Duck For Your Device</h2>
-            <p className="section-subtitle">
-              Enjoy lightning-fast downloading and offline local organization across mobile and desktop interfaces.
-            </p>
-          </div>
-          <div className="platforms-grid-container">
-            {siteConfig.platforms.map((platform) => (
-              <article className="platform-card-wrapper" key={platform.name}>
-                <div className="platform-card-header">
-                  <div className="platform-icon-container">
-                    <Icon name={platform.name === "Android" ? "android" : "windows"} />
-                  </div>
-                  <div>
-                    <h3 className="platform-card-title">{platform.name}</h3>
-                    <span className="platform-status-badge">{platform.status}</span>
-                  </div>
+            <div className="bento">
+              <Reveal className="cell cell-lg cell-media">
+                <div className="cell-icon"><DownloadSimpleIcon size={20} weight="bold" /></div>
+                <h3 className="h3">Watch it arrive</h3>
+                <p className="body">
+                  Real progress, from the first byte to the finished file, with
+                  the duck doing the waiting for you.
+                </p>
+                <div className="cell-shot cell-shot-tall">
+                  <Image
+                    src={shot("crop-progress")}
+                    alt="A download in progress, 80 percent cached"
+                    width={1080}
+                    height={820}
+                    sizes="(max-width: 900px) 90vw, 620px"
+                  />
                 </div>
-                <p className="platform-card-desc">{platform.detail}</p>
-                {platform.name === "Android" ? (
-                  <a href="/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" download className="platform-download-btn">
-                    Download APK (Recommended)
-                  </a>
-                ) : (
-                  <button type="button" aria-disabled="true" className="platform-download-btn disabled">
-                    {platform.actionLabel}
-                  </button>
-                )}
-              </article>
-            ))}
+              </Reveal>
+
+              <Reveal className="cell cell-sm" delay={60}>
+                <div className="cell-icon"><WifiSlashIcon size={20} weight="bold" /></div>
+                <h3 className="h3">Yours offline</h3>
+                <p className="body">
+                  Saved files play with no connection, and no server between you
+                  and them.
+                </p>
+              </Reveal>
+
+              <Reveal className="cell cell-sm" delay={90}>
+                <div className="cell-icon"><SlidersHorizontalIcon size={20} weight="bold" /></div>
+                <h3 className="h3">Trim and convert</h3>
+                <p className="body">
+                  Cut a clip, pull the audio out, make a GIF, shrink a file that
+                  is too big to send.
+                </p>
+              </Reveal>
+
+              <Reveal className="cell cell-md cell-media" delay={120}>
+                <div className="cell-icon"><FoldersIcon size={20} weight="bold" /></div>
+                <h3 className="h3">Every folder on the phone</h3>
+                <p className="body">
+                  Browse, rename and move what is already on your device, not
+                  only what Duck downloaded.
+                </p>
+                <div className="cell-shot cell-shot-tall">
+                  <Image
+                    src={shot("crop-folders")}
+                    alt="The folder browser listing video folders on the device"
+                    width={1080}
+                    height={880}
+                    sizes="(max-width: 900px) 90vw, 460px"
+                  />
+                </div>
+              </Reveal>
+
+              <Reveal className="cell cell-md cell-media" delay={150}>
+                <div className="cell-icon"><PlayCircleIcon size={20} weight="bold" /></div>
+                <h3 className="h3">Sorted as it lands</h3>
+                <p className="body">
+                  Video, photos and audio each get their own shelf, with
+                  favourites and playlists on top.
+                </p>
+                <div className="cell-shot cell-shot-tall">
+                  <Image
+                    src={shot("crop-library")}
+                    alt="The video library listing several saved downloads"
+                    width={1080}
+                    height={980}
+                    sizes="(max-width: 900px) 90vw, 460px"
+                  />
+                </div>
+              </Reveal>
+            </div>
           </div>
         </section>
 
-        <section className="section-container safety-section" id="safety">
-          <div className="safety-grid">
-            <div className="safety-info">
-              <span className="pre-title">Security Standards</span>
-              <h2 className="section-title">Strictly Designed For Personal Use</h2>
+        {/* 4. Vault - split, flipped */}
+        <section className="section split-flip" id="vault">
+          <div className="wrap split split-flip">
+            <div className="split-copy">
+              <Reveal>
+                <h2 className="h2">A vault that stays shut</h2>
+              </Reveal>
+              <Reveal delay={70}>
+                <p className="body">
+                  Move anything into the vault and it is encrypted on your
+                  device with AES-256, behind a six-digit passcode or your
+                  fingerprint. Names and thumbnails stay blurred until you ask
+                  for them, so a glance over your shoulder shows nothing.
+                </p>
+              </Reveal>
+              <Reveal delay={120}>
+                <p className="small">
+                  The key never leaves the phone. Lose the passcode and the
+                  files stay locked, including to us.
+                </p>
+              </Reveal>
             </div>
-            <div className="safety-details-list">
-              <div className="safety-detail-item">
-                <strong>Public Links Only</strong>
-                <p>Duck does not support private profiles, DRM-locked content, or paid/protected websites.</p>
+            <Reveal className="split-media" delay={60}>
+              <div className="phone">
+                <div className="phone-glow" aria-hidden />
+                <Image
+                  src={shot("vault-blurred")}
+                  alt="The vault listing files with their names and thumbnails blurred"
+                  width={1080}
+                  height={2400}
+                  sizes="(max-width: 860px) 74vw, 280px"
+                />
               </div>
-              <div className="safety-detail-item">
-                <strong>No Tracking / No Logs</strong>
-                <p>We do not store your download logs, search keywords, or cached files. Everything stays on-device.</p>
-              </div>
-              <div className="safety-detail-item">
-                <strong>Encrypted Vault Obfuscation</strong>
-                <p>Private vault files are renamed, hidden in a secure subfolder, and locked local-only behind a passcode.</p>
-              </div>
-            </div>
+            </Reveal>
           </div>
         </section>
 
-        <section className="section-container faq-section" id="faq">
-          <div className="faq-grid">
-            <div className="faq-info">
-              <span className="pre-title">Got Questions?</span>
-              <h2 className="section-title">Frequently Asked Questions</h2>
-            </div>
-            <div className="faq-accordion-list">
-              {faqs.map((faq) => (
-                <details className="faq-details" key={faq.question}>
-                  <summary className="faq-summary">
-                    <span>{faq.question}</span>
-                    <span className="summary-arrow">+</span>
-                  </summary>
-                  <div className="faq-content">
-                    <p>{faq.answer}</p>
-                  </div>
-                </details>
+        {/* 5. Player - full-width showcase */}
+        <section className="section">
+          <div className="wrap showcase">
+            <Reveal>
+              <h2 className="h2">A player worth staying in</h2>
+            </Reveal>
+            <Reveal delay={70}>
+              <p className="lede">
+                Gestures for seek and volume, picture-in-picture, background
+                audio that survives a locked screen, and trimming without
+                leaving the video.
+              </p>
+            </Reveal>
+            <Reveal className="showcase-frame" delay={120}>
+              <div className="wide-frame">
+                <Image
+                  src={shot("player")}
+                  alt="The video player in landscape with trim, GIF, picture-in-picture and speed controls"
+                  width={2400}
+                  height={1080}
+                  sizes="(max-width: 1000px) 92vw, 940px"
+                />
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        {/* 6. How it works - hairline steps */}
+        <section className="section" id="how">
+          <div className="wrap">
+            <Reveal>
+              <h2 className="h2" style={{ marginBottom: "40px" }}>
+                Three taps, start to finish
+              </h2>
+            </Reveal>
+            <div className="steps">
+              {[
+                {
+                  n: "Copy",
+                  t: "Grab the link",
+                  d: "Share or copy a post from any app on your phone."
+                },
+                {
+                  n: "Confirm",
+                  t: "Pick the quality",
+                  d: "Duck reads the link and offers what is available."
+                },
+                {
+                  n: "Keep",
+                  t: "It is yours",
+                  d: "The file lands in your library, and in your gallery if you want it there."
+                }
+              ].map((step, i) => (
+                <Reveal className="step" key={step.n} delay={i * 70}>
+                  <span className="step-n">{step.n}</span>
+                  <h3 className="h3">{step.t}</h3>
+                  <p className="body">{step.d}</p>
+                </Reveal>
               ))}
             </div>
           </div>
         </section>
+
+        {/* 7. FAQ - accordion */}
+        <section className="section" id="faq">
+          <div className="wrap">
+            <Reveal>
+              <p className="eyebrow">Before you ask</p>
+              <h2 className="h2" style={{ marginBottom: "40px" }}>
+                Questions worth answering
+              </h2>
+            </Reveal>
+            <div className="faq">
+              {faqs.map((item, i) => (
+                <Reveal key={item.q} delay={i * 40}>
+                  <details>
+                    <summary>
+                      {item.q}
+                      <PlusIcon className="faq-mark" size={18} weight="bold" />
+                    </summary>
+                    <p className="body faq-answer">{item.a}</p>
+                  </details>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* 8. Closing CTA */}
+        <section className="section">
+          <div className="wrap showcase">
+            <Reveal>
+              <h2 className="h2">Keep what you save</h2>
+            </Reveal>
+            <Reveal delay={70}>
+              <PlayButton />
+            </Reveal>
+          </div>
+        </section>
       </main>
 
-      <footer className="site-footer">
-        <div className="footer-top">
-          <a className="footer-brand" href="#top">
-            <Image src="/duck-idle.png" alt="" width={38} height={38} />
+      <footer className="footer">
+        <div className="wrap footer-inner">
+          <Link className="brand" href="/">
+            <Image src="/duck-idle.png" alt="" width={22} height={22} />
             <span>{siteConfig.name}</span>
-          </a>
-          <p className="footer-tagline">{siteConfig.tagline}</p>
-        </div>
-        <div className="footer-bottom">
-          <small className="copyright">© 2026 Duck Downloader. All rights reserved. Created for personal, public link organization only.</small>
+          </Link>
           <div className="footer-links">
-            <a href="/privacy-policy.html" className="footer-link">Privacy Policy</a>
+            <Link href="/privacy">Privacy</Link>
+            <a href={`mailto:${siteConfig.contactEmail}`}>{siteConfig.contactEmail}</a>
+            <a
+              href={siteConfig.whatsapp.href}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <WhatsappLogoIcon size={16} weight="fill" aria-hidden />
+              WhatsApp support
+            </a>
           </div>
         </div>
       </footer>
     </>
+  );
+}
+
+/**
+ * The only call to action on the page.
+ *
+ * One intent, one label, everywhere it appears. The page it replaced had
+ * "Get App" in the nav, "Download APK" in the hero and "Windows Installer"
+ * beside it, which asked the reader to work out that two of them were the same
+ * request. It also promised a platform whose installer did not exist yet, next
+ * to a card claiming that platform was "Available".
+ */
+function PlayButton({ small = false }: { small?: boolean }) {
+  const { live, url, label } = siteConfig.play;
+  const className = `btn btn-primary${small ? " btn-sm" : ""}`;
+
+  if (live && url) {
+    return (
+      <a className={className} href={url}>
+        <GooglePlayLogoIcon size={small ? 17 : 19} weight="fill" />
+        {label}
+      </a>
+    );
+  }
+
+  return (
+    <span className={className} aria-disabled="true">
+      <GooglePlayLogoIcon size={small ? 17 : 19} weight="fill" />
+      {small ? "Coming soon" : "Coming to Google Play"}
+    </span>
   );
 }
