@@ -51,4 +51,56 @@ class PermissionService {
   }
 
   Future<bool> hasMediaImagesPermission() => hasStoragePermission();
+
+  /// Requests everything the media folders browser needs to list the user's
+  /// own images, video and audio.
+  ///
+  /// Android 13 replaced READ_EXTERNAL_STORAGE with one permission per media
+  /// type, and Android 14 added a "selected photos only" answer that reports
+  /// as `limited` rather than granted. Treating `limited` as a denial made the
+  /// browser look empty for anyone who picked it, with no way to recover from
+  /// inside the app.
+  Future<bool> requestMediaLibraryAccess() async {
+    if (Platform.isIOS) {
+      final status = await Permission.photos.request();
+      return status.isGranted || status.isLimited;
+    }
+
+    final results = await [
+      Permission.photos,
+      Permission.videos,
+      Permission.audio,
+    ].request();
+
+    final anyGranted = results.values.any(
+      (status) => status.isGranted || status.isLimited,
+    );
+    if (anyGranted) return true;
+
+    // Android 12 and below: the split permissions do not exist, so the request
+    // above resolves to the legacy one instead.
+    final storage = await Permission.storage.request();
+    return storage.isGranted;
+  }
+
+  /// True when at least one media type is readable.
+  ///
+  /// Partial ("selected photos") access counts: the browser shows what the
+  /// user chose to share rather than nothing at all.
+  Future<bool> hasMediaLibraryAccess() async {
+    if (Platform.isIOS) {
+      final status = await Permission.photos.status;
+      return status.isGranted || status.isLimited;
+    }
+    for (final permission in [
+      Permission.photos,
+      Permission.videos,
+      Permission.audio,
+      Permission.storage,
+    ]) {
+      final status = await permission.status;
+      if (status.isGranted || status.isLimited) return true;
+    }
+    return false;
+  }
 }

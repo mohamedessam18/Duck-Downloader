@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'premium_entitlement.dart';
+import './crash_reporting_service.dart';
 
 class SubscriptionService {
   SubscriptionService({InAppPurchase? inAppPurchase})
@@ -27,8 +28,11 @@ class SubscriptionService {
           }
         }
       }
-    } catch (_) {
-      // Ignore errors when querying product details from store
+    } catch (error, stackTrace) {
+      // An empty plan list looks identical to "no products configured", so a
+      // store query that throws has to be reported or the paywall just looks
+      // broken with no explanation.
+      reportError(error, stackTrace, reason: 'iap-query-products');
     }
 
     products.sort((a, b) => a.plan.index.compareTo(b.plan.index));

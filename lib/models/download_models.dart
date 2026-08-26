@@ -344,7 +344,14 @@ class PlaylistItem {
   final bool isVideo;
 
   factory PlaylistItem.fromJson(Map<String, dynamic> json) {
-    debugPrint('DEBUG JSON: url=${json['url']} isVideo=${json['isVideo']} keys=${json.keys.toList()}');
+    // debugPrint still writes to logcat in release builds, and this fires for
+    // every item of every playlist — noise plus a stream of user URLs in the
+    // device log. Keep it for local debugging only.
+    assert(() {
+      debugPrint('DEBUG JSON: url=${json['url']} isVideo=${json['isVideo']} '
+          'keys=${json.keys.toList()}');
+      return true;
+    }());
     return PlaylistItem(
       url: json['url']?.toString() ?? '',
       title: json['title']?.toString() ?? '',

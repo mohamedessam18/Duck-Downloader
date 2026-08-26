@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -9,12 +10,11 @@ import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import '../../core/app_navigator.dart';
+import '../../core/duck_media_channel.dart';
 import '../../models/download_models.dart';
 import '../../services/trim_service.dart';
 import '../../state/downloads_controller.dart';
 import '../../services/vault_encryption_service.dart';
-import 'audio_progress.dart';
 import 'media_colors.dart';
 import 'media_thumb.dart';
 import 'media_utils.dart';
@@ -22,7 +22,6 @@ import 'media_slider.dart';
 import 'liquid_interactive_button.dart';
 import '../../theme/duck_theme.dart';
 import '../duck_liquid_glass.dart';
-import '../glass_panel.dart';
 import 'animated_favorite_button.dart';
 import 'player_error.dart';
 import 'audio_queue_sheet.dart';
@@ -51,6 +50,10 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   bool _showControls = true;
   Timer? _hideTimer;
   bool _isInPiP = false;
+
+  /// Set by the platform right before it enters PiP, so the lifecycle event
+  /// that follows does not also hand audio to the background player.
+  bool _enteringPip = false;
   bool _backgroundHandoffActive = false;
   Duration _savedPositionForHandoff = Duration.zero;
   late final AnimationController _discRotationController;
@@ -149,41 +152,6 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     return _trimEnd - _trimStart >= TrimService.minClipSeconds;
   }
 
-  static const _compactIconConstraints = BoxConstraints(
-    minWidth: 40,
-    minHeight: 40,
-  );
-
-  Widget _fittedControlRow({
-    required List<Widget> children,
-    MainAxisAlignment alignment = MainAxisAlignment.spaceEvenly,
-  }) {
-    return Center(
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: alignment,
-            children: children,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _fittedToolbar({
-    required Widget child,
-    Alignment alignment = Alignment.centerLeft,
-  }) {
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: alignment,
-      child: child,
-    );
-  }
-
   @override
   void initState() {
     super.initState();
@@ -194,31 +162,16 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       value: widget.controller.audioPlayer.playing ? 1.0 : 0.0,
     );
     widget.controller.addListener(_syncDiscRotation);
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == 'pipModeChanged') {
-        final bool inPiP = call.arguments as bool;
-        setState(() {
-          _isInPiP = inPiP;
-          if (inPiP) {
-            _showControls = false;
-          } else {
-            _showControls = true;
-          }
-        });
-      } else if (call.method == 'pipAction') {
-        final int controlType = call.arguments as int;
-        if (controlType == 1) {
-          _video?.play();
-        } else if (controlType == 2) {
-          _video?.pause();
-        }
-      }
-    });
+    widget.controller.addBackInterceptor(_handleBack);
+    DuckMediaChannel.instance.addHandler(_handleNativeCall);
 
     final filePath = widget.item.filePath;
     if (filePath == null) return;
     if (widget.item.isVideo) {
       widget.controller.buildVideoQueue(widget.item);
+      // Greys out Next/Previous in the PiP window when the queue has no more
+      // items in that direction.
+      _syncPiPQueueState();
       _video = VideoPlayerController.file(File(filePath))
         ..initialize()
             .then((_) async {
@@ -259,11 +212,10 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               _startHideTimer();
 
               // ── Pre-load background audio at volume 0 ──────────────────
-              // This way when the screen locks we only need to unmute —
-              // no loading delay, identical to YouTube Premium's behavior.
-              if (widget.controller.backgroundPlaybackEnabled) {
-                unawaited(widget.controller.preloadBackgroundAudio(widget.item));
-              }
+              // So locking the screen only has to unmute — no loading delay.
+              // Unconditional: background playback is how the player behaves,
+              // not a mode the user opts into.
+              unawaited(widget.controller.preloadBackgroundAudio(widget.item));
             })
             .catchError((Object _) {
               if (mounted) {
@@ -304,10 +256,20 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     setState(() {});
   }
 
+  /// What the user last asked the video to do, as opposed to what the platform
+  /// player currently reports — the two diverge the moment the screen turns off.
+  bool _wasPlayingBeforeBackground = false;
+
   void _videoListener() {
     final video = _video;
     if (video == null) return;
     final isPlaying = video.value.isPlaying;
+    // Only record the transition while the app is actually on screen: once it
+    // is backgrounded the platform reports a pause that the user never asked
+    // for, and latching that would defeat the handoff.
+    if (_currentLifecycleState == AppLifecycleState.resumed) {
+      _wasPlayingBeforeBackground = isPlaying;
+    }
     try {
       _channel.invokeMethod('setVideoPlaying', {'playing': isPlaying});
     } catch (_) {}
@@ -396,10 +358,96 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     }
   }
 
+  /// Platform events for the open player.
+  ///
+  /// Shared with the rest of the app through [DuckMediaChannel]: a plain
+  /// `setMethodCallHandler` here would have replaced the controller's
+  /// quick-share listener for as long as a video was open, then removed it
+  /// entirely on close.
+  Future<void> _handleNativeCall(MethodCall call) async {
+    if (!mounted) return;
+
+    switch (call.method) {
+      case 'pipModeChanged':
+        final inPiP = call.arguments as bool;
+        setState(() {
+          _isInPiP = inPiP;
+          _showControls = !inPiP;
+        });
+
+      case 'pipAction':
+        // Ids mirror MainActivity.PipAction.
+        switch (call.arguments as int) {
+          case 1:
+            _video?.play();
+          case 2:
+            _video?.pause();
+          case 3:
+            widget.controller.playNextVideo();
+          case 4:
+            widget.controller.playPreviousVideo();
+        }
+
+      case 'enteringPip':
+        // Arrives just before the activity enters PiP, so the lifecycle event
+        // that follows knows not to start a background handoff that would
+        // fight the PiP window.
+        _enteringPip = true;
+
+      case 'pipDismissed':
+        // Closed with the X rather than expanded back. Keep the sound going
+        // instead of stopping dead.
+        _enteringPip = false;
+        unawaited(_handoffVideoAudioToBackground());
+
+      case 'screenOff':
+        debugPrint(
+          'BG AUDIO: screenOff — isVideo=${widget.item.isVideo} '
+          'inPiP=$_isInPiP wasPlaying=$_wasPlayingBeforeBackground',
+        );
+        // Power button. Unambiguous and immediate — no waiting to see whether
+        // PiP was going to happen.
+        if (widget.item.isVideo && !_isInPiP) {
+          unawaited(_handoffVideoAudioToBackground());
+        }
+
+      case 'screenOn':
+        if (widget.item.isVideo && _backgroundHandoffActive) {
+          unawaited(_resumeVideoFromBackground());
+        }
+    }
+  }
+
+  /// Authoritative PiP check, straight from the activity.
+  ///
+  /// `_isInPiP` comes from the `pipModeChanged` callback, which races the
+  /// lifecycle event; losing that race paused the video and started a second
+  /// player, leaving a frozen PiP window with sound from somewhere else.
+  Future<bool> _isInPiPNow() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('isInPiP') ?? _isInPiP;
+    } catch (_) {
+      return _isInPiP;
+    }
+  }
+
+  /// Mirrors the video queue into the PiP window's Next / Previous buttons.
+  void _syncPiPQueueState() {
+    if (!Platform.isAndroid || !widget.item.isVideo) return;
+    try {
+      _channel.invokeMethod('setVideoQueueState', {
+        'hasNext': widget.controller.hasNextVideo,
+        'hasPrevious': widget.controller.hasPreviousVideo,
+      });
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_syncDiscRotation);
+    widget.controller.removeBackInterceptor(_handleBack);
     _discRotationController.dispose();
     if (widget.item.isVideo) {
       WakelockPlus.disable();
@@ -424,7 +472,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     try {
       _channel.invokeMethod('setVideoPlaying', {'playing': false});
     } catch (_) {}
-    _channel.setMethodCallHandler(null);
+    DuckMediaChannel.instance.removeHandler(_handleNativeCall);
     _video?.dispose();
     super.dispose();
   }
@@ -434,40 +482,22 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     super.didChangeAppLifecycleState(state);
     _currentLifecycleState = state;
 
-    // Only applies to video playback
     if (!widget.item.isVideo) return;
 
-    // ── Screen lock / background ──────────────────────────────────────────
-    // Trigger ONLY on `inactive` (first signal when lock button is pressed).
-    if (state == AppLifecycleState.inactive) {
-      // Give Android's onUserLeaveHint() time to trigger PiP before we pause
-      await Future.delayed(const Duration(milliseconds: 350));
+    // The two cases that matter — locking the screen and entering PiP — are
+    // now reported explicitly by the platform (`screenOff` / `enteringPip`),
+    // so this only covers what is left: the app being backgrounded without PiP
+    // taking over. `paused` rather than `inactive`, because a rotation raises
+    // `inactive` and immediately returns, which is what the old 350ms sleep
+    // was there to filter out.
+    if (state == AppLifecycleState.paused) {
+      if (_enteringPip || _isInPiP) return;
+      if (await _isInPiPNow()) return;
 
-      // CRITICAL FIX: If app has returned to resumed during the 350ms delay
-      // (which happens on orientation change / system chrome change), CANCEL handoff!
-      if (_currentLifecycleState == AppLifecycleState.resumed) {
-        return;
-      }
-
-      // Skip if in PiP — PiP has its own flow
-      try {
-        final bool inPiP = await _channel.invokeMethod<bool>('isInPiP') ?? false;
-        if (inPiP || _isInPiP) return;
-      } catch (_) {
-        if (_isInPiP) return;
-      }
-
-      if (widget.controller.backgroundPlaybackEnabled) {
-        await _handoffVideoAudioToBackground();
-      } else {
-        _video?.pause();
-      }
+      await _handoffVideoAudioToBackground();
     } else if (state == AppLifecycleState.resumed) {
-      if (widget.controller.backgroundPlaybackEnabled) {
-        await _resumeVideoFromBackground();
-      } else {
-        if (mounted) setState(() {});
-      }
+      _enteringPip = false;
+      await _resumeVideoFromBackground();
     }
   }
 
@@ -477,8 +507,15 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     if (_isInPiP) return;
     final video = _video;
     if (video == null || !video.value.isInitialized) return;
-    if (!video.value.isPlaying) return;
     if (_backgroundHandoffActive) return;
+
+    // Deliberately *not* `video.value.isPlaying`. Turning the screen off
+    // destroys the render surface, and the platform player reports itself as
+    // paused before this handler gets a chance to run — so reading it here
+    // aborted the handoff on exactly the case it exists for. `_wasPlaying` is
+    // tracked continuously from the video listener instead, which records what
+    // the user actually asked for.
+    if (!_wasPlayingBeforeBackground) return;
 
     _backgroundHandoffActive = true;
     _savedPositionForHandoff = video.value.position;
@@ -695,7 +732,6 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   }
                 } : null,
                 onPanStart: !_isScreenLocked ? (details) {
-                  if (video == null) return;
                   _isSwiping = true;
                   _swipeFeedbackTimer?.cancel();
                   _panStartOffset = details.localPosition;
@@ -707,7 +743,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   setState(() {});
                 } : null,
                 onPanUpdate: !_isScreenLocked ? (details) {
-                  if (!_isSwiping || video == null) return;
+                  if (!_isSwiping) return;
                   final screenWidth = MediaQuery.sizeOf(context).width;
                   final screenHeight = MediaQuery.sizeOf(context).height;
                   final dx = details.localPosition.dx - _panStartOffset.dx;
@@ -756,7 +792,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   }
                 } : null,
                 onPanEnd: !_isScreenLocked ? (_) {
-                  if (_swipeType == 'seek' && video != null) {
+                  if (_swipeType == 'seek') {
                     video.seekTo(Duration(seconds: _swipeDisplayValue.toInt()));
                   }
                   _isSwiping = false;
@@ -2314,215 +2350,11 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
           });
   }
 
-  void _showQueueSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return FractionallySizedBox(
-          heightFactor: 0.6,
-          child: AudioQueueSheet(controller: widget.controller),
-        );
-      },
-    );
-  }
-
   // ─── Speed sheet ──────────────────────────────────────────────────────────
   void _showSpeedSheet(BuildContext context) {
     setState(() {
       _showSpeedPanel = true;
     });
-  }
-
-  void _showVideoMoreSheet(BuildContext context) {
-    _resetHideTimer();
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            return DuckLiquidGlassSurface(
-              borderRadius: 28,
-              variant: DuckLiquidGlassVariant.panel,
-              isLight: isLight,
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.white24,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'More Options',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ListTile(
-                        leading: Icon(
-                          _isLooping ? Icons.repeat_one : Icons.repeat,
-                          color: _isLooping ? mediaGold : Colors.white70,
-                        ),
-                        title: Text(
-                          _isLooping ? 'Loop Video (Active)' : 'Loop Video',
-                          style: TextStyle(
-                            color: _isLooping ? mediaGold : Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        trailing: Switch(
-                          value: _isLooping,
-                          activeColor: mediaGold,
-                          onChanged: (val) {
-                            setState(() {
-                              _isLooping = val;
-                              _video?.setLooping(_isLooping);
-                            });
-                            Navigator.pop(context);
-                          },
-                        ),
-                        onTap: () {
-                          setState(() {
-                            _isLooping = !_isLooping;
-                            _video?.setLooping(_isLooping);
-                          });
-                          Navigator.pop(context);
-                        },
-                      ),
-                      const Divider(color: Colors.white12),
-                      ListTile(
-                        leading: const Icon(Icons.delete_outline, color: mediaDanger),
-                        title: const Text(
-                          'Delete Video',
-                          style: TextStyle(
-                            color: mediaDanger,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        onTap: () {
-                          Navigator.pop(context);
-                          widget.controller.closePlayer();
-                          widget.controller.deleteDownload(widget.item);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showSleepTimerSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final isLight = Theme.of(context).brightness == Brightness.light;
-        return ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            return DuckLiquidGlassSurface(
-              borderRadius: 28,
-              variant: DuckLiquidGlassVariant.panel,
-              isLight: isLight,
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Sleep Timer',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildSleepTimerOption('15 minutes', const Duration(minutes: 15)),
-                      _buildSleepTimerOption('30 minutes', const Duration(minutes: 30)),
-                      _buildSleepTimerOption('45 minutes', const Duration(minutes: 45)),
-                      _buildSleepTimerOption('60 minutes', const Duration(minutes: 60)),
-                      ListTile(
-                        title: const Text('End of current track', style: TextStyle(color: Colors.white70)),
-                        trailing: widget.controller.sleepTimerLabel == 'End of track' 
-                            ? Icon(Icons.check, color: mediaGold) 
-                            : null,
-                        onTap: () {
-                          widget.controller.setSleepTimerEndOfTrack();
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Sleep timer set: End of current track'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                      ),
-                      if (widget.controller.isSleepTimerActive) ...[
-                        const Divider(color: Colors.white24),
-                        ListTile(
-                          title: Text('Cancel timer', style: TextStyle(color: mediaDanger)),
-                          onTap: () {
-                            widget.controller.cancelSleepTimer();
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Sleep timer cancelled'),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                          },
-                        ),
-                      ]
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildSleepTimerOption(String label, Duration duration) {
-    return ListTile(
-      title: Text(label, style: const TextStyle(color: Colors.white70)),
-      trailing: widget.controller.sleepTimerLabel == label
-          ? Icon(Icons.check, color: mediaGold)
-          : null,
-      onTap: () {
-        widget.controller.setSleepTimer(duration, label);
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Sleep timer set: $label'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
-    );
   }
 
   Widget _buildSpeedOverlay() {
@@ -2553,7 +2385,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             left: 0,
             right: 0,
             bottom: 0,
-            child: ClipRRect(
+            child: _DismissiblePanel(
+              onDismiss: () => setState(() => _showSpeedPanel = false),
+              child: ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
               child: DuckLiquidGlassSurface(
                 borderRadius: 28,
@@ -2690,6 +2524,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   ),
                 ),
               ),
+            ),
             ),
           ),
         ],
@@ -2832,6 +2667,43 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     );
   }
 
+  /// Back, inside the player, closes the innermost thing first.
+  ///
+  /// Registered with the controller rather than wired to a PopScope of its
+  /// own: two PopScopes on one route both fire, so the panel would close and
+  /// the root handler would tear down the player in the same gesture.
+  ///
+  /// Returns true when it consumed the gesture.
+  bool _handleBack() {
+    if (_showVideoMorePanel || _showSpeedPanel || _showQueuePanel) {
+      setState(() {
+        _showVideoMorePanel = false;
+        _showSpeedPanel = false;
+        _showQueuePanel = false;
+      });
+      return true;
+    }
+
+    // Landscape is a mode the user entered deliberately, so back should leave
+    // it before it leaves the video — closing straight to a portrait library
+    // from fullscreen is the single most jarring thing back can do here.
+    if (mounted &&
+        MediaQuery.orientationOf(context) == Orientation.landscape) {
+      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      return true;
+    }
+
+    if (_isScreenLocked) {
+      // The lock exists to stop stray touches. Letting back out of the player
+      // through it would defeat the point, so surface the unlock affordance
+      // instead and swallow the gesture.
+      setState(() => _showUnlockButton = true);
+      return true;
+    }
+
+    return false;
+  }
+
   Widget _buildVideoMoreOverlay() {
     if (!_showVideoMorePanel) return const SizedBox.shrink();
     final isLight = Theme.of(context).brightness == Brightness.light;
@@ -2856,7 +2728,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             left: 0,
             right: 0,
             bottom: 0,
-            child: ClipRRect(
+            child: _DismissiblePanel(
+              onDismiss: () => setState(() => _showVideoMorePanel = false),
+              child: ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
               child: DuckLiquidGlassSurface(
                 borderRadius: 28,
@@ -2976,6 +2850,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                 ),
               ),
             ),
+            ),
           ),
         ],
       ),
@@ -3067,7 +2942,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
             left: 0,
             right: 0,
             bottom: 0,
-            child: ClipRRect(
+            child: _DismissiblePanel(
+              onDismiss: () => setState(() => _showQueuePanel = false),
+              child: ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
               child: DuckLiquidGlassSurface(
                 borderRadius: 28,
@@ -3241,6 +3118,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                   ),
                 ),
               ),
+            ),
             ),
           ),
         ],
@@ -3417,3 +3295,94 @@ class PlayerHeader extends StatelessWidget {
 }
 
 
+/// A bottom panel that dismisses the way the platform's own sheets do.
+///
+/// The player paints its panels inside its own Stack rather than pushing them
+/// as routes, so they get none of showModalBottomSheet's behaviour for free.
+/// What they had instead was a drag handle drawn on top of nothing — worse
+/// than no handle, because it advertises a gesture that does not exist. This
+/// makes the gesture real: drag down past a threshold, or flick, and the panel
+/// goes; let go short of it and it springs back.
+class _DismissiblePanel extends StatefulWidget {
+  const _DismissiblePanel({required this.onDismiss, required this.child});
+
+  final VoidCallback onDismiss;
+  final Widget child;
+
+  @override
+  State<_DismissiblePanel> createState() => _DismissiblePanelState();
+}
+
+class _DismissiblePanelState extends State<_DismissiblePanel>
+    with TickerProviderStateMixin {
+  late final AnimationController _entrance = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  )..forward();
+
+  late final AnimationController _settle = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  );
+
+  /// How far the finger has pulled the panel down, in logical pixels.
+  double _drag = 0;
+
+  /// Past this, letting go dismisses instead of springing back.
+  static const _dismissAfter = 90.0;
+
+  /// A flick this fast dismisses regardless of how far it travelled.
+  static const _flingVelocity = 700.0;
+
+  @override
+  void dispose() {
+    _entrance.dispose();
+    _settle.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    _settle.stop();
+    // Upward drags do nothing: the panel already sits against the bottom edge,
+    // and letting it travel further would open a gap underneath it.
+    setState(() => _drag = math.max(0, _drag + details.delta.dy));
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    if (_drag > _dismissAfter ||
+        details.velocity.pixelsPerSecond.dy > _flingVelocity) {
+      widget.onDismiss();
+      return;
+    }
+    final springBack = Tween<double>(begin: _drag, end: 0).animate(
+      CurvedAnimation(parent: _settle, curve: Curves.easeOut),
+    );
+    springBack.addListener(() {
+      if (mounted) setState(() => _drag = springBack.value);
+    });
+    _settle.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: _onDragUpdate,
+      onVerticalDragEnd: _onDragEnd,
+      child: AnimatedBuilder(
+        animation: _entrance,
+        builder: (context, child) {
+          final entered = Curves.easeOutCubic.transform(_entrance.value);
+          return Transform.translate(
+            offset: Offset(0, _drag),
+            child: FractionalTranslation(
+              translation: Offset(0, 1 - entered),
+              child: child,
+            ),
+          );
+        },
+        child: widget.child,
+      ),
+    );
+  }
+}

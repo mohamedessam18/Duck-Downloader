@@ -30,12 +30,20 @@ class MediaSaveService {
     );
   }
 
+  /// iOS has no writable Music library for third-party apps, so audio is handed
+  /// to the system share sheet ("Save to Files" / "Copy to …") instead.
+  ///
+  /// [interactive] must be false for automatic post-download saving: popping a
+  /// share sheet the user never asked for is jarring, so on iOS the call becomes
+  /// a no-op and reports failure rather than hijacking the screen.
   Future<ExternalSaveResult> saveAudio({
     required String path,
     required String filename,
     required DownloadType type,
+    bool interactive = true,
   }) async {
     if (Platform.isIOS) {
+      if (!interactive) return const ExternalSaveResult(success: false);
       await SharePlus.instance.share(
         ShareParams(files: [XFile(path)], subject: filename),
       );
@@ -55,13 +63,9 @@ class MediaSaveService {
     required String path,
     required String filename,
     required String mimeType,
-  }) async {
-    if (Platform.isIOS) {
-      await SharePlus.instance.share(
-        ShareParams(files: [XFile(path)], subject: filename),
-      );
-      return const ExternalSaveResult(success: true);
-    }
+  }) {
+    // Both platforms save straight into the system gallery (Photos /
+    // MediaStore). The iOS side is implemented in AppDelegate.swift.
     return _invokeSave(
       method: 'saveImage',
       path: path,

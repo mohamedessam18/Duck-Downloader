@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class DuckColors {
   const DuckColors._({
@@ -120,7 +121,36 @@ class DuckTheme {
         primary: colors.gold,
         surface: colors.panel,
       ),
+      appBarTheme: AppBarThemeData(
+        systemOverlayStyle: systemOverlayStyleFor(brightness),
+      ),
       extensions: const [DuckThemeExtension()],
+    );
+  }
+
+  /// System bar styling that sets icon brightness and *nothing else*.
+  ///
+  /// Left to itself, AppBar builds this style with `statusBarColor:
+  /// backgroundColor`, and Flutter's Android embedding only calls the
+  /// deprecated `Window.setStatusBarColor` / `setNavigationBarColor` /
+  /// `setNavigationBarDividerColor` when the matching field is non-null. Those
+  /// three setters do nothing at all on Android 15 and are what Play flags as
+  /// "deprecated APIs or parameters for edge-to-edge" — under edge-to-edge the
+  /// bars are transparent and our own content paints behind them, so the
+  /// colours were never doing any work here anyway.
+  ///
+  /// Keeping every colour field null is therefore the fix and the correct
+  /// behaviour at once. Only the brightness hints remain, because those decide
+  /// whether the clock and gesture bar are drawn light or dark.
+  static SystemUiOverlayStyle systemOverlayStyleFor(Brightness brightness) {
+    final onDark = brightness == Brightness.dark;
+    return SystemUiOverlayStyle(
+      statusBarIconBrightness: onDark ? Brightness.light : Brightness.dark,
+      // iOS reads this one, and it is inverted relative to the Android field.
+      statusBarBrightness: onDark ? Brightness.dark : Brightness.light,
+      systemNavigationBarIconBrightness: onDark
+          ? Brightness.light
+          : Brightness.dark,
     );
   }
 }

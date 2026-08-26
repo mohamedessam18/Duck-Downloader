@@ -50,59 +50,6 @@ class _LiquidGlassInteractiveButtonState
     super.dispose();
   }
 
-  void _onPanStart(DragStartDetails details) {
-    _animationController.stop();
-    setState(() {
-      _isPressed = true;
-      _isDragging = false;
-    });
-  }
-
-  void _onPanUpdate(DragUpdateDetails details) {
-    setState(() {
-      _dragOffset += details.delta;
-
-      final distance = _dragOffset.distance;
-      if (distance > 4.0) {
-        final dampedDistance =
-            4.0 + (distance - 4.0).clamp(0.0, 40.0) * 0.15;
-        _dragOffset = Offset.fromDirection(
-          _dragOffset.direction,
-          dampedDistance.clamp(0.0, 10.0),
-        );
-      }
-
-      if (distance > 5.0) {
-        _isDragging = true;
-      }
-    });
-  }
-
-  void _onPanEnd(DragEndDetails details) {
-    if (!_isDragging && widget.onTap != null) {
-      widget.onTap!();
-    }
-
-    setState(() {
-      _isPressed = false;
-      _isDragging = false;
-    });
-
-    _snapAnimation = _animationController.drive(
-      Tween<Offset>(begin: _dragOffset, end: Offset.zero).chain(
-        CurveTween(curve: Curves.easeOutBack),
-      ),
-    );
-
-    _animationController.forward(from: 0.0).then((_) {
-      if (mounted) {
-        setState(() {
-          _dragOffset = Offset.zero;
-        });
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final useLiquidEffects = DuckLiquidGlass.shouldUseLiquidGlass(context);

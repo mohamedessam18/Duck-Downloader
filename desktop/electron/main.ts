@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readExtensionId, registerNativeHost, startEngine } from './engine-host.js';
 
 type DownloadType = 'video' | 'audio';
 type DownloadStatus =
@@ -163,8 +164,19 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+
+  // Duck Engine owns downloads. Starting it here means the queue is running
+  // before any window appears, and it keeps running after the window closes.
+  try {
+    startEngine();
+    const extensionId = await readExtensionId();
+    const written = await registerNativeHost(extensionId);
+    console.log(`[duck] engine started; native host registered for ${written.length} browser(s)`);
+  } catch (error) {
+    console.error('[duck] could not start the engine:', error);
+  }
 
   ipcMain.handle('app:get-api-base-url', () => apiBaseUrl);
   ipcMain.handle('clipboard:read-text', () => clipboard.readText().trim());

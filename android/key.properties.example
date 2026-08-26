@@ -1,0 +1,15 @@
+# Copy to android/key.properties and fill in with your upload keystore.
+# key.properties, *.jks and *.keystore are all gitignored — never commit them.
+#
+# This must be the SAME keystore used for the closed-testing release that is
+# already on Play. Play App Signing accepts uploads signed by the registered
+# upload key only; a new keystore is rejected and can only be replaced by
+# filing an upload-key reset with Google.
+#
+# storeFile is resolved relative to android/app/, so a keystore kept outside
+# the repo needs an absolute path.
+
+storeFile=/absolute/path/to/duck-upload.jks
+storePassword=
+keyAlias=
+keyPassword=

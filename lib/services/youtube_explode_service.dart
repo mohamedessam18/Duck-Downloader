@@ -10,6 +10,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:youtube_explode_dart/src/reverse_engineering/youtube_http_client.dart';
 
 import '../models/download_models.dart';
+import './crash_reporting_service.dart';
 
 /// Extracts YouTube video metadata and downloads streams **directly on the
 /// client device**, bypassing the backend server entirely.
@@ -229,10 +230,13 @@ class YouTubeExplodeService {
       // Transcode to M4A
       onTranscoding?.call();
       final m4aPath = rawPath.replaceAll(RegExp(r'\.\w+$'), '.m4a');
-      await transcodeToM4a(rawPath, m4aPath);
       try {
-        await File(rawPath).delete();
-      } catch (_) {}
+        await transcodeToM4a(rawPath, m4aPath);
+      } finally {
+        // Same reason as the merge above: the raw download carries the video's
+        // own name, so a failed transcode used to leave a duplicate on show.
+        await _deleteQuietly(rawPath);
+      }
       return m4aPath;
     } catch (_) {
       // Fallback: download lowest muxed stream and extract audio
@@ -248,10 +252,11 @@ class YouTubeExplodeService {
     );
 
     final m4aPath = await _getUniqueFilePath(folder.path, '$safeTitle.m4a');
-    await transcodeToM4a(muxedPath, m4aPath);
     try {
-      await File(muxedPath).delete();
-    } catch (_) {}
+      await transcodeToM4a(muxedPath, m4aPath);
+    } finally {
+      await _deleteQuietly(muxedPath);
+    }
     return m4aPath;
   }
 
@@ -338,14 +343,19 @@ class YouTubeExplodeService {
       );
 
       // 3. Merge Video + Audio using FFmpeg (90 - 100%)
-      onProgress?.call(95, 100);
-      await mergeVideoAndAudio(tempVideoPath, tempAudioPath, finalFilePath);
-
-      // Clean up temp files
+      //
+      // The cleanup has to be in a finally. It used to sit after the merge, so
+      // any failure past this point — an ffmpeg error, a cancelled job, the
+      // process being killed mid-download — left `<title>_temp_a.m4a` behind.
+      // That orphan is named after the video and carries an audio extension,
+      // so it then showed up in the user's audio folders as a phantom copy.
       try {
-        await File(tempVideoPath).delete();
-        await File(tempAudioPath).delete();
-      } catch (_) {}
+        onProgress?.call(95, 100);
+        await mergeVideoAndAudio(tempVideoPath, tempAudioPath, finalFilePath);
+      } finally {
+        await _deleteQuietly(tempVideoPath);
+        await _deleteQuietly(tempAudioPath);
+      }
 
       return finalFilePath;
     }
@@ -548,6 +558,43 @@ class YouTubeExplodeService {
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
         .trim()
         .replaceAll(RegExp(r'_{2,}'), '_');
+  }
+
+  /// Deletes a working file, ignoring the case where it was never created.
+  ///
+  /// Only ever used for Duck's own intermediates, so a failure here is not
+  /// worth surfacing — but leaving one behind is, which is why every caller
+  /// runs it from a finally.
+  static Future<void> _deleteQuietly(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  /// Removes intermediates orphaned by an earlier run.
+  ///
+  /// Builds before the finally blocks above could strand `_temp_a.m4a`,
+  /// `_temp_v.mp4` and `_muxed.mp4` files in the download folders, where they
+  /// appear to the user as duplicate tracks. Fixing the leak does not clean up
+  /// what already leaked, so sweep once on launch.
+  static Future<void> cleanOrphanedWorkFiles() async {
+    const suffixes = ['_temp_a.m4a', '_temp_v.mp4', '_muxed.mp4'];
+    try {
+      final root = await getApplicationDocumentsDirectory();
+      for (final name in ['Videos', 'Audios']) {
+        final folder = Directory(p.join(root.path, 'Duck Downloader', name));
+        if (!await folder.exists()) continue;
+        await for (final entity in folder.list()) {
+          if (entity is! File) continue;
+          if (suffixes.any(entity.path.endsWith)) {
+            await _deleteQuietly(entity.path);
+          }
+        }
+      }
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'orphan-sweep');
+    }
   }
 
   Future<String> _getUniqueFilePath(String folderPath, String filename) async {

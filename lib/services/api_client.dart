@@ -5,7 +5,16 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/download_models.dart';
 
-const _defaultApiBaseUrl = 'https://duck-downloader-production.up.railway.app';
+/// Custom domain rather than the Railway-generated hostname on purpose.
+///
+/// A published build cannot be changed after the fact, so the address baked in
+/// here has to outlive whatever the API happens to be hosted on. The generated
+/// `*.up.railway.app` name belongs to one specific project on one specific
+/// account — moving the backend, or losing that account, would strand every
+/// installed copy of the app. A domain we own can just be repointed.
+///
+/// Override at build time with `--dart-define=DUCK_API_BASE_URL=...`.
+const _defaultApiBaseUrl = 'https://api.duckdownloader.site';
 
 class DuckApiClient {
   DuckApiClient({Dio? dio, String? apiBaseUrl})

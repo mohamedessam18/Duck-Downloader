@@ -145,6 +145,19 @@ class _AmbientBackgroundState extends State<AmbientBackground>
                   ),
                 ),
               ),
+              // Vignette. Darkening the corners pushes the ambient glow into
+              // the centre and gives the glass panels floating above it an
+              // edge to read against.
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.center,
+                    radius: 1.0,
+                    colors: [Colors.transparent, Color(0x40000000)],
+                    stops: [0.55, 1.0],
+                  ),
+                ),
+              ),
               if (widget.padding != null)
                 Padding(padding: widget.padding!, child: child!)
               else

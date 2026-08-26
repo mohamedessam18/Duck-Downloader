@@ -10,7 +10,9 @@
     "dev": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "npm run build:electron && tsc -p tsconfig.json && vite build",
     "dist:win": "npm run build && electron-builder --win nsis portable",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "build:engine": "cd ../engine && npm run build && cd ../bridge && npx tsc -p tsconfig.json",
+    "dist:mac": "npm run build:engine && npm run build && electron-builder --mac dmg"
   },
   "dependencies": {
     "electron-store": "^11.0.2",
@@ -51,6 +53,36 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "extraResources": [
+      {
+        "from": "../engine/dist",
+        "to": "duck/engine/dist"
+      },
+      {
+        "from": "../bridge/dist",
+        "to": "duck/bridge/dist"
+      },
+      {
+        "from": "../extension/keys/id.txt",
+        "to": "duck/extension-id.txt"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "identity": null
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   }
 }

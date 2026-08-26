@@ -6,6 +6,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'premium_entitlement.dart';
 import 'purchase_repository.dart';
 import 'subscription_service.dart';
+import './crash_reporting_service.dart';
 
 class PremiumManager extends ChangeNotifier {
   PremiumManager({
@@ -71,7 +72,8 @@ class PremiumManager extends ChangeNotifier {
       } else {
         statusMessage = 'Choose a subscription plan.';
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'iap-load-products');
       errorMessage = _cleanError(error);
     } finally {
       loadingProducts = false;
@@ -88,7 +90,8 @@ class PremiumManager extends ChangeNotifier {
     notifyListeners();
     try {
       await _subscriptions.buy(product);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'iap-purchase');
       errorMessage = _cleanError(error);
     } finally {
       purchasePending = false;
@@ -109,7 +112,8 @@ class PremiumManager extends ChangeNotifier {
         statusMessage = 'No active purchases found to restore.';
         notifyListeners();
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'iap-restore');
       purchasePending = false;
       errorMessage = _cleanError(error);
       notifyListeners();
@@ -172,7 +176,10 @@ class PremiumManager extends ChangeNotifier {
             ? 'Duck Premium restored.'
             : 'Duck Premium is active.';
         errorMessage = null;
-      } catch (error) {
+      } catch (error, stackTrace) {
+        // The user paid and just lost their entitlement. Nothing is louder
+        // than a refund request, so this must never be silent.
+        reportError(error, stackTrace, reason: 'iap-entitlement-verify');
         await _purchases.clearEntitlement();
         entitlement = const PremiumEntitlement.inactive();
         errorMessage = _cleanError(error);

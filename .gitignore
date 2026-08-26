@@ -64,3 +64,26 @@ nul
 
 *.apk
 
+
+# JVM crash dumps from Gradle daemon OOMs
+android/hs_err_pid*.log
+android/replay_pid*.log
+
+# ── Signing ─────────────────────────────────────────────────────────────────
+# Never commit these. key.properties holds the keystore passwords in plain
+# text, and the keystore itself is the only thing proving this app is this app:
+# leak it and someone else can publish updates as you, lose it and nobody can.
+android/key.properties
+*.jks
+*.keystore
+
+# ── macOS ───────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Local tooling ───────────────────────────────────────────────────────────
+.claude/settings.local.json
+
+# ── Scratch ─────────────────────────────────────────────────────────────────
+# Download-pipeline artefacts written by hand during debugging. Referenced by
+# nothing; 33MB of them were about to be committed.
+temp_test_*.mp4

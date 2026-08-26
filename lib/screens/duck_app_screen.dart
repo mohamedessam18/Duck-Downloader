@@ -16,9 +16,19 @@ import '../l10n/app_localizations.dart';
 import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/premium_entitlement.dart';
+import '../constants/asset_paths.dart';
+import '../core/duck_page_route.dart';
+import '../core/haptics.dart';
+import '../core/plurals.dart';
+import 'device_folder_sheet.dart';
+import '../widgets/duck_empty_state.dart';
+import '../widgets/duck_motion.dart';
 import '../state/downloads_controller.dart';
 import '../services/device_media_service.dart';
+import '../services/download_store.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../core/permissions/permission_service.dart';
+import '../services/vault_encryption_service.dart';
 import '../widgets/ambient_background.dart';
 import '../widgets/animated_duck.dart';
 import '../widgets/duck_liquid_glass.dart';
@@ -28,6 +38,15 @@ import '../widgets/media/mini_player.dart';
 import '../services/ad_service.dart';
 import 'locked_social_browser_screen.dart';
 import 'settings_screen.dart';
+
+
+/// Digits in a vault passcode.
+///
+/// Taken from the encryption service rather than written here, because these
+/// two had drifted: the keypad submitted at 4 digits while the service required
+/// 6, so every attempt to create a vault was rejected as too short and the
+/// feature was unusable. One source of truth stops that recurring.
+const int _pinLength = VaultEncryptionService.minimumPinLength;
 
 bool get _isLight {
   try {
@@ -74,6 +93,12 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.controller.isPremiumActive) return;
+      if (!widget.controller.consumePendingPremiumOffer()) return;
+      showPremiumSheet(context, widget.controller);
+    });
   }
 
   @override
@@ -102,8 +127,10 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
     final currentFlow = widget.controller.flow;
     if (_prevFlow != currentFlow) {
       if (currentFlow == DuckFlow.success) {
+        DuckHaptics.success();
         _showSettingToast(context, 'Download Completed!', true);
       } else if (currentFlow == DuckFlow.error) {
+        DuckHaptics.error();
         final err = widget.controller.status;
         if (err.isNotEmpty &&
             err != 'null' &&
@@ -203,7 +230,7 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
     if (widget.controller.lockedBrowserRequest != request) return;
     widget.controller.clearLockedBrowserRequest();
     final result = await Navigator.of(context).push<dynamic>(
-      CupertinoPageRoute(
+      DuckPageRoute(
         builder: (_) => LockedSocialBrowserScreen(
           initialUrl: request.url,
           platform: request.platform,
@@ -241,6 +268,7 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
         final isAndroid = Theme.of(context).platform == TargetPlatform.android;
         final canPop =
             !isAndroid &&
+            !widget.controller.hasBackInterceptors &&
             widget.controller.playerItem == null &&
             widget.controller.detectedClipboardUrl == null &&
             widget.controller.tab == DuckTab.home &&
@@ -250,6 +278,13 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
           canPop: canPop,
           onPopInvokedWithResult: (didPop, result) {
             if (didPop) return;
+
+            // 0. Innermost first. Anything that owns a dismissible layer of
+            // its own — the player's option panels, its landscape mode, its
+            // screen lock — registers with the controller and gets asked
+            // before the coarse rules below run. Without this, back skipped
+            // straight past whatever the user was actually looking at.
+            if (widget.controller.handleBackIntercept()) return;
 
             // 1. If player is open, close it
             if (widget.controller.playerItem != null) {
@@ -381,25 +416,92 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
     );
   }
 
+  /// Left-to-right position of a tab in the nav bar.
+  ///
+  /// Deliberately not `DuckTab.index`: the enum is declared
+  /// `home, videos, audios, images` while the bar reads HOME, IMAGES, VIDEOS,
+  /// AUDIOS. Driving the slide direction off the enum would send the page
+  /// leftwards for a tab sitting to the right, which reads as a glitch rather
+  /// than as movement.
+  static int _navOrder(DuckTab tab) => switch (tab) {
+    DuckTab.home => 0,
+    DuckTab.images => 1,
+    DuckTab.videos => 2,
+    DuckTab.audios => 3,
+  };
+
+  /// Which way the current tab change travels: 1 rightwards, -1 leftwards.
+  int _tabSlide = 1;
+  DuckTab? _renderedTab;
+
   Widget _bodyForTab(BuildContext context) {
+    final tab = widget.controller.tab;
+    final previous = _renderedTab;
+    if (previous != null && previous != tab) {
+      _tabSlide = _navOrder(tab) > _navOrder(previous) ? 1 : -1;
+    }
+    _renderedTab = tab;
+    final key = ValueKey(tab);
+
+    return AnimatedSwitcher(
+      duration: DuckMotion.transitionDuration,
+      switchInCurve: DuckMotion.transitionCurve,
+      switchOutCurve: DuckMotion.transitionCurve,
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        fit: StackFit.expand,
+        alignment: Alignment.topCenter,
+        children: [...previousChildren, ?currentChild],
+      ),
+      transitionBuilder: (child, animation) {
+        // The outgoing child keeps its own animation running backwards, so it
+        // needs the opposite offset: the pair should travel together in one
+        // direction, like a strip being pulled across, rather than both
+        // arriving from the same side.
+        final leaving = child.key != key;
+        final from = leaving ? -_tabSlide.toDouble() : _tabSlide.toDouble();
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: Offset(from, 0),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        );
+      },
+      child: KeyedSubtree(key: key, child: _tabBody()),
+    );
+  }
+
+  Widget _tabBody() {
     return switch (widget.controller.tab) {
       DuckTab.home => _HomeView(controller: widget.controller),
       DuckTab.images => _LibraryView(
         title: 'IMAGES',
         items: widget.controller.images,
-        empty: 'No downloaded images yet.',
+        emptyTitle: 'No images yet',
+        emptyMessage:
+            'Photos and carousels you download will land here, ready to view '
+            'or save to your gallery.',
+        emptyIcon: Icons.photo_library_outlined,
         controller: widget.controller,
       ),
       DuckTab.videos => _LibraryView(
         title: 'VIDEOS',
         items: widget.controller.videos,
-        empty: 'No downloaded videos yet.',
+        emptyTitle: 'No videos yet',
+        emptyMessage:
+            'Copy a link from YouTube, Instagram, TikTok, Reddit or X, then '
+            'tap the duck to grab it.',
+        emptyIcon: Icons.movie_outlined,
         controller: widget.controller,
       ),
       DuckTab.audios => _LibraryView(
         title: 'AUDIOS',
         items: widget.controller.audios,
-        empty: 'No downloaded audios yet.',
+        emptyTitle: 'No audio yet',
+        emptyMessage:
+            'Pick Audio when you download, or convert any video you already '
+            'have into a track.',
+        emptyIcon: Icons.library_music_outlined,
         controller: widget.controller,
       ),
     };
@@ -439,7 +541,6 @@ class _HomeView extends StatelessWidget {
                     children: [
                       _AutoSaveToggle(controller: controller),
                       _ClipboardToggle(controller: controller),
-                      _BackgroundPlayToggle(controller: controller),
                       _SettingsButton(controller: controller),
                       _ProBadge(controller: controller),
                     ],
@@ -557,13 +658,23 @@ class _Brand extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          'DOWNLOADER',
-          style: TextStyle(
-            color: _textMuted.withValues(alpha: 0.85),
-            fontSize: (compact ? 10 : 12) * scale,
-            letterSpacing: 9,
-            fontWeight: FontWeight.w300,
+        // The tagline, not a second copy of the wordmark's last word. This
+        // used to read "DOWNLOADER" directly under "DUCK DOWNLOADER", which
+        // looked like a rendering fault rather than a subtitle.
+        //
+        // FittedBox because the line is now three words instead of one: at
+        // this letter spacing it would otherwise overflow on a narrow phone,
+        // and trading a duplicated word for a clipped one is no trade at all.
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            'COPY. DETECT. DOWNLOAD.',
+            style: TextStyle(
+              color: _textMuted.withValues(alpha: 0.85),
+              fontSize: (compact ? 10 : 12) * scale,
+              letterSpacing: 4,
+              fontWeight: FontWeight.w300,
+            ),
           ),
         ),
       ],
@@ -682,34 +793,6 @@ class _ClipboardToggle extends StatelessWidget {
   }
 }
 
-class _BackgroundPlayToggle extends StatelessWidget {
-  const _BackgroundPlayToggle({required this.controller});
-
-  final DuckDownloadsController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return _HeaderToggle(
-      icon: controller.backgroundPlaybackEnabled
-          ? Icons.headphones
-          : Icons.headphones_outlined,
-      label: 'BG PLAY',
-      active: controller.backgroundPlaybackEnabled,
-      onTap: () {
-        final newStatus = !controller.backgroundPlaybackEnabled;
-        controller.toggleBackgroundPlayback(newStatus);
-        _showSettingToast(
-          context,
-          newStatus
-              ? 'Background Playback Enabled'
-              : 'Background Playback Disabled',
-          newStatus,
-        );
-      },
-    );
-  }
-}
-
 class _SettingsButton extends StatelessWidget {
   const _SettingsButton({required this.controller});
 
@@ -723,8 +806,13 @@ class _SettingsButton extends StatelessWidget {
       active: false,
       onTap: () {
         Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => SettingsScreen(controller: controller),
+          DuckPageRoute(
+            builder: (_) => SettingsScreen(
+              controller: controller,
+              // Replaying the intro flips an app-level flag rather than any
+              // controller state, so the screen needs the store directly.
+              store: DownloadStore(Hive.box('duck-downloads')),
+            ),
           ),
         );
       },
@@ -888,7 +976,7 @@ class _ProBadgeState extends State<_ProBadge> {
       onTapDown: (_) => setState(() => _isPressed = true),
       onTapUp: (_) => setState(() => _isPressed = false),
       onTapCancel: () => setState(() => _isPressed = false),
-      onTap: () => _showPremiumSheet(context, widget.controller),
+      onTap: () => showPremiumSheet(context, widget.controller),
       child: AnimatedScale(
         scale: _isPressed ? 0.95 : 1.0,
         duration: const Duration(milliseconds: 120),
@@ -987,7 +1075,12 @@ class _ProBadgeState extends State<_ProBadge> {
   }
 }
 
-void _showPremiumSheet(
+/// Opens the subscription sheet.
+///
+/// Public because the first-run intro presents it once at the end, after the
+/// three intro pages rather than as a fourth one — a paywall the user cannot
+/// swipe past is the fastest way to get uninstalled.
+void showPremiumSheet(
   BuildContext context,
   DuckDownloadsController controller,
 ) {
@@ -1340,13 +1433,13 @@ class _StatusBar extends StatelessWidget {
         ],
       );
     } else if (flow == DuckFlow.downloading) {
-      // Look at the speed/ETA/size info if available in status or simulate size
-      // We display: %progress CACHED (e.g. %8 CACHED)
+      // "42% CACHED", not "%42". The sign follows the number in English and in
+      // Arabic alike; leading it reads as a formatting bug in both.
       child = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            '%$progress CACHED',
+            '$progress% CACHED',
             style: TextStyle(
               color: _text,
               fontSize: 14,
@@ -1663,7 +1756,7 @@ class _BatchOptionsCardState extends State<_BatchOptionsCard> {
                 const SizedBox(width: 8),
               ],
               Text(
-                '${items.length} items found',
+                '${plural(items.length, 'item')} found',
                 style: TextStyle(color: _textMuted, fontSize: 12),
               ),
             ],
@@ -2047,13 +2140,17 @@ class _LibraryView extends StatefulWidget {
   const _LibraryView({
     required this.title,
     required this.items,
-    required this.empty,
+    required this.emptyTitle,
+    required this.emptyMessage,
+    required this.emptyIcon,
     required this.controller,
   });
 
   final String title;
   final List<DownloadItem> items;
-  final String empty;
+  final String emptyTitle;
+  final String emptyMessage;
+  final IconData emptyIcon;
   final DuckDownloadsController controller;
 
   @override
@@ -2066,13 +2163,45 @@ class _LibraryViewState extends State<_LibraryView> {
   Offset? _dragPillOffset;
   bool _isDraggingPill = false;
 
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addBackInterceptor(_handleBack);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeBackInterceptor(_handleBack);
+    super.dispose();
+  }
+
+  /// Back inside the library steps back out of the sub-tab before it leaves
+  /// the tab.
+  ///
+  /// Landing on Home from three levels deep is the thing that made back feel
+  /// arbitrary: the user picked Folders deliberately, and undoing that one
+  /// choice is what they mean by "back" — not unwinding the whole screen.
+  bool _handleBack() {
+    if (_subTab != _LibrarySubTab.all) {
+      setState(() => _subTab = _LibrarySubTab.all);
+      return true;
+    }
+    return false;
+  }
+
   bool get _isImagesTab => widget.title == 'IMAGES';
 
+  /// Space the floating nav bar — and the mini player when visible — cover.
+  ///
+  /// The nav bar pads itself by MediaQuery.paddingOf(context).bottom, so a
+  /// fixed number here left the last row of every list sitting underneath it
+  /// on any device with a gesture bar or home indicator.
   double get _bottomPadding {
     final hasMiniPlayer =
         widget.controller.playingItem != null &&
         widget.controller.playerItem == null;
-    return hasMiniPlayer ? 144.0 : 80.0;
+    return (hasMiniPlayer ? 150.0 : 80.0) +
+        MediaQuery.paddingOf(context).bottom;
   }
 
   Widget _buildUnifiedSubTabBar() {
@@ -2299,16 +2428,26 @@ class _LibraryViewState extends State<_LibraryView> {
                       ),
                     ),
                     Expanded(
-                      child: Text(
-                        widget.title,
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: _text,
-                          fontSize: 20,
-                          letterSpacing: 3,
-                          fontWeight: FontWeight.w300,
+                      // Shrinks rather than truncates. This row carries a back
+                      // button, two icon buttons and the auto-save switch, so
+                      // what is left for the title is narrow enough that even
+                      // "IMAGES" was rendering as "IMA…" at this letter
+                      // spacing. Arabic titles are longer still. A title that
+                      // is 2pt smaller reads fine; one that is cut in half
+                      // does not.
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.center,
+                        child: Text(
+                          widget.title,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: _text,
+                            fontSize: 20,
+                            letterSpacing: 3,
+                            fontWeight: FontWeight.w300,
+                          ),
                         ),
                       ),
                     ),
@@ -2346,7 +2485,7 @@ class _LibraryViewState extends State<_LibraryView> {
                               onSuccess: () {
                                 Navigator.push(
                                   context,
-                                  CupertinoPageRoute(
+                                  DuckPageRoute(
                                     builder: (context) => _SecureVaultView(
                                       controller: widget.controller,
                                       mediaType: mediaType,
@@ -2375,15 +2514,25 @@ class _LibraryViewState extends State<_LibraryView> {
                 : _subTab == _LibrarySubTab.playlists
                 ? _buildPlaylistsTab()
                 : filteredItems.isEmpty
-                ? Center(
-                    child: Text(
-                      _subTab == _LibrarySubTab.favorites
-                          ? 'No favorites added yet.'
-                          : widget.empty,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: _textMuted, fontSize: 18),
-                    ),
-                  )
+                ? (_subTab == _LibrarySubTab.favorites
+                      ? const DuckEmptyState(
+                          icon: Icons.favorite_border_rounded,
+                          title: 'No favourites yet',
+                          message:
+                              'Tap the heart on anything in your library to '
+                              'keep it close by.',
+                        )
+                      : DuckEmptyState(
+                          icon: widget.emptyIcon,
+                          imageAsset: DuckAssets.duckIdle(),
+                          title: widget.emptyTitle,
+                          message: widget.emptyMessage,
+                          actionLabel: 'Paste a link',
+                          onAction: () {
+                            widget.controller.setTab(DuckTab.home);
+                            widget.controller.pasteAndExtract();
+                          },
+                        ))
                 : _isImagesTab && _useGridLayout
                 ? GridView.builder(
                     padding: EdgeInsets.only(bottom: _bottomPadding),
@@ -2397,7 +2546,10 @@ class _LibraryViewState extends State<_LibraryView> {
                     itemCount: filteredItems.length,
                     itemBuilder: (context, index) {
                       final item = filteredItems[index];
-                      return GestureDetector(
+                      return EntranceFade(
+                        index: index,
+                        child: Pressable(
+                        pressedScale: 0.94,
                         onTap: () => widget.controller.openPlayer(
                           item,
                           galleryItems: filteredItems,
@@ -2427,18 +2579,22 @@ class _LibraryViewState extends State<_LibraryView> {
                             ],
                           ),
                         ),
+                        ),
                       );
                     },
                   )
                 : ListView.separated(
                     padding: EdgeInsets.only(bottom: _bottomPadding),
-                    itemBuilder: (context, index) => _DownloadRow(
-                      item: filteredItems[index],
-                      controller: widget.controller,
-                      galleryItems: _isImagesTab ? filteredItems : null,
-                      queueItems: widget.title == 'AUDIOS'
-                          ? filteredItems
-                          : null,
+                    itemBuilder: (context, index) => EntranceFade(
+                      index: index,
+                      child: _DownloadRow(
+                        item: filteredItems[index],
+                        controller: widget.controller,
+                        galleryItems: _isImagesTab ? filteredItems : null,
+                        queueItems: widget.title == 'AUDIOS'
+                            ? filteredItems
+                            : null,
+                      ),
                     ),
                     separatorBuilder: (_, _) =>
                         Divider(height: 1, color: _divider),
@@ -2452,35 +2608,44 @@ class _LibraryViewState extends State<_LibraryView> {
 
   Widget _buildFoldersTab() {
     final title = widget.title.toUpperCase();
+    // The library is no longer read at startup, so the first time this tab is
+    // built it asks for it. Scheduled after the frame because this runs during
+    // build and the load calls notifyListeners.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.controller.ensureDeviceFolders();
+    });
+
     final List<DeviceMediaFolder> folders = title == 'VIDEOS'
         ? widget.controller.videoFolders
         : (title == 'IMAGES'
               ? widget.controller.imageFolders
               : widget.controller.audioFolders);
 
+    if (folders.isEmpty && widget.controller.deviceFoldersLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     if (folders.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.folder_off_outlined, size: 48, color: _textMuted),
-            const SizedBox(height: 12),
-            Text(
-              'No $title folders found on device.',
-              style: TextStyle(color: _textMuted, fontSize: 15),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(side: BorderSide(color: _gold)),
-              onPressed: () => widget.controller.refreshDeviceFolders(),
-              icon: Icon(Icons.refresh, color: _gold),
-              label: Text(
-                'Scan Storage Folders',
-                style: TextStyle(color: _gold),
-              ),
-            ),
-          ],
-        ),
+      // Denied access and genuinely-empty storage look identical on screen but
+      // need completely different actions, so they are separated here.
+      final denied = widget.controller.deviceMediaAccessDenied;
+      return DuckEmptyState(
+        icon: denied ? Icons.lock_outline_rounded : Icons.folder_off_outlined,
+        title: denied ? 'Media access needed' : 'No $title folders found',
+        message: denied
+            ? 'Duck needs permission to read your photos, videos and audio to '
+                  'browse and manage the folders on this device.'
+            : 'Nothing turned up in your device storage. Scan again if you '
+                  'have just added files.',
+        actionLabel: denied ? 'Grant access' : 'Scan storage',
+        onAction: () async {
+          await widget.controller.refreshDeviceFolders();
+          // A second denial means the OS has stopped showing the prompt, so
+          // send the user where they can still change it.
+          if (widget.controller.deviceMediaAccessDenied && denied) {
+            await widget.controller.openDeviceMediaSettings();
+          }
+        },
       );
     }
 
@@ -2530,7 +2695,7 @@ class _LibraryViewState extends State<_LibraryView> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
-                        '${folder.itemCount} items',
+                        plural(folder.itemCount, 'item'),
                         style: TextStyle(
                           color: _gold,
                           fontSize: 11,
@@ -2575,73 +2740,10 @@ class _LibraryViewState extends State<_LibraryView> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        final isLight = Theme.of(context).brightness == Brightness.light;
-        return Container(
-          height: MediaQuery.sizeOf(context).height * 0.75,
-          decoration: BoxDecoration(
-            color: isLight ? Colors.white : const Color(0xFF141518),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            children: [
-              const SizedBox(height: 12),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.folder, color: _gold, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            folder.name,
-                            style: TextStyle(
-                              color: _text,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            '${folder.itemCount} items inside this folder',
-                            style: TextStyle(color: _textMuted, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: folder.items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final item = folder.items[index];
-                    return _DownloadRow(
-                      item: item,
-                      galleryItems: folder.items,
-                      controller: widget.controller,
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (context) => DeviceFolderSheet(
+        folder: folder,
+        controller: widget.controller,
+      ),
     );
   }
 
@@ -2717,7 +2819,7 @@ class _LibraryViewState extends State<_LibraryView> {
                           ),
                         ),
                         subtitle: Text(
-                          '${playlistItems.length} items',
+                          plural(playlistItems.length, 'item'),
                           style: TextStyle(color: _muted),
                         ),
                         trailing: IconButton(
@@ -2731,7 +2833,7 @@ class _LibraryViewState extends State<_LibraryView> {
                         onTap: () {
                           Navigator.push(
                             context,
-                            CupertinoPageRoute(
+                            DuckPageRoute(
                               builder: (context) => _PlaylistItemsView(
                                 playlist: playlist,
                                 controller: widget.controller,
@@ -3293,8 +3395,8 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   void initState() {
     super.initState();
     _message = widget.controller.isVaultSetup
-        ? 'Enter your 4-digit passcode'
-        : 'Create a 4-digit vault passcode';
+        ? 'Enter your $_pinLength-digit passcode'
+        : 'Create a $_pinLength-digit vault passcode';
     if (widget.controller.isVaultSetup && widget.controller.biometricEnabled) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _authenticateWithBiometrics();
@@ -3328,12 +3430,12 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   }
 
   void _onKeyPress(String val) {
-    if (_isCheckingPin || _pin.length >= 4) return;
+    if (_isCheckingPin || _pin.length >= _pinLength) return;
     setState(() {
       _pin += val;
-      if (_pin.length == 4) _message = 'Checking passcode...';
+      if (_pin.length == _pinLength) _message = 'Checking passcode...';
     });
-    if (_pin.length == 4) unawaited(_submitPin());
+    if (_pin.length == _pinLength) unawaited(_submitPin());
   }
 
   Future<void> _submitPin() async {
@@ -3381,7 +3483,7 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
           _newPinMode = true;
           _confirmMode = false;
           _pin = '';
-          _message = 'Create a new 4-digit passcode';
+          _message = 'Create a new $_pinLength-digit passcode';
         });
       } else {
         setState(() {
@@ -3470,7 +3572,7 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
               const SizedBox(height: 32),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(4, (index) {
+                children: List.generate(_pinLength, (index) {
                   final filled = index < _pin.length;
                   return Container(
                     width: 16,
@@ -3563,64 +3665,45 @@ class _VaultPinSheetState extends State<_VaultPinSheet> {
   }
 }
 
-class _SecureVaultView extends StatelessWidget {
+class _SecureVaultView extends StatefulWidget {
   const _SecureVaultView({required this.controller, required this.mediaType});
 
   final DuckDownloadsController controller;
   final String mediaType; // 'audio' | 'video' | 'image'
 
+  @override
+  State<_SecureVaultView> createState() => _SecureVaultViewState();
+}
+
+class _SecureVaultViewState extends State<_SecureVaultView> {
+  /// Whether names and thumbnails are legible right now.
+  ///
+  /// The vault's whole promise is that what is inside it is nobody else's
+  /// business, and a list of readable filenames breaks that promise before a
+  /// single file is opened: a glance over a shoulder, a screen mirrored to a
+  /// TV, or a screenshot taken by another app all leak the contents without
+  /// ever touching the encryption.
+  ///
+  /// Android cannot blur part of a captured screenshot, so this blurs the UI
+  /// itself. Peeking is a deliberate act, and it resets when the screen is
+  /// left, because a vault that stays unblurred is one the user forgets to
+  /// re-hide.
+  bool _revealed = false;
+
   Future<void> _onBackRequested(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: _dark,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: _border),
-          ),
-          title: Text(
-            'Exit Vault?',
-            style: TextStyle(color: _text, fontWeight: FontWeight.bold),
-          ),
-          content: Text(
-            'Are you sure you want to exit the secure vault and lock it?',
-            style: TextStyle(color: _muted),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text('Cancel', style: TextStyle(color: _muted)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text(
-                'Exit',
-                style: TextStyle(color: _danger, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        );
-      },
-    );
+    // No confirmation. Leaving the vault destroys nothing and takes one tap to
+    // undo, so a dialog on every exit was pure friction: the user answers it
+    // the same way every time, which is the definition of a prompt that should
+    // not be there.
+    widget.controller.closePlayer();
+    await widget.controller.audioPlayer.stop();
+    widget.controller.lockVault();
 
-    if (confirmed == true) {
-      // 1. Stop all media playback
-      controller.closePlayer();
-      await controller.audioPlayer.stop();
-
-      // 2. Lock the vault
-      controller.lockVault();
-
-      // 3. Pop the vault screen
-      if (context.mounted) {
-        Navigator.pop(context);
-      }
-
-      // 4. Force navigation to the Home tab
-      controller.tabHistory.clear();
-      controller.setTab(DuckTab.home);
-    }
+    // Deliberately no setTab(DuckTab.home) here. Sending the user to Home threw
+    // away where they were: open the vault from VIDEOS, come back, and you are
+    // somewhere else. Popping the route returns them to the tab that opened it,
+    // which is what every other screen in the app now does.
+    if (context.mounted) Navigator.pop(context);
   }
 
   void _showVaultSettings(BuildContext context) {
@@ -3666,10 +3749,10 @@ class _SecureVaultView extends StatelessWidget {
                     'Unlock the vault using fingerprint / Face ID',
                     style: TextStyle(color: _muted),
                   ),
-                  value: controller.biometricEnabled,
+                  value: widget.controller.biometricEnabled,
                   activeColor: _gold,
                   onChanged: (val) async {
-                    await controller.toggleBiometricEnabled(val);
+                    await widget.controller.toggleBiometricEnabled(val);
                     setModalState(() {});
                   },
                 ),
@@ -3705,7 +3788,7 @@ class _SecureVaultView extends StatelessWidget {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    CupertinoPageRoute(
+                    DuckPageRoute(
                       builder: (context) => const _IntruderLogsScreen(),
                     ),
                   );
@@ -3724,7 +3807,7 @@ class _SecureVaultView extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return _DecoyPinSetupSheet(controller: controller);
+        return _DecoyPinSetupSheet(controller: widget.controller);
       },
     );
   }
@@ -3734,10 +3817,10 @@ class _SecureVaultView extends StatelessWidget {
       FileType fileType;
       DownloadType downloadType;
 
-      if (mediaType == 'audio') {
+      if (widget.mediaType == 'audio') {
         fileType = FileType.audio;
         downloadType = DownloadType.audio;
-      } else if (mediaType == 'video') {
+      } else if (widget.mediaType == 'video') {
         fileType = FileType.video;
         downloadType = DownloadType.video;
       } else {
@@ -3762,7 +3845,7 @@ class _SecureVaultView extends StatelessWidget {
           );
         }
 
-        await controller.importLocalFileToVault(path, downloadType);
+        await widget.controller.importLocalFileToVault(path, downloadType);
 
         if (context.mounted) {
           Navigator.pop(context); // Close loading indicator
@@ -3794,9 +3877,9 @@ class _SecureVaultView extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: _nav,
           title: Text(
-            mediaType == 'audio'
+            widget.mediaType == 'audio'
                 ? 'AUDIO VAULT'
-                : mediaType == 'video'
+                : widget.mediaType == 'video'
                 ? 'VIDEO VAULT'
                 : 'IMAGE VAULT',
             style: TextStyle(
@@ -3812,7 +3895,23 @@ class _SecureVaultView extends StatelessWidget {
             onPressed: () => _onBackRequested(context),
           ),
           actions: [
-            if (!controller.isDecoySession)
+            // Tapping a row plays the file, so revealing cannot live there.
+            // One control for the whole list is also the honest shape: what is
+            // being hidden is the list, not any single row of it.
+            IconButton(
+              tooltip: _revealed ? 'Hide names' : 'Show names',
+              onPressed: () {
+                widget.controller.touchVault();
+                setState(() => _revealed = !_revealed);
+              },
+              icon: Icon(
+                _revealed
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: _gold,
+              ),
+            ),
+            if (!widget.controller.isDecoySession)
               IconButton(
                 icon: Icon(Icons.settings, color: _text),
                 onPressed: () => _showVaultSettings(context),
@@ -3825,12 +3924,12 @@ class _SecureVaultView extends StatelessWidget {
           child: const Icon(Icons.add, color: Colors.black, size: 28),
         ),
         body: AnimatedBuilder(
-          animation: controller,
+          animation: widget.controller,
           builder: (context, _) {
-            final items = controller.privateDownloads.where((item) {
-              if (mediaType == 'audio') return item.isAudio;
-              if (mediaType == 'video') return item.isVideo;
-              if (mediaType == 'image') return item.isImage;
+            final items = widget.controller.privateDownloads.where((item) {
+              if (widget.mediaType == 'audio') return item.isAudio;
+              if (widget.mediaType == 'video') return item.isVideo;
+              if (widget.mediaType == 'image') return item.isImage;
               return false;
             }).toList();
 
@@ -3842,13 +3941,25 @@ class _SecureVaultView extends StatelessWidget {
                 ),
               );
             } else {
-              return ListView.builder(
+              return NotificationListener<ScrollNotification>(
+                // Scrolling the list is use, not idleness. Without this the
+                // countdown would run out while the user was still browsing.
+                onNotification: (_) {
+                  widget.controller.touchVault();
+                  return false;
+                },
+                child: ListView.builder(
                 padding: const EdgeInsets.all(16),
                 itemCount: items.length,
                 itemBuilder: (context, index) {
                   final item = items[index];
-                  return _VaultItemTile(item: item, controller: controller);
+                  return _VaultItemTile(
+                    item: item,
+                    controller: widget.controller,
+                    revealed: _revealed,
+                  );
                 },
+                ),
               );
             }
           },
@@ -3871,13 +3982,13 @@ class _DecoyPinSetupSheetState extends State<_DecoyPinSetupSheet> {
   String _pin = '';
   String _firstPin = '';
   bool _confirmMode = false;
-  String _message = 'Create a 4-digit decoy passcode';
+  String _message = 'Create a $_pinLength-digit decoy passcode';
 
   void _onKeyPress(String val) {
-    if (_pin.length >= 4) return;
+    if (_pin.length >= _pinLength) return;
     setState(() {
       _pin += val;
-      if (_pin.length == 4) _handlePinComplete();
+      if (_pin.length == _pinLength) _handlePinComplete();
     });
   }
   void _onBackspace() {
@@ -3955,7 +4066,7 @@ class _DecoyPinSetupSheetState extends State<_DecoyPinSetupSheet> {
             const SizedBox(height: 32),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(4, (index) {
+              children: List.generate(_pinLength, (index) {
                 final filled = index < _pin.length;
                 return Container(
                   width: 16,
@@ -4201,10 +4312,37 @@ class _IntruderLogsScreenState extends State<_IntruderLogsScreen> {
 }
 
 class _VaultItemTile extends StatelessWidget {
-  const _VaultItemTile({required this.item, required this.controller});
+  const _VaultItemTile({
+    required this.item,
+    required this.controller,
+    this.revealed = true,
+  });
 
   final DownloadItem item;
   final DuckDownloadsController controller;
+
+  /// False while the vault is hiding what it holds.
+  final bool revealed;
+
+  /// Blurs its child until the vault is peeked at.
+  ///
+  /// A blur rather than a placeholder block on purpose: the row keeps its real
+  /// shape and length, so the list still reads as a list and the user can
+  /// still find the file they are looking for by position. A row of grey bars
+  /// would hide the same information and lose that.
+  Widget _veil(Widget child, {double sigma = 6}) {
+    if (revealed) return child;
+    return ImageFiltered(
+      imageFilter: ImageFilter.blur(
+        sigmaX: sigma,
+        sigmaY: sigma,
+        // Without this the blur samples transparent pixels past the edge and
+        // the text fades out at its ends instead of staying evenly obscured.
+        tileMode: TileMode.decal,
+      ),
+      child: child,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4218,23 +4356,28 @@ class _VaultItemTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _Thumb(
-            url: item.thumbnail,
-            filePath: item.filePath,
-            width: 48,
-            height: 48,
-            icon: item.isAudio ? Icons.music_note : Icons.play_arrow,
+          _veil(
+            _Thumb(
+              url: item.thumbnail,
+              filePath: item.filePath,
+              width: 48,
+              height: 48,
+              icon: item.isAudio ? Icons.music_note : Icons.play_arrow,
+            ),
+            sigma: 8,
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: _text, fontWeight: FontWeight.bold),
+                _veil(
+                  Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: _text, fontWeight: FontWeight.bold),
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -6401,7 +6544,7 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
                   const CircularProgressIndicator(),
                   const SizedBox(height: 10),
                   Text(
-                    widget.controller.status ?? 'Processing...',
+                    widget.controller.status,
                     style: TextStyle(color: text, fontSize: 13),
                   ),
                 ] else
