@@ -1,8 +1,36 @@
 import { articles, type Article } from "./knowledge";
 
-/** A stemmer would be overkill; these are the endings that actually collide. */
+/** True when the text contains Arabic letters. */
+export function isArabic(text: string): boolean {
+  return /[؀-ۿ]/.test(text);
+}
+
+/**
+ * Reduces a word to something two spellings of it can share.
+ *
+ * The English side strips a few endings. The Arabic side does something more
+ * important: it removes the diacritics and the tatweel that change how a word
+ * is typed without changing what it means, and normalises the alef and yaa
+ * forms people use interchangeably. Someone typing "الخزنه" and someone typing
+ * "الخزنة" are asking the same question, and only one of those is in the
+ * knowledge base.
+ */
 function normalise(word: string): string {
-  const w = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+  let w = word.toLowerCase();
+
+  if (/[؀-ۿ]/.test(w)) {
+    w = w
+      .replace(/[ً-ْـ]/g, "")   // harakat and tatweel
+      .replace(/[آأإٱ]/g, "ا") // alef forms
+      .replace(/ى/g, "ي")            // alef maqsura to yaa
+      .replace(/ة/g, "ه")            // taa marbuta to haa
+      .replace(/[^؀-ۿ0-9]/g, "");
+    // The definite article carries no meaning for matching.
+    if (w.length > 4 && w.startsWith("ال")) w = w.slice(2);
+    return w;
+  }
+
+  w = w.replace(/[^a-z0-9]/g, "");
   if (w.length > 4 && w.endsWith("ing")) return w.slice(0, -3);
   if (w.length > 4 && w.endsWith("ed")) return w.slice(0, -2);
   if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
@@ -12,15 +40,18 @@ function normalise(word: string): string {
 /**
  * Words that appear in almost every question and so separate nothing.
  *
- * Without this, "how do I cancel" scores every article that contains "how",
- * and the ranking is decided by noise rather than by the one word that carried
- * the question.
+ * Both languages, because a bilingual index needs both: without the Arabic
+ * half, "ازاي اعمل كذا" scores every article containing "ازاي".
  */
 const STOP = new Set([
   "the", "a", "an", "is", "are", "do", "does", "did", "can", "could", "how",
   "what", "when", "where", "why", "i", "my", "me", "you", "your", "it", "to",
   "of", "in", "on", "for", "and", "or", "but", "with", "this", "that", "get",
   "have", "has", "will", "would", "should", "there", "any", "if", "not", "no",
+  // Arabic, already normalised the way normalise() would leave them
+  "ازاي", "ايه", "هل", "في", "من", "علي", "عن", "مع", "ده", "دي", "انا",
+  "هو", "هي", "كان", "بس", "لو", "مش", "ما", "لا", "و", "يا", "عشان",
+  "ليه", "امتي", "فين", "كده", "اللي", "بتاع", "بتاعت", "عايز", "عاوز",
 ]);
 
 function tokenise(text: string): string[] {
@@ -33,11 +64,12 @@ function tokenise(text: string): string[] {
 export type Match = { article: Article; score: number };
 
 /**
- * Ranks articles against a question.
+ * Ranks articles against a question, in either language.
  *
  * Keywords are weighted above the question text because they are the words a
  * person reaches for when they do not know the app's own vocabulary: someone
- * whose vault will not open types "locked out", never "passcode".
+ * whose vault will not open types "locked out" or "مش بتفتح", never
+ * "passcode".
  *
  * Returns nothing rather than a poor guess when the score is too low. An
  * assistant that answers everything is an assistant you cannot trust on
@@ -48,9 +80,18 @@ export function search(query: string, limit = 3): Match[] {
   if (terms.length === 0) return [];
 
   const scored = articles.map((article) => {
-    const questionWords = new Set(tokenise(article.question));
+    // Both languages are indexed together, so an Arabic question can still
+    // match an article whose distinguishing word is a product name in Latin
+    // script, like "PiP" or "Premium".
+    const questionWords = new Set([
+      ...tokenise(article.question),
+      ...tokenise(article.questionAr),
+    ]);
     const keywordText = new Set(article.keywords.flatMap(tokenise));
-    const answerWords = new Set(tokenise(article.answer));
+    const answerWords = new Set([
+      ...tokenise(article.answer),
+      ...tokenise(article.answerAr),
+    ]);
 
     let score = 0;
     for (const term of terms) {
@@ -58,8 +99,6 @@ export function search(query: string, limit = 3): Match[] {
       if (questionWords.has(term)) score += 3;
       if (answerWords.has(term)) score += 1;
 
-      // A term the user typed that only appears inside a longer keyword still
-      // counts: "uninstalling" should reach the "uninstall" article.
       if (score === 0) {
         for (const kw of keywordText) {
           if (kw.length > 3 && (kw.includes(term) || term.includes(kw))) {
@@ -70,8 +109,6 @@ export function search(query: string, limit = 3): Match[] {
       }
     }
 
-    // Divided by term count so a long rambling question cannot out-score a
-    // short precise one purely by having more words to match.
     return { article, score: score / Math.sqrt(terms.length) };
   });
 

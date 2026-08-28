@@ -55,3 +55,40 @@ test('ranks at most three and orders by score', () => {
     assert.ok(hits[i - 1].score >= hits[i].score);
   }
 });
+
+/**
+ * Arabic. The tokeniser used to strip every non-Latin character, so an Arabic
+ * question arrived at the ranker as an empty string and matched nothing. These
+ * are phrased the way the app's actual users type: Egyptian, unpunctuated, and
+ * rarely spelled the way the knowledge base spells it.
+ */
+test('finds the vault answer in Arabic', () => {
+  assert.equal(top('نسيت رمز الخزنة'), 'vault-forgot');
+  assert.equal(top('الخزنه مش بتفتح'), 'vault-forgot');
+});
+
+test('tolerates alef and taa-marbuta spelling', () => {
+  // "الخزنه" and "الخزنة" are the same word typed two ways.
+  assert.equal(top('ازاي افتح الخزنه'), top('ازاي افتح الخزنة'));
+});
+
+test('reaches the permission answer in Arabic', () => {
+  assert.equal(top('الفولدرات فاضية'), 'permission-denied');
+});
+
+test('separates cancelling from restoring in Arabic', () => {
+  assert.equal(top('عايز الغي الاشتراك'), 'premium-cancel');
+  assert.equal(top('دفعت والبريميوم مش ظاهر'), 'premium-restore');
+});
+
+test('finds background playback in Arabic', () => {
+  assert.equal(top('اسمع والشاشة مقفولة'), 'background-audio');
+});
+
+test('still returns nothing for an Arabic question it has no answer to', () => {
+  assert.equal(search('عايز اطبخ كشري').length, 0);
+});
+
+test('all-stopword Arabic returns nothing', () => {
+  assert.equal(search('ازاي انا ده').length, 0);
+});
