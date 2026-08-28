@@ -1174,3 +1174,6 @@ a { color: inherit; text-decoration: none; }
   .now-card, .contact-lead { grid-template-columns: 1fr; }
   .now-shot { max-width: none; }
 }
+
+/* The greeting carries a blank line between its two languages. */
+.bubble-text { white-space: pre-line; }

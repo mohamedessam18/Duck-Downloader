@@ -6,7 +6,7 @@ import {
   ChatCircleDotsIcon,
   WhatsappLogoIcon
 } from "@phosphor-icons/react/dist/ssr";
-import { search } from "../lib/search";
+import { isArabic, search } from "../lib/search";
 import { siteConfig } from "../site-config";
 
 type Turn = {
@@ -18,16 +18,17 @@ type Turn = {
   handoff?: boolean;
 };
 
+/** Two of each, so an Arabic speaker sees their own language offered first. */
 const OPENERS = [
-  "How do I download a video?",
-  "I forgot my vault passcode",
+  "نسيت رمز الخزنة",
+  "Duck مش شايف الفولدرات",
   "How do I cancel Premium?",
-  "Duck cannot see my folders"
+  "Can I keep listening with the screen off?"
 ];
 
 const GREETING: Turn = {
   from: "duck",
-  text: "Ask me anything about Duck. I answer from the app's own documentation, so if I do not know something I will say so rather than guess.",
+  text: "اسألني أي حاجة عن Duck بالعربي أو بالإنجليزي. بجاوب من توثيق التطبيق نفسه، فلو مش عارف حاجة هقولك بدل ما أخمّن.\n\nAsk me anything about Duck, in Arabic or English.",
   related: OPENERS
 };
 
@@ -48,17 +49,25 @@ export function SupportBot() {
     const query = question.trim();
     if (!query) return;
 
+    // Answer in whichever language the question arrived in. The index holds
+    // both, so an Arabic question can still match on a Latin-script product
+    // name and come back in Arabic.
+    const ar = isArabic(query);
     const matches = search(query);
     const reply: Turn = matches.length
       ? {
           from: "duck",
-          text: matches[0].article.answer,
-          related: matches.slice(1).map((m) => m.article.question)
+          text: ar ? matches[0].article.answerAr : matches[0].article.answer,
+          related: matches
+            .slice(1)
+            .map((m) => (ar ? m.article.questionAr : m.article.question))
         }
       : {
           from: "duck",
           // Saying nothing useful is a real answer. Inventing one is not.
-          text: "I could not find that in the documentation. A person can help you faster than I can guess.",
+          text: ar
+            ? "ملقيتش دي في التوثيق. حد من الدعم هيساعدك أسرع من إني أخمّن."
+            : "I could not find that in the documentation. A person can help you faster than I can guess.",
           handoff: true
         };
 
@@ -81,8 +90,12 @@ export function SupportBot() {
 
       <div className="bot-log">
         {turns.map((turn, i) => (
-          <div key={i} className={`bubble bubble-${turn.from}`}>
-            <p>{turn.text}</p>
+          <div
+            key={i}
+            className={`bubble bubble-${turn.from}`}
+            dir={isArabic(turn.text) ? "rtl" : "ltr"}
+          >
+            <p className="bubble-text">{turn.text}</p>
 
             {turn.handoff ? (
               <a
@@ -103,6 +116,7 @@ export function SupportBot() {
                     key={q}
                     type="button"
                     className="chip"
+                    dir={isArabic(q) ? "rtl" : "ltr"}
                     onClick={() => ask(q)}
                   >
                     {q}
