@@ -83,6 +83,13 @@ android/key.properties
 # ── Local tooling ───────────────────────────────────────────────────────────
 .claude/settings.local.json
 
+# Release bundles. 193MB each, rebuildable from any commit, and git keeps
+# every version of a binary forever.
+duckdownloader.abb
+duckdownloader.aab
+*.aab
+*.abb
+
 # ── Scratch ─────────────────────────────────────────────────────────────────
 # Download-pipeline artefacts written by hand during debugging. Referenced by
 # nothing; 33MB of them were about to be committed.

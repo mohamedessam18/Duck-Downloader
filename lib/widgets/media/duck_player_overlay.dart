@@ -420,6 +420,23 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
   /// Authoritative PiP check, straight from the activity.
   ///
+  /// Whether the window is too small to carry the player's controls.
+  ///
+  /// Deliberately measured rather than asked. `_isInPiP` arrives from the
+  /// platform's pipModeChanged callback, and Android starts resizing the
+  /// window before that callback lands: tapping a PiP window to restore it
+  /// animates from roughly 200dp up to full width, and for those frames the
+  /// flag and the size disagree. Whichever way round they disagree, the full
+  /// control bar gets laid out in a window too narrow to hold it, and the
+  /// overflow stripes appear along the edge.
+  ///
+  /// A width is true the instant it is read, so there is nothing to race.
+  /// 320dp is comfortably above any PiP window and below any phone.
+  static const _controlsMinWidth = 320.0;
+
+  bool _tooSmallForControls(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < _controlsMinWidth;
+
   /// `_isInPiP` comes from the `pipModeChanged` callback, which races the
   /// lifecycle event; losing that race paused the video and started a second
   /// player, leaving a frozen PiP window with sound from somewhere else.
@@ -641,7 +658,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
         value.duration > Duration.zero &&
         value.position >= value.duration;
 
-    if (_isInPiP) {
+    if (_isInPiP || _tooSmallForControls(context)) {
       return SizedBox.expand(
         child: Container(
           color: Colors.black,
@@ -1498,7 +1515,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     final playing = audio.playing;
     final isCompleted = audio.processingState == ProcessingState.completed;
 
-    if (_isInPiP) {
+    if (_isInPiP || _tooSmallForControls(context)) {
       return const SizedBox.shrink();
     }
 

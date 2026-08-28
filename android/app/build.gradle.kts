@@ -34,7 +34,15 @@ android {
     defaultConfig {
         applicationId = "com.duck.downloader"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+        // Android 16. Play requires the target to stay within a year of the
+        // latest release, and from 31 August 2026 an app below that cannot be
+        // updated at all. compileSdk is already 36 by way of Flutter, so this
+        // is the declaration catching up with what the app is built against.
+        //
+        // The behaviour this opts into is edge-to-edge, which the app already
+        // requests explicitly in main.dart, and predictive back, which is
+        // opt-in and not enabled here.
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         manifestPlaceholders["adMobAppId"] =

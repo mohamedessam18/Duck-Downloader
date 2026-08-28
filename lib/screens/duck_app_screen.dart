@@ -1106,6 +1106,9 @@ class _PremiumSheet extends StatelessWidget {
           SubscriptionPlan.monthly,
         );
         final yearly = controller.subscriptionProduct(SubscriptionPlan.yearly);
+        final lifetime = controller.subscriptionProduct(
+          SubscriptionPlan.lifetime,
+        );
         final busy = controller.premiumBusy;
         final active = controller.isPremiumActive;
         return Padding(
@@ -1210,6 +1213,22 @@ class _PremiumSheet extends StatelessWidget {
                         SubscriptionPlan.yearly,
                       ),
                     ),
+                    // Only rendered once the store actually returns it, so the
+                    // sheet does not advertise a product that is still a draft
+                    // in Play. The two above are unconditional because the app
+                    // has always had them.
+                    if (lifetime != null) ...[
+                      const SizedBox(height: 10),
+                      _SubscriptionButton(
+                        label: 'Buy once, keep forever',
+                        price: lifetime.localizedPrice,
+                        loading: busy,
+                        enabled: !busy,
+                        onPressed: () => controller.subscribeToPremium(
+                          SubscriptionPlan.lifetime,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,

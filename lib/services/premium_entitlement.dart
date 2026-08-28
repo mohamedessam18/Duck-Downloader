@@ -2,17 +2,37 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 
 const monthlyPremiumProductId = 'duck_pro_monthly';
 const yearlyPremiumProductId = 'duck_pro_yearly';
-const premiumProductIds = <String>{
+
+/// Bought once, kept forever.
+///
+/// A one-time product in Play, not a subscription, which is the distinction
+/// the rest of this file exists to keep straight. Everything about renewal,
+/// expiry and grace windows applies to the two above and to none of this one.
+const lifetimePremiumProductId = 'duck_pro_lifetime';
+
+/// The two that renew, and so the two that can lapse.
+const subscriptionProductIds = <String>{
   monthlyPremiumProductId,
   yearlyPremiumProductId,
 };
 
-enum SubscriptionPlan { monthly, yearly }
+/// Everything the store is asked about, and everything that grants premium.
+const premiumProductIds = <String>{
+  ...subscriptionProductIds,
+  lifetimePremiumProductId,
+};
+
+/// True when this product renews and can therefore stop being valid.
+bool isRecurringProduct(String productId) =>
+    subscriptionProductIds.contains(productId);
+
+enum SubscriptionPlan { monthly, yearly, lifetime }
 
 extension SubscriptionPlanStoreId on SubscriptionPlan {
   String get productId => switch (this) {
     SubscriptionPlan.monthly => monthlyPremiumProductId,
     SubscriptionPlan.yearly => yearlyPremiumProductId,
+    SubscriptionPlan.lifetime => lifetimePremiumProductId,
   };
 }
 

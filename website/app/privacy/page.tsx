@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 };
 
 /// Google Play requires a publicly reachable privacy policy URL for the store
-/// listing, and it must stay reachable for as long as the app is published —
+/// listing, and it must stay reachable for as long as the app is published,
 /// so this lives in the site rather than only as a dialog inside the app.
 const LAST_UPDATED = "July 19, 2026";
 

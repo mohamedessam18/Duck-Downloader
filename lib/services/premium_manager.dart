@@ -49,6 +49,21 @@ class PremiumManager extends ChangeNotifier {
       },
     );
     await refresh();
+
+    // Ask the store what it still holds. Restored purchases arrive on the
+    // stream above and run through verifyAndSave, which stamps a fresh
+    // timestamp and so re-opens the grace window for anyone still subscribed.
+    //
+    // Without this the window only ever counts down: a paying user would be
+    // dropped to free after a week, and someone whose subscription lapsed
+    // would keep premium until the same week ran out. Silent because it is
+    // background housekeeping, not something the user asked for.
+    unawaited(
+      _subscriptions.restorePurchases().catchError((Object error) {
+        // Offline is the ordinary case here. The grace window exists for it.
+        debugPrint('Silent entitlement refresh failed: $error');
+      }),
+    );
   }
 
   Future<void> refresh() async {

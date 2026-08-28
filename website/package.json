@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "tsc app/lib/search.ts app/lib/knowledge.ts --outDir .build-test --module esnext --target es2022 --moduleResolution bundler && sed -i '' 's#from \"./knowledge\"#from \"./knowledge.js\"#' .build-test/search.js && echo '{\"type\":\"module\"}' > .build-test/package.json && node --test \"tests/**/*.test.mjs\""
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
