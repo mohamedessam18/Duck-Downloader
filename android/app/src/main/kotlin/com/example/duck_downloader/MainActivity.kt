@@ -93,26 +93,20 @@ class MainActivity : AudioServiceFragmentActivity() {
                 addAction(Intent.ACTION_USER_PRESENT)
             },
         )
-        handleIntent(intent)
     }
 
+    /**
+     * A share arriving while the app is already running.
+     *
+     * `setIntent` has to happen before `super`: the share plugin reads
+     * `getIntent()` when it is notified, and doing it the other way round left
+     * it looking at the intent from the previous launch. This override used to
+     * call `setIntent` and stop there, so a link shared into a running app did
+     * nothing at all — no sheet, no download, no error.
+     */
     override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
         setIntent(intent)
-    }
-
-    private fun handleIntent(intent: Intent?) {
-        val isQuickShare = intent?.getBooleanExtra("quickShare", false) ?: false
-        val startDownload = intent?.getBooleanExtra("startDownloadDirectly", false) ?: false
-        val url = intent?.getStringExtra("quickShareUrl") ?: intent?.getStringExtra(Intent.EXTRA_TEXT)
-        val downloadType = intent?.getStringExtra("downloadType") ?: "video"
-
-        if (startDownload && !url.isNullOrEmpty()) {
-            methodChannel?.invokeMethod("startDirectQuickDownload", mapOf(
-                "url" to url,
-                "type" to downloadType
-            ))
-        }
+        super.onNewIntent(intent)
     }
 
     override fun provideFlutterEngine(context: Context): FlutterEngine? {
@@ -123,10 +117,55 @@ class MainActivity : AudioServiceFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         methodChannel = channel
-        handleIntent(intent)
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
+                    // Keeps the native side pointed at the same backend the
+                    // Dart side resolved, including a --dart-define override.
+                    // Without this the share sheet would talk to whatever URL
+                    // was compiled into DuckShareApi months ago.
+                    // Dart's own downloads run in the Flutter isolate, which
+                    // Android freezes once the app is backgrounded. The service
+                    // keeps the process — and therefore those transfers — alive.
+                    "keepDownloadsAlive" -> {
+                        val intent = Intent(this, DownloadService::class.java).apply {
+                            action = DownloadService.ACTION_KEEP_ALIVE
+                            putExtra("title", call.argument<String>("title"))
+                            putExtra("percent", call.argument<Int>("percent") ?: 0)
+                            putExtra("running", call.argument<Int>("running") ?: 1)
+                            putExtra("total", call.argument<Int>("total") ?: 1)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    }
+                    "releaseDownloadsAlive" -> {
+                        startService(
+                            Intent(this, DownloadService::class.java)
+                                .setAction(DownloadService.ACTION_STOP_KEEP_ALIVE)
+                        )
+                        result.success(true)
+                    }
+                    "syncShareConfig" -> {
+                        val baseUrl = call.argument<String>("apiBaseUrl")
+                        getSharedPreferences(DuckShareApi.PREFS, Context.MODE_PRIVATE)
+                            .edit()
+                            .putString("apiBaseUrl", baseUrl)
+                            .apply()
+                        result.success(true)
+                    }
+                    // Hands over everything DownloadService finished while the
+                    // app was closed, and clears it in the same breath so a
+                    // download cannot be added to the library twice.
+                    "drainShareInbox" -> {
+                        val prefs = getSharedPreferences(DuckShareApi.PREFS, Context.MODE_PRIVATE)
+                        val payload = prefs.getString(DownloadService.INBOX_KEY, "[]") ?: "[]"
+                        prefs.edit().remove(DownloadService.INBOX_KEY).apply()
+                        result.success(payload)
+                    }
                     "saveVideo", "saveAudioToMusic" -> {
                         val path = call.argument<String>("path")
                         val filename = call.argument<String>("filename")
@@ -426,129 +465,25 @@ class MainActivity : AudioServiceFragmentActivity() {
         filename: String,
         mimeType: String,
         video: Boolean,
-    ): Map<String, Any?> {
-        val source = File(sourcePath)
-        require(source.exists()) { "Downloaded file is not available." }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveMediaStoreQ(source, filename, mimeType, video)
-        } else {
-            saveLegacy(source, filename, mimeType, video)
-        }
-    }
-
-    private fun saveMediaStoreQ(
-        source: File,
-        filename: String,
-        mimeType: String,
-        video: Boolean,
-    ): Map<String, Any?> {
-        val collection = if (video) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        } else {
-            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        }
-        val relativePath = if (video) {
-            Environment.DIRECTORY_MOVIES + "/Duck Downloader"
-        } else {
-            Environment.DIRECTORY_MUSIC + "/Duck Downloader"
-        }
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
-        }
-        val resolver = applicationContext.contentResolver
-        val uri = resolver.insert(collection, values)
-            ?: throw IllegalStateException("Could not create media library item.")
-        resolver.openOutputStream(uri)?.use { output ->
-            FileInputStream(source).use { input -> input.copyTo(output) }
-        } ?: throw IllegalStateException("Could not open media library item.")
-        values.clear()
-        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-        resolver.update(uri, values, null, null)
-        return mapOf("success" to true, "uri" to uri.toString())
-    }
-
-    private fun saveLegacy(
-        source: File,
-        filename: String,
-        mimeType: String,
-        video: Boolean,
-    ): Map<String, Any?> {
-        val directory = Environment.getExternalStoragePublicDirectory(
-            if (video) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC,
-        ).resolve("Duck Downloader")
-        directory.mkdirs()
-        val target = directory.resolve(filename)
-        source.copyTo(target, overwrite = true)
-        MediaScannerConnection.scanFile(
-            applicationContext,
-            arrayOf(target.absolutePath),
-            arrayOf(mimeType),
-            null,
-        )
-        return mapOf("success" to true, "uri" to Uri.fromFile(target).toString())
-    }
+    ): Map<String, Any?> = MediaSaver.save(
+        this,
+        sourcePath,
+        filename,
+        mimeType,
+        if (video) MediaSaver.Kind.VIDEO else MediaSaver.Kind.AUDIO,
+    )
 
     private fun saveImageMedia(
         sourcePath: String,
         filename: String,
         mimeType: String,
-    ): Map<String, Any?> {
-        val source = File(sourcePath)
-        require(source.exists()) { "Downloaded file is not available." }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveMediaStoreImageQ(source, filename, mimeType)
-        } else {
-            saveLegacyImage(source, filename, mimeType)
-        }
-    }
-
-    private fun saveMediaStoreImageQ(
-        source: File,
-        filename: String,
-        mimeType: String,
-    ): Map<String, Any?> {
-        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val relativePath = Environment.DIRECTORY_PICTURES + "/Duck Downloader"
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
-        }
-        val resolver = applicationContext.contentResolver
-        val uri = resolver.insert(collection, values)
-            ?: throw IllegalStateException("Could not create media library item.")
-        resolver.openOutputStream(uri)?.use { output ->
-            FileInputStream(source).use { input -> input.copyTo(output) }
-        } ?: throw IllegalStateException("Could not open media library item.")
-        values.clear()
-        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-        resolver.update(uri, values, null, null)
-        return mapOf("success" to true, "uri" to uri.toString())
-    }
-
-    private fun saveLegacyImage(
-        source: File,
-        filename: String,
-        mimeType: String,
-    ): Map<String, Any?> {
-        val directory = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_PICTURES
-        ).resolve("Duck Downloader")
-        directory.mkdirs()
-        val target = directory.resolve(filename)
-        source.copyTo(target, overwrite = true)
-        MediaScannerConnection.scanFile(
-            applicationContext,
-            arrayOf(target.absolutePath),
-            arrayOf(mimeType),
-            null,
-        )
-        return mapOf("success" to true, "uri" to Uri.fromFile(target).toString())
-    }
+    ): Map<String, Any?> = MediaSaver.save(
+        this,
+        sourcePath,
+        filename,
+        mimeType,
+        MediaSaver.Kind.IMAGE,
+    )
 
     private fun setSystemRingtone(file: File, title: String): Boolean {
         return try {

@@ -352,7 +352,26 @@ class VaultEncryptionService {
     } catch (_) {}
   }
 
+  /// The tail of the chain of in-flight index writes.
+  ///
+  /// The write below is atomic against a crash, not against itself: every call
+  /// uses the same `.partial` and `.backup` paths. Two overlapping calls have
+  /// both moved the real index to `.backup` before either has renamed its
+  /// `.partial` into place — and the loser deletes the backup on its way out.
+  /// That is the vault index gone, which is every private download gone with
+  /// it. Nothing overlapped while downloads ran one at a time.
+  static Future<void> _indexWrites = Future<void>.value();
+
   static Future<void> writePrivateDownloadIndex(
+    List<Map<String, dynamic>> entries,
+  ) {
+    final result = _indexWrites.then((_) => _writeIndexNow(entries));
+    // A failed write must not wedge every later one behind it.
+    _indexWrites = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  static Future<void> _writeIndexNow(
     List<Map<String, dynamic>> entries,
   ) async {
     final key = _requireSessionKey();

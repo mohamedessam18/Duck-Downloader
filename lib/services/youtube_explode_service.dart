@@ -243,7 +243,17 @@ class YouTubeExplodeService {
     }
 
     onTranscoding?.call();
-    final lowestMuxed = manifest.muxed.sortByVideoQuality().last;
+    // `.last` on an empty list throws StateError, and YouTube now serves many
+    // videos with no muxed streams at all — so the fallback for a failed
+    // audio-only download was itself a crash rather than an error the caller
+    // could report.
+    final sortedMuxed = manifest.muxed.sortByVideoQuality();
+    if (sortedMuxed.isEmpty) {
+      throw Exception(
+        'YouTube did not offer a downloadable audio stream for this video.',
+      );
+    }
+    final lowestMuxed = sortedMuxed.last;
     final muxedPath = await _getUniqueFilePath(folder.path, '${safeTitle}_muxed.mp4');
     await _downloadStreamWithTimeout(
       streamUrl: lowestMuxed.url.toString(),
@@ -314,7 +324,11 @@ class YouTubeExplodeService {
       selectedVideoOnly = sortedVideoOnly.last; // highest available
     }
 
-    if (selectedVideoOnly != null) {
+    // The audio check belongs in the condition, not inside the branch: a
+    // video-only stream with no audio track to merge used to throw StateError
+    // out of `withHighestBitrate()` instead of falling through to the muxed
+    // fallback sitting right below, which would have worked.
+    if (selectedVideoOnly != null && manifest.audioOnly.isNotEmpty) {
       final bestAudio = manifest.audioOnly.withHighestBitrate();
       final tempVideoPath = await _getUniqueFilePath(folder.path, '${safeTitle}_temp_v.mp4');
       final tempAudioPath = await _getUniqueFilePath(folder.path, '${safeTitle}_temp_a.m4a');

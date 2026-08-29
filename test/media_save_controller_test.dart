@@ -46,6 +46,21 @@ class FakeMediaSaveService extends MediaSaveService {
   }
 }
 
+/// Waits for the download queue to finish handing work to the backend.
+///
+/// `startBatchDownload` used to call `/api/download` for every item before it
+/// returned. It now returns once they are queued, and the queue starts three
+/// at a time, so a test that asserts immediately sees only the first three.
+Future<void> _drainDownloadQueue(DuckDownloadsController controller) async {
+  for (var attempt = 0; attempt < 200; attempt++) {
+    if (controller.queuedDownloadCount == 0 &&
+        controller.runningDownloadCount == 0) {
+      return;
+    }
+    await pumpEventQueue(times: 5);
+  }
+}
+
 class FakeBatchApiClient extends DuckApiClient {
   FakeBatchApiClient({this.failUrls = const {}})
     : super(apiBaseUrl: 'https://api.test');
@@ -406,6 +421,12 @@ void main() {
         type: DownloadType.image,
         quality: 'Best',
       );
+      // The summary describes what the call did, and the call queues. Read it
+      // before draining: once jobs start finishing, `status` moves on to
+      // whatever happened last.
+      expect(controller.status, '2 images queued');
+
+      await _drainDownloadQueue(controller);
 
       expect(api.startedUrls, [
         'https://cdninstagram.com/full-1.jpg',
@@ -423,7 +444,6 @@ void main() {
         downloads.every((item) => item.type == DownloadType.image),
         isTrue,
       );
-      expect(controller.status, 'Started 2 images');
     },
   );
 
@@ -453,13 +473,25 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
+    // Both were accepted: nothing has been sent to the backend yet, so a
+    // link that will be rejected cannot be known about here.
+    expect(controller.status, '2 images queued');
 
+    await _drainDownloadQueue(controller);
+
+    // Only the good one reached the backend, and the rejected one is a failed
+    // row the user can retry rather than an item that silently disappeared.
     expect(api.startedUrls, ['https://cdninstagram.com/full-1.jpg']);
+    final byUrl = {
+      for (final item in controller.downloads) item.url: item,
+    };
+    expect(byUrl.keys, containsAll(<String>['https://cdninstagram.com/full-1.jpg']));
     expect(
-      controller.downloads.single.url,
-      'https://cdninstagram.com/full-1.jpg',
+      controller.downloads
+          .where((item) => item.status == DownloadStatus.failed)
+          .length,
+      greaterThanOrEqualTo(1),
     );
-    expect(controller.status, 'Started 1 images, 1 failed');
   });
 
   test(
@@ -493,6 +525,7 @@ void main() {
         quality: 'Best',
         forceHybrid: true,
       );
+      await _drainDownloadQueue(controller);
 
       expect(api.startedDownloads, hasLength(2));
       expect(
@@ -533,10 +566,11 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
+    await _drainDownloadQueue(controller);
 
     expect(api.startedUrls, isEmpty);
     expect(controller.downloads, isEmpty);
-    expect(controller.status, 'Failed to start 1 images');
+    expect(controller.status, '1 images could not start');
     expect(controller.flow, DuckFlow.error);
   });
 
@@ -633,6 +667,7 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
+    await _drainDownloadQueue(controller);
 
     expect(api.startedUrls, [
       'https://scontent.cdninstagram.com/full-0.jpg',

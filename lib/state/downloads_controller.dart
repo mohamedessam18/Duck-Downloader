@@ -10,7 +10,6 @@ import 'package:just_audio_background/just_audio_background.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../constants/asset_paths.dart';
-import '../core/duck_media_channel.dart';
 import '../core/haptics.dart';
 import '../services/camera_service.dart';
 import '../core/notifications/notification_service.dart';
@@ -28,7 +27,9 @@ import '../services/premium_entitlement.dart';
 import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
 import '../services/trim_service.dart';
+import '../services/share_bridge.dart';
 import '../services/youtube_explode_service.dart';
+import 'duck_status.dart';
 import '../services/vault_encryption_service.dart';
 import '../services/conversion_service.dart';
 import '../services/cobalt_service.dart';
@@ -36,6 +37,30 @@ import '../services/reddit_service.dart';
 import '../services/device_media_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+
+/// What the adult-content check was able to establish.
+///
+/// A plain bool could not tell "this link is fine" apart from "nothing
+/// answered", and the two were treated identically — so a Reddit post whose
+/// NSFW flag could not be read was downloaded as though it had come back
+/// clean.
+enum _AdultVerdict {
+  allowed,
+  blocked,
+
+  /// The one authoritative source for this link did not answer.
+  unverified,
+}
+
+/// One download that has a row in the library but has not reached the backend.
+class _PendingDownload {
+  _PendingDownload({required this.placeholderId, required this.begin});
+
+  final String placeholderId;
+
+  /// Returns the backend's download id. Not called until a slot frees up.
+  final Future<String> Function() begin;
+}
 
 class DuckDownloadsController extends ChangeNotifier
     with WidgetsBindingObserver {
@@ -69,6 +94,11 @@ class DuckDownloadsController extends ChangeNotifier
       _privateMetadata[item.id] = item;
     }
     _videoResumePositions = _store.readVideoResumePositions();
+    // Every other preference survives a restart — quality, type, where a video
+    // was paused. These two were the exception, so turning shuffle on and
+    // reopening the app silently turned it back off.
+    shuffleEnabled = _store.readShuffleEnabled();
+    _loopMode = _readStoredLoopMode(_store.readPlaybackLoopMode());
     autoSaveVideos = _store.readAutoSaveVideos();
     enableClipboardDetection = _store.readEnableClipboardDetection();
     crashReportingEnabled = _store.readCrashReportingEnabled();
@@ -88,6 +118,11 @@ class DuckDownloadsController extends ChangeNotifier
     if (initializePlatformServices) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_initializePlatformServices());
+        // Point the native share sheet at the same backend this build
+        // resolved, then collect anything it finished while Duck was closed.
+        unawaited(_shareBridge.syncConfig(apiBaseUrl: _api.apiBaseUrl));
+        unawaited(_drainShareInbox());
+        unawaited(_recoverInterruptedDownloads());
       });
     }
     unawaited(_configureAudioSession());
@@ -160,9 +195,26 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
+  /// Takes a track out of the queue, including the one playing.
+  ///
+  /// Removing the current track used to be refused outright — the row simply
+  /// did not respond, with nothing to say why. Skipping to the next one is
+  /// what the user asked for, so do that and then remove it.
   void removeFromQueue(int index) {
+    if (index < 0 || index >= _audioQueue.length) return;
     if (_audioQueue.length <= 1) return;
-    if (index == _audioQueueIndex) return; // Can't remove currently playing
+
+    if (index == _audioQueueIndex) {
+      final next = _audioQueue[(index + 1) % _audioQueue.length];
+      _audioQueue.removeAt(index);
+      // The list shrank under the index; wrapping past the end means starting
+      // over at the top.
+      _audioQueueIndex = index >= _audioQueue.length ? 0 : index;
+      unawaited(playItem(next, advanceQueue: true));
+      notifyListeners();
+      return;
+    }
+
     _audioQueue.removeAt(index);
     if (index < _audioQueueIndex) _audioQueueIndex--;
     notifyListeners();
@@ -254,7 +306,24 @@ class DuckDownloadsController extends ChangeNotifier
 
   DuckFlow flow = DuckFlow.idle;
   DuckTab tab = DuckTab.home;
-  String status = 'Tap the duck';
+  DuckStatus _status = const DuckStatus.key('statusTapDuck');
+
+  /// The status line as a translation key, for whatever is displaying it.
+  DuckStatus get statusMessage => _status;
+
+  /// The same line in English.
+  ///
+  /// Kept as a plain `String` because a lot of code — and every test — reads
+  /// it that way, and because the one remaining piece of UI that has to
+  /// recognise a specific message needs something stable to match on.
+  String get status => _status.english;
+
+  set status(String value) => _status = DuckStatus.literal(value);
+
+  /// Sets the status from a translation key rather than a finished sentence.
+  void setStatus(String key, [Map<String, String> args = const {}]) {
+    _status = DuckStatus.key(key, args: args);
+  }
   MediaMetadata? metadata;
   List<PlaylistItem>? batchItems;
   String? batchTitle;
@@ -290,6 +359,343 @@ class DuckDownloadsController extends ChangeNotifier
     _downloadSubscriptions.remove(id);
   }
 
+  /// A download is over — for any reason — so its slot goes back to the queue.
+  ///
+  /// Separate from [_cancelDownloadSubscription] because that is also called
+  /// at the top of [_watchDownload] to clear a previous socket for the same
+  /// id. Folding the two together meant every download handed its slot back
+  /// the instant it started watching itself, so the concurrency cap held
+  /// nothing back at all.
+  void _finishDownload(String id) {
+    _cancelDownloadSubscription(id);
+    _releaseDownloadSlot(id);
+  }
+
+  // ── The download queue ────────────────────────────────────────────────────
+
+  /// How many downloads run at once without Premium.
+  ///
+  /// There was no queue at all before this. `DownloadStatus.queued` existed as
+  /// a label but nothing enforced it: every call site created an item and
+  /// immediately hit `/api/download`, so sharing a 40-video playlist opened 40
+  /// simultaneous jobs — 40 backend workers, 40 sockets, and a phone dividing
+  /// its bandwidth 40 ways so that nothing finished for a very long time.
+  ///
+  /// Three is where mainstream downloaders land: fast enough that a playlist
+  /// moves, few enough that each stream gets real bandwidth.
+  static const freeConcurrentDownloads = 3;
+
+  /// The same, with Premium.
+  ///
+  /// Five rather than three is the whole of "Faster Downloads" on the paywall.
+  /// Deliberately a modest step: the phone and the backend are shared with
+  /// everyone else, and a number high enough to feel dramatic in a demo is
+  /// high enough to make every individual download slower on real signal.
+  static const premiumConcurrentDownloads = 5;
+
+  /// The cap in force right now.
+  ///
+  /// Read on every pump rather than cached, so buying Premium with a queue
+  /// already backed up starts the extra downloads immediately instead of at
+  /// the next launch.
+  int get maxConcurrentDownloads =>
+      premium.hasFeature(PremiumFeature.fasterProcessing)
+      ? premiumConcurrentDownloads
+      : freeConcurrentDownloads;
+
+  /// Downloads waiting for a slot, oldest first.
+  final List<_PendingDownload> _pendingDownloads = [];
+
+  /// Ids currently holding a slot. A set, not a counter, so releasing the same
+  /// download twice cannot hand out a slot that was never taken.
+  final Set<String> _runningDownloads = {};
+
+  int _localIdCounter = 0;
+
+  /// An id for a row that exists before the backend has been told anything.
+  ///
+  /// Prefixed so it is obvious in storage that this is not a backend id, and
+  /// counted as well as timestamped because a batch loop creates several
+  /// within the same microsecond.
+  String _newLocalDownloadId() =>
+      'local_${DateTime.now().microsecondsSinceEpoch}_${_localIdCounter++}';
+
+  final ShareBridge _shareBridge = ShareBridge();
+
+  // ── Surviving the background ──────────────────────────────────────────────
+
+  DateTime? _lastKeepAlivePush;
+  bool _keepAliveHeld = false;
+
+  /// How often the notification's numbers are refreshed while downloading.
+  ///
+  /// Progress arrives per network chunk; a platform call per chunk would cost
+  /// far more than the one-second staleness it buys.
+  static const _keepAliveRefresh = Duration(seconds: 1);
+
+  /// Asks the native service to keep this process alive while work is running.
+  ///
+  /// Without this an in-app download dies the moment the user switches to
+  /// WhatsApp: Android freezes the Flutter isolate and takes every open socket
+  /// with it. The service holds the process up; Dart still does the
+  /// downloading.
+  void _syncKeepAlive() {
+    final active = activeDownloads;
+    final busyNow = active.isNotEmpty || _pendingDownloads.isNotEmpty;
+
+    if (!busyNow) {
+      if (!_keepAliveHeld) return;
+      _keepAliveHeld = false;
+      _lastKeepAlivePush = null;
+      unawaited(_shareBridge.releaseKeepAlive());
+      return;
+    }
+
+    final now = DateTime.now();
+    final due = _lastKeepAlivePush == null ||
+        now.difference(_lastKeepAlivePush!) >= _keepAliveRefresh;
+    // A transition into "busy" is never throttled: the service has to be up
+    // before the user has a chance to leave.
+    if (_keepAliveHeld && !due) return;
+    _lastKeepAlivePush = now;
+    _keepAliveHeld = true;
+
+    final total = active.length + _pendingDownloads.length;
+    final head = active.firstOrNull;
+    final percent = active.isEmpty
+        ? 0
+        : (active.map((item) => item.progress).reduce((a, b) => a + b) /
+                  active.length)
+              .round()
+              .clamp(0, 100);
+    unawaited(
+      _shareBridge.holdKeepAlive(
+        title: head?.title ?? 'Duck Downloader',
+        percent: percent,
+        running: active.length,
+        total: total,
+      ),
+    );
+  }
+
+  /// How long an unfinished download is still worth reconnecting to.
+  ///
+  /// The backend keeps a job and its file for a while, not forever. Past this
+  /// the socket would open onto nothing and report a failure that reads like a
+  /// fresh error for something that went wrong yesterday.
+  static const _resumeWindow = Duration(hours: 2);
+
+  /// Deals with downloads the app was killed in the middle of.
+  ///
+  /// Nothing used to: an item left `downloading` when the process died stayed
+  /// `downloading` forever, with no socket behind it and no way for the user
+  /// to retry it — a progress bar frozen at 40% that outlived reboots.
+  ///
+  /// Recent server-side jobs get their socket back, because the backend has
+  /// most likely carried on without us. Everything else is marked failed so it
+  /// can be retried instead of sitting there lying.
+  Future<void> _recoverInterruptedDownloads() async {
+    final now = DateTime.now();
+    final interrupted = _downloads
+        .where(
+          (item) =>
+              item.status == DownloadStatus.queued ||
+              item.status == DownloadStatus.downloading ||
+              item.status == DownloadStatus.processing,
+        )
+        .toList();
+
+    for (final item in interrupted) {
+      // A local id means the queue never got as far as telling the backend
+      // about it, so there is nothing on the other end to reconnect to.
+      final reachedBackend = !item.id.startsWith('local_');
+      final recent = now.difference(item.createdAt) < _resumeWindow;
+
+      if (reachedBackend && recent) {
+        _runningDownloads.add(item.id);
+        _watchDownload(item.id, item);
+        continue;
+      }
+      try {
+        await _saveItem(item.copyWith(status: DownloadStatus.failed));
+      } catch (error, stackTrace) {
+        // A private item whose vault is still locked. It will be picked up
+        // the next time the vault opens rather than blocking startup.
+        reportError(error, stackTrace, reason: 'download-recovery');
+      }
+    }
+    _pumpDownloadQueue();
+  }
+
+  /// Folds in downloads the native share service finished while Duck was shut.
+  ///
+  /// Runs at launch and on every resume: the user shares a link from Facebook,
+  /// never opens Duck, and the file has to be waiting in the library the next
+  /// time they do.
+  Future<void> _drainShareInbox() async {
+    try {
+      final finished = await _shareBridge.drain();
+      if (finished.isEmpty) return;
+      for (final item in finished) {
+        // A share can only ever be a normal download; nothing outside the app
+        // can write to the vault, which needs a key that lives behind the PIN.
+        await _store.upsert(item);
+      }
+      _downloads = _store.readDownloads();
+      _mergePrivateMetadata();
+      notifyListeners();
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'share-inbox-drain');
+    }
+  }
+
+  int get queuedDownloadCount => _pendingDownloads.length;
+  int get runningDownloadCount => _runningDownloads.length;
+
+  /// Puts a download in the library immediately and starts it when there is
+  /// room.
+  ///
+  /// [placeholder] is a real row the user can see and cancel while it waits.
+  /// [begin] is the call that actually reaches the backend; it is not made
+  /// until this download's turn, which is the entire point — a queued item
+  /// must not occupy a backend worker.
+  ///
+  /// The backend hands back its own id, so when the job finally starts the
+  /// placeholder is replaced by a row keyed on that id.
+  Future<void> _enqueueDownload({
+    required DownloadItem placeholder,
+    required Future<String> Function() begin,
+  }) async {
+    await _saveItem(placeholder);
+    _pendingDownloads.add(
+      _PendingDownload(placeholderId: placeholder.id, begin: begin),
+    );
+    _pumpDownloadQueue();
+  }
+
+  bool _pumping = false;
+  bool _pumpAgain = false;
+  bool _disposed = false;
+
+  void _pumpDownloadQueue() {
+    // Nothing may start after the controller is gone: its storage is closed
+    // and its listeners are detached, so a job that begins here writes into a
+    // box nobody owns any more.
+    if (_disposed) return;
+    // A download can finish synchronously inside the loop below — a cached
+    // file, a fake API in a test — which lands straight back here and starts
+    // taking items off a list the outer loop is still walking. That reordered
+    // the queue and dropped entries. Nested calls now just ask for another
+    // pass once the current one is done.
+    if (_pumping) {
+      _pumpAgain = true;
+      return;
+    }
+    _pumping = true;
+    try {
+      do {
+        _pumpAgain = false;
+        _drainPendingDownloads();
+      } while (_pumpAgain);
+    } finally {
+      _pumping = false;
+    }
+    _syncKeepAlive();
+    notifyListeners();
+  }
+
+  void _drainPendingDownloads() {
+    while (_runningDownloads.length < maxConcurrentDownloads &&
+        _pendingDownloads.isNotEmpty) {
+      final pending = _pendingDownloads.removeAt(0);
+      final placeholder = _downloads
+          .where((item) => item.id == pending.placeholderId)
+          .firstOrNull;
+      // Cancelled or deleted while it sat in the queue. Nothing to start, and
+      // no slot to take.
+      if (placeholder == null ||
+          placeholder.status != DownloadStatus.queued) {
+        continue;
+      }
+      _runningDownloads.add(pending.placeholderId);
+      unawaited(_startPending(pending, placeholder));
+    }
+  }
+
+  Future<void> _startPending(
+    _PendingDownload pending,
+    DownloadItem placeholder,
+  ) async {
+    // Which id is actually holding the slot right now. It changes halfway
+    // through, and releasing the one that is no longer held leaks a slot —
+    // three of those and the queue stops starting anything for the rest of
+    // the session.
+    var heldId = pending.placeholderId;
+    var failedItem = placeholder;
+    try {
+      final backendId = await pending.begin();
+      if (_disposed) return;
+
+      // The placeholder's id was ours; the real one is the backend's, and the
+      // rest of the controller keys everything on it. Swap the row rather than
+      // carry two ids around.
+      final started = DownloadItem.fromJson({
+        ...placeholder.toJson(),
+        'id': backendId,
+        'status': DownloadStatus.downloading.name,
+      });
+      _runningDownloads.remove(heldId);
+      _runningDownloads.add(backendId);
+      heldId = backendId;
+      failedItem = started;
+      if (backendId != placeholder.id) {
+        _privateMetadata.remove(placeholder.id);
+        await _store.delete(placeholder.id);
+        // The in-memory list still holds the placeholder, and _saveItem
+        // rewrites the whole list from it — which would put the row straight
+        // back, leaving every download in the library twice.
+        _downloads = _store.readDownloads();
+      }
+      await _saveItem(started);
+      activeId = backendId;
+      // From here the slot belongs to the watcher, which releases it on the
+      // first terminal update.
+      _watchDownload(backendId, started);
+    } catch (error) {
+      flow = DuckFlow.error;
+      _status = _errorStatus(error);
+      try {
+        await _saveItem(failedItem.copyWith(status: DownloadStatus.failed));
+      } catch (saveError, stackTrace) {
+        reportError(saveError, stackTrace, reason: 'queue-start-failure');
+      }
+      _releaseDownloadSlot(heldId);
+    }
+    notifyListeners();
+  }
+
+  void _releaseDownloadSlot(String id) {
+    if (_runningDownloads.remove(id)) {
+      _pumpDownloadQueue();
+    }
+  }
+
+  /// Drops everything still waiting for a slot.
+  ///
+  /// The running downloads are left alone: they are already costing bandwidth
+  /// and are the ones nearest to being useful.
+  Future<void> clearDownloadQueue() async {
+    final waiting = List.of(_pendingDownloads);
+    _pendingDownloads.clear();
+    for (final pending in waiting) {
+      _privateMetadata.remove(pending.placeholderId);
+      await _store.delete(pending.placeholderId);
+    }
+    _downloads = _store.readDownloads();
+    _mergePrivateMetadata();
+    notifyListeners();
+  }
+
   bool removeMusic = false;
 
   void toggleRemoveMusic(bool value) {
@@ -305,7 +711,7 @@ class DuckDownloadsController extends ChangeNotifier
   void _requestLockedBrowser(String url, String platform) {
     lockedBrowserRequest = LockedBrowserRequest(url: url, platform: platform);
     flow = DuckFlow.ready;
-    status = 'Open Duck Downloader browser to finish image download';
+    setStatus('statusOpenBrowserForImages');
   }
 
   Future<void> startBrowserImageDownloads({
@@ -319,7 +725,7 @@ class DuckDownloadsController extends ChangeNotifier
     }
     if (items.isEmpty) {
       flow = DuckFlow.error;
-      status = 'Could not find full-size images on this page.';
+      setStatus('statusNoFullSizeImages');
       notifyListeners();
       return;
     }
@@ -343,13 +749,11 @@ class DuckDownloadsController extends ChangeNotifier
     selectedType = DownloadType.image;
     quality = 'Best';
     flow = DuckFlow.ready;
-    status = 'Choose images to download';
+    setStatus('statusChooseImages');
     notifyListeners();
   }
 
   bool get isPremiumActive => premium.isPremium;
-  bool get isMusicPremiumActive =>
-      hasPremiumFeature(PremiumFeature.musicRemoval);
   bool get premiumBusy => premium.loadingProducts || premium.purchasePending;
   bool get premiumStoreAvailable => premium.storeAvailable;
   String get premiumStatus => premium.errorMessage ?? premium.statusMessage;
@@ -364,6 +768,10 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> restorePurchases() => premium.restorePurchases();
 
   void _premiumChanged() {
+    // Buying Premium raises the concurrency cap, and someone who paid while
+    // watching a playlist crawl should see the extra downloads start now, not
+    // after a restart.
+    _pumpDownloadQueue();
     notifyListeners();
   }
 
@@ -710,7 +1118,7 @@ class DuckDownloadsController extends ChangeNotifier
   Future<bool> checkVaultPin(String pin) async {
     if (isVaultLockedOut) {
       final seconds = vaultLockoutRemaining.inSeconds + 1;
-      status = 'Too many attempts. Try again in ${seconds}s.';
+      setStatus('statusTooManyAttempts', {'seconds': '$seconds'});
       notifyListeners();
       return false;
     }
@@ -809,7 +1217,7 @@ class DuckDownloadsController extends ChangeNotifier
   /// encrypted media files themselves are never touched.
   Future<bool> recoverVaultMetadataIndex() async {
     if (!VaultEncryptionService.isUnlocked) {
-      status = 'Unlock the Secure Vault first.';
+      setStatus('statusUnlockVaultFirst');
       notifyListeners();
       return false;
     }
@@ -824,12 +1232,12 @@ class DuckDownloadsController extends ChangeNotifier
         }
       }
       await _persistPrivateMetadata();
-      status = 'Secure Vault index rebuilt';
+      setStatus('statusVaultIndexRebuilt');
       notifyListeners();
       return true;
     } catch (error) {
       _privateMetadataIndexHealthy = false;
-      status = 'Could not rebuild the Vault index: ${_cleanError(error)}';
+      setStatus('statusVaultIndexRebuildFailed', {'error': _cleanError(error)});
       flow = DuckFlow.error;
       notifyListeners();
       return false;
@@ -881,7 +1289,14 @@ class DuckDownloadsController extends ChangeNotifier
         if (item.url.isNotEmpty) item.toJson(),
     ];
     await VaultEncryptionService.writePrivateDownloadIndex(entries);
-    await _store.writeDownloads(_downloads);
+    // Re-apply what is private on top of what is actually stored, rather than
+    // writing this object's copy of the list back over it. The copy goes stale
+    // the moment another download saves, and writing it back took that
+    // download's row with it.
+    _downloads = await _store.rewrite(
+      (stored) => [for (final item in stored) _privateMetadata[item.id] ?? item],
+    );
+    _mergePrivateMetadata();
   }
 
   void _mergePrivateMetadata() {
@@ -975,13 +1390,13 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<bool> moveItemToVault(DownloadItem item) async {
     if (!VaultEncryptionService.isUnlocked) {
-      status = 'Unlock the Secure Vault before moving a file.';
+      setStatus('statusUnlockVaultBeforeMove');
       notifyListeners();
       return false;
     }
     final path = item.filePath;
     if (path == null) {
-      status = 'This file is not available locally.';
+      setStatus('statusFileNotLocal');
       notifyListeners();
       return false;
     }
@@ -1013,11 +1428,11 @@ class DuckDownloadsController extends ChangeNotifier
         notifyListeners();
         return false;
       }
-      status = 'Moved to Secure Vault';
+      setStatus('statusMovedToVault');
       notifyListeners();
       return true;
     } catch (error) {
-      status = 'Could not move file to Secure Vault: ${_cleanError(error)}';
+      setStatus('statusMoveToVaultFailed', {'error': _cleanError(error)});
       flow = DuckFlow.error;
       notifyListeners();
       return false;
@@ -1043,7 +1458,7 @@ class DuckDownloadsController extends ChangeNotifier
     );
     final next = item.copyWith(isPrivate: false, filePath: destPath);
     await _saveItem(next);
-    status = 'Restored from Secure Vault';
+    setStatus('statusRestoredFromVault');
     notifyListeners();
   }
 
@@ -1116,7 +1531,7 @@ class DuckDownloadsController extends ChangeNotifier
 
     busy = true;
     flow = DuckFlow.extracting;
-    status = 'Converting video to audio...';
+    setStatus('statusConvertingToAudio');
     notifyListeners();
 
     String? tempDecryptedPath;
@@ -1160,7 +1575,7 @@ class DuckDownloadsController extends ChangeNotifier
       }
 
       flow = DuckFlow.success;
-      status = 'Conversion complete!';
+      setStatus('statusConversionComplete');
       unawaited(
         _notifications.showDownloadComplete(
           id: audioItem.id.hashCode,
@@ -1194,7 +1609,7 @@ class DuckDownloadsController extends ChangeNotifier
 
     busy = true;
     flow = DuckFlow.extracting;
-    status = 'Creating GIF clip...';
+    setStatus('statusCreatingGif');
     notifyListeners();
 
     String? tempDecryptedPath;
@@ -1239,7 +1654,7 @@ class DuckDownloadsController extends ChangeNotifier
       }
 
       flow = DuckFlow.success;
-      status = 'GIF created successfully!';
+      setStatus('statusGifCreated');
       unawaited(
         _notifications.showDownloadComplete(
           id: gifItem.id.hashCode,
@@ -1266,7 +1681,7 @@ class DuckDownloadsController extends ChangeNotifier
     final item = lastDownloadedItem;
     if (item == null || item.filePath == null) return;
     if (item.isPrivate) {
-      status = 'Private files cannot be shared directly.';
+      setStatus('statusPrivateCannotShare');
       notifyListeners();
       return;
     }
@@ -1285,7 +1700,7 @@ class DuckDownloadsController extends ChangeNotifier
     _playlists.add(p);
     await _store.writePlaylists(_playlists);
     _playlists = _store.readPlaylists();
-    status = 'Playlist "${p.name}" created';
+    setStatus('statusPlaylistCreated', {'name': p.name});
     notifyListeners();
   }
 
@@ -1293,7 +1708,7 @@ class DuckDownloadsController extends ChangeNotifier
     _playlists.removeWhere((p) => p.id == id);
     await _store.writePlaylists(_playlists);
     _playlists = _store.readPlaylists();
-    status = 'Playlist deleted';
+    setStatus('statusPlaylistDeleted');
     notifyListeners();
   }
 
@@ -1310,7 +1725,7 @@ class DuckDownloadsController extends ChangeNotifier
         _playlists[idx] = playlist.copyWith(downloadIds: nextIds);
         await _store.writePlaylists(_playlists);
         _playlists = _store.readPlaylists();
-        status = 'Added to playlist';
+        setStatus('statusAddedToPlaylist');
         notifyListeners();
       }
     }
@@ -1329,7 +1744,7 @@ class DuckDownloadsController extends ChangeNotifier
         _playlists[idx] = playlist.copyWith(downloadIds: nextIds);
         await _store.writePlaylists(_playlists);
         _playlists = _store.readPlaylists();
-        status = 'Removed from playlist';
+        setStatus('statusRemovedFromPlaylist');
         notifyListeners();
       }
     }
@@ -1341,7 +1756,7 @@ class DuckDownloadsController extends ChangeNotifier
     List<DownloadItem>? queueItems,
   }) async {
     if (item.isPrivate && isVaultLocked) {
-      status = 'Unlock the Secure Vault first.';
+      setStatus('statusUnlockVaultFirst');
       notifyListeners();
       return;
     }
@@ -1372,7 +1787,7 @@ class DuckDownloadsController extends ChangeNotifier
           isPrivate: false,
         );
       } catch (error) {
-        status = 'Could not open Vault media: ${_cleanError(error)}';
+        setStatus('statusVaultOpenFailed', {'error': _cleanError(error)});
         flow = DuckFlow.error;
         notifyListeners();
         return;
@@ -1429,11 +1844,14 @@ class DuckDownloadsController extends ChangeNotifier
 
     var cleanUrl = url.trim();
 
-    final isAdult = await _isAdultUrl(cleanUrl);
-    if (isAdult) {
+    final verdict = await _isAdultUrl(cleanUrl);
+    if (verdict == _AdultVerdict.blocked) {
       isAdultContentBlocked = true;
       notifyListeners();
       throw Exception('BLOCKED_ADULT_CONTENT');
+    }
+    if (verdict == _AdultVerdict.unverified) {
+      throw Exception('ADULT_CHECK_UNAVAILABLE');
     }
 
     final hasVideoAndList =
@@ -1461,10 +1879,10 @@ class DuckDownloadsController extends ChangeNotifier
       selectedType = DownloadType.video;
       quality = 'Best';
       flow = DuckFlow.ready;
-      status = 'Choose videos to download';
+      setStatus('statusChooseVideos');
     } else if (isPlaylist) {
       flow = DuckFlow.extracting;
-      status = 'Extracting playlist...';
+      setStatus('statusExtractingPlaylist');
       notifyListeners();
 
       // YouTube playlists: extract on-device via youtube_explode_dart
@@ -1477,7 +1895,7 @@ class DuckDownloadsController extends ChangeNotifier
           selectedType = DownloadType.video;
           quality = 'Best';
           flow = DuckFlow.ready;
-          status = 'Choose videos to download';
+          setStatus('statusChooseVideos');
           return;
         } catch (e) {
           // Don't fall through to backend for YouTube playlists —
@@ -1497,7 +1915,7 @@ class DuckDownloadsController extends ChangeNotifier
       selectedType = DownloadType.video;
       quality = 'Best';
       flow = DuckFlow.ready;
-      status = 'Choose videos to download';
+      setStatus('statusChooseVideos');
     } else {
       if (!_isPublicMediaCandidate(cleanUrl)) {
         throw Exception('Copy a public social media link first.');
@@ -1510,7 +1928,7 @@ class DuckDownloadsController extends ChangeNotifier
       // whatever the server managed to negotiate.
       if (YouTubeExplodeService.isYouTubeUrl(cleanUrl)) {
         flow = DuckFlow.extracting;
-        status = 'Fetching YouTube info...';
+        setStatus('statusFetchingYouTube');
         notifyListeners();
         try {
           final ytMeta = await _ytExplode.extractMetadata(cleanUrl);
@@ -1519,9 +1937,11 @@ class DuckDownloadsController extends ChangeNotifier
             selectedType = _selectDefaultDownloadType(ytMeta, cleanUrl);
             quality = _firstQuality(ytMeta, selectedType);
             flow = DuckFlow.ready;
-            status = selectedType == DownloadType.audio
-                ? 'Choose audio format'
-                : 'Choose video or audio';
+            setStatus(
+              selectedType == DownloadType.audio
+                  ? 'statusChooseAudioFormat'
+                  : 'statusChooseVideoOrAudio',
+            );
             return;
           }
           throw Exception(
@@ -1553,12 +1973,12 @@ class DuckDownloadsController extends ChangeNotifier
               selectedType = DownloadType.video;
               quality = _firstQuality(media, DownloadType.video);
               flow = DuckFlow.ready;
-              status = 'Choose video or audio';
+              setStatus('statusChooseVideoOrAudio');
             } else {
               selectedType = DownloadType.image;
               quality = _firstQuality(media, DownloadType.image);
               flow = DuckFlow.ready;
-              status = 'Tap download to save image';
+              setStatus('statusTapDownloadForImage');
             }
             return;
           }
@@ -1580,7 +2000,7 @@ class DuckDownloadsController extends ChangeNotifier
               selectedType = DownloadType.image;
               quality = 'Best';
               flow = DuckFlow.ready;
-              status = 'Choose images to download';
+              setStatus('statusChooseImages');
             } else {
               // Single image post - download directly as image
               batchTitle = playlist.title;
@@ -1589,7 +2009,7 @@ class DuckDownloadsController extends ChangeNotifier
               selectedType = DownloadType.image;
               quality = 'Best';
               flow = DuckFlow.ready;
-              status = 'Tap download to save image';
+              setStatus('statusTapDownloadForImage');
             }
             return;
           }
@@ -1607,14 +2027,16 @@ class DuckDownloadsController extends ChangeNotifier
           selectedType = DownloadType.image;
           quality = _firstQuality(media, DownloadType.image);
           flow = DuckFlow.ready;
-          status = 'Tap download to save image';
+          setStatus('statusTapDownloadForImage');
         } else {
           selectedType = _selectDefaultDownloadType(media, cleanUrl);
           quality = _firstQuality(media, selectedType);
           flow = DuckFlow.ready;
-          status = selectedType == DownloadType.audio
-              ? 'Choose audio format'
-              : 'Choose video or audio';
+          setStatus(
+            selectedType == DownloadType.audio
+                ? 'statusChooseAudioFormat'
+                : 'statusChooseVideoOrAudio',
+          );
         }
       } catch (error) {
         try {
@@ -1626,7 +2048,7 @@ class DuckDownloadsController extends ChangeNotifier
             selectedType = DownloadType.image;
             quality = 'Best';
             flow = DuckFlow.ready;
-            status = 'Choose images to download';
+            setStatus('statusChooseImages');
           } else {
             rethrow;
           }
@@ -1649,13 +2071,27 @@ class DuckDownloadsController extends ChangeNotifier
     } catch (_) {}
   }
 
+  /// Refuses a second job while one is already running, and says so.
+  ///
+  /// Every one of these guards used to be a bare `return`. The user pasted a
+  /// link, tapped download, or shared something from another app, and nothing
+  /// happened at all — no message, no spinner, no error. A shared link in
+  /// particular simply vanished, which reads as the app being broken rather
+  /// than busy.
+  bool _rejectIfBusy() {
+    if (!busy) return false;
+    setStatus('statusStillBusy');
+    notifyListeners();
+    return true;
+  }
+
   Future<void> pasteAndExtract() async {
-    if (busy) return;
+    if (_rejectIfBusy()) return;
     DuckHaptics.tap();
     unawaited(_playQuack());
     busy = true;
     flow = DuckFlow.extracting;
-    status = 'Checking link...';
+    setStatus('statusCheckingLink');
     metadata = null;
     batchItems = null;
     batchTitle = null;
@@ -1671,7 +2107,7 @@ class DuckDownloadsController extends ChangeNotifier
       await _extractUrlOrBatch(url);
     } catch (error) {
       flow = DuckFlow.error;
-      status = _cleanError(error);
+      _status = _errorStatus(error);
     } finally {
       busy = false;
       notifyListeners();
@@ -1679,11 +2115,11 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   Future<void> extractUrl(String url, {bool fromLockedBrowser = false}) async {
-    if (busy) return;
+    if (_rejectIfBusy()) return;
     busy = true;
     _justReturnedFromLockedBrowser = fromLockedBrowser;
     flow = DuckFlow.extracting;
-    status = 'Checking link...';
+    setStatus('statusCheckingLink');
     metadata = null;
     batchItems = null;
     batchTitle = null;
@@ -1695,7 +2131,7 @@ class DuckDownloadsController extends ChangeNotifier
       await _extractUrlOrBatch(url);
     } catch (error) {
       flow = DuckFlow.error;
-      status = _cleanError(error);
+      _status = _errorStatus(error);
     } finally {
       busy = false;
       _justReturnedFromLockedBrowser = false;
@@ -1708,7 +2144,7 @@ class DuckDownloadsController extends ChangeNotifier
     if (media == null || busy) return;
     busy = true;
     flow = DuckFlow.downloading;
-    status = 'Downloading...';
+    setStatus('statusDownloading');
     metadata = null;
     notifyListeners();
 
@@ -1724,33 +2160,38 @@ class DuckDownloadsController extends ChangeNotifier
         debugPrint('Cobalt extraction failed: $e');
       }
 
-      final id = await _api.startDownload(
-        url: media.url,
-        type: selectedType,
-        quality: quality,
-        removeMusic: removeMusic,
-        premiumNoWatermark: true,
+      final type = selectedType;
+      final chosenQuality = quality;
+      final stripAudio = removeMusic;
+      await _enqueueDownload(
+        placeholder: DownloadItem(
+          id: _newLocalDownloadId(),
+          url: media.url,
+          title: media.title,
+          thumbnail: media.thumbnail,
+          platform: media.platform,
+          quality: chosenQuality,
+          type: type,
+          createdAt: DateTime.now(),
+          status: DownloadStatus.queued,
+          progress: 0,
+          favorite: false,
+          isPrivate: downloadDirectToVault,
+        ),
+        // Captured rather than read at start time: the user is free to change
+        // the type and quality pickers while this waits its turn, and the job
+        // must download what they actually asked for.
+        begin: () => _api.startDownload(
+          url: media.url,
+          type: type,
+          quality: chosenQuality,
+          removeMusic: stripAudio,
+          premiumNoWatermark: true,
+        ),
       );
-      final item = DownloadItem(
-        id: id,
-        url: media.url,
-        title: media.title,
-        thumbnail: media.thumbnail,
-        platform: media.platform,
-        quality: quality,
-        type: selectedType,
-        createdAt: DateTime.now(),
-        status: DownloadStatus.queued,
-        progress: 0,
-        favorite: false,
-        isPrivate: downloadDirectToVault,
-      );
-      await _saveItem(item);
-      activeId = id;
-      _watchDownload(id, item);
     } catch (error) {
       flow = DuckFlow.error;
-      status = _cleanError(error);
+      _status = _errorStatus(error);
       if (_isLoginRequiredError(error.toString()) &&
           !_justReturnedFromLockedBrowser) {
         _requestLockedBrowser(media.url, _browserPlatformFor(media.url));
@@ -1863,30 +2304,32 @@ class DuckDownloadsController extends ChangeNotifier
       if (isYouTube) {
         await _startYouTubeExplodeDownload(media);
       } else {
-        final id = await _api.startDownload(
-          url: media.url,
-          type: selectedType,
-          quality: quality,
-          removeMusic: removeMusic,
-          premiumNoWatermark: true,
+        final type = selectedType;
+        final chosenQuality = quality;
+        final stripAudio = removeMusic;
+        await _enqueueDownload(
+          placeholder: DownloadItem(
+            id: _newLocalDownloadId(),
+            url: media.url,
+            title: media.title,
+            thumbnail: media.thumbnail,
+            platform: media.platform,
+            quality: chosenQuality,
+            type: type,
+            createdAt: DateTime.now(),
+            status: DownloadStatus.queued,
+            progress: 0,
+            favorite: false,
+            isPrivate: downloadDirectToVault,
+          ),
+          begin: () => _api.startDownload(
+            url: media.url,
+            type: type,
+            quality: chosenQuality,
+            removeMusic: stripAudio,
+            premiumNoWatermark: true,
+          ),
         );
-        final fallbackItem = DownloadItem(
-          id: id,
-          url: media.url,
-          title: media.title,
-          thumbnail: media.thumbnail,
-          platform: media.platform,
-          quality: quality,
-          type: selectedType,
-          createdAt: DateTime.now(),
-          status: DownloadStatus.queued,
-          progress: 0,
-          favorite: false,
-          isPrivate: downloadDirectToVault,
-        );
-        await _saveItem(fallbackItem);
-        activeId = id;
-        _watchDownload(id, fallbackItem);
       }
     }
   }
@@ -1953,7 +2396,7 @@ class DuckDownloadsController extends ChangeNotifier
             await _publishProgress(item, progress);
           },
           onTranscoding: () async {
-            status = 'Converting to M4A...';
+            setStatus('statusConvertingToM4a');
             await _publishProgress(
               item,
               99,
@@ -2029,7 +2472,7 @@ class DuckDownloadsController extends ChangeNotifier
       item = item.copyWith(status: DownloadStatus.failed);
       await _saveItem(item);
       flow = DuckFlow.error;
-      status = 'YouTube download failed: ${_cleanError(error)}';
+      setStatus('statusYouTubeFailed', {'error': _cleanError(error)});
     } finally {
       busy = false;
       notifyListeners();
@@ -2175,12 +2618,12 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   Future<void> cancelDownload(DownloadItem item) async {
-    _cancelDownloadSubscription(item.id);
+    _finishDownload(item.id);
     await _controlDownload(item: item, action: 'cancel');
   }
 
   Future<void> deleteDownload(DownloadItem item) async {
-    _cancelDownloadSubscription(item.id);
+    _finishDownload(item.id);
     await _files.deleteFile(item.filePath);
     _privateMetadata.remove(item.id);
     await _store.delete(item.id);
@@ -2198,7 +2641,7 @@ class DuckDownloadsController extends ChangeNotifier
     required double startTime,
     required double endTime,
   }) async {
-    if (busy) return;
+    if (_rejectIfBusy()) return;
 
     if (!Platform.isAndroid) {
       throw Exception(
@@ -2216,7 +2659,7 @@ class DuckDownloadsController extends ChangeNotifier
     }
 
     busy = true;
-    status = 'Preparing ringtone...';
+    setStatus('statusPreparingRingtone');
     notifyListeners();
 
     String? inputPath;
@@ -2245,7 +2688,7 @@ class DuckDownloadsController extends ChangeNotifier
         // Fast direct copy without invoking FFmpeg
         await File(inputPath).copy(finalPath);
       } else {
-        status = 'Trimming audio...';
+        setStatus('statusTrimmingAudio');
         notifyListeners();
 
         try {
@@ -2272,7 +2715,7 @@ class DuckDownloadsController extends ChangeNotifier
         }
       }
 
-      status = 'Setting system ringtone...';
+      setStatus('statusSettingRingtone');
       notifyListeners();
 
       final bool success =
@@ -2283,14 +2726,14 @@ class DuckDownloadsController extends ChangeNotifier
           false;
 
       if (success) {
-        status = 'Ringtone set successfully!';
+        setStatus('statusRingtoneSet');
       } else {
         throw Exception(
           'Could not register ringtone in Android system database.',
         );
       }
     } catch (e) {
-      status = 'Error: ${e.toString()}';
+      setStatus('statusGenericError', {'error': e.toString()});
       rethrow;
     } finally {
       if (item.isPrivate && inputPath != null && inputPath != item.filePath) {
@@ -2306,7 +2749,7 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> toggleAutoSaveVideos(bool enabled) async {
     autoSaveVideos = enabled;
     await _store.writeAutoSaveVideos(enabled);
-    status = enabled ? 'Auto save enabled' : 'Auto save disabled';
+    setStatus(enabled ? 'statusAutoSaveOn' : 'statusAutoSaveOff');
     notifyListeners();
   }
 
@@ -2324,9 +2767,9 @@ class DuckDownloadsController extends ChangeNotifier
     crashReportingEnabled = enabled;
     await _store.writeCrashReportingEnabled(enabled);
     await CrashReportingService.instance.setEnabled(enabled);
-    status = enabled
-        ? 'Crash reports enabled'
-        : 'Crash reports disabled';
+    setStatus(
+      enabled ? 'statusCrashReportsOn' : 'statusCrashReportsOff',
+    );
     notifyListeners();
   }
 
@@ -2381,11 +2824,11 @@ class DuckDownloadsController extends ChangeNotifier
       if (action == 'resume' && next.status != DownloadStatus.paused) {
         activeId = item.id;
         flow = DuckFlow.downloading;
-        status = 'Downloading...';
+        setStatus('statusDownloading');
       } else if (action == 'resume') {
-        status = 'Pausing...';
+        setStatus('statusPausing');
       } else if (action == 'pause') {
-        status = 'Download paused';
+        setStatus('statusDownloadPaused');
         flow = DuckFlow.downloading;
       } else {
         _cancelDownloadSubscription(item.id);
@@ -2394,16 +2837,18 @@ class DuckDownloadsController extends ChangeNotifier
         if (activeId == item.id) {
           activeId = null;
           flow = DuckFlow.idle;
-          status = 'Tap the duck';
+          setStatus('statusTapDuck');
         }
       }
       _syncActiveFlow();
       return next;
     } catch (error) {
       flow = DuckFlow.error;
-      status = _cleanError(error).contains('Download not found')
-          ? 'Restart backend with latest build, then try again.'
-          : _cleanError(error);
+      if (_cleanError(error).contains('Download not found')) {
+        setStatus('statusBackendOutdated');
+      } else {
+        _status = _errorStatus(error);
+      }
       return null;
     } finally {
       controlPendingIds.remove(item.id);
@@ -2412,11 +2857,13 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void _watchDownload(String id, DownloadItem baseItem) {
+    if (_disposed) return;
     _cancelDownloadSubscription(id);
     _downloadSubscriptions[id] = _api
         .watchDownload(id)
         .listen(
           (update) async {
+            if (_disposed) return;
             var next = baseItem.copyWith(
               progress: update.progress,
               status: update.status == DownloadStatus.completed
@@ -2426,12 +2873,12 @@ class DuckDownloadsController extends ChangeNotifier
             await _saveItem(next);
 
             if (update.status == DownloadStatus.completed) {
-              _cancelDownloadSubscription(id);
+              _finishDownload(id);
               if (update.fileUrl == null) {
                 next = next.copyWith(status: DownloadStatus.failed);
                 await _saveItem(next);
                 flow = DuckFlow.error;
-                status = 'Server completed download but returned no file URL.';
+                setStatus('statusNoFileUrl');
               } else {
                 try {
                   next = next.copyWith(
@@ -2476,13 +2923,15 @@ class DuckDownloadsController extends ChangeNotifier
                   lastDownloadedItem = next;
                   metadata = null;
                   flow = DuckFlow.success;
-                  status = next.externalSaveError == null
-                      ? next.type == DownloadType.image
-                            ? 'Download complete and saved to pictures'
-                            : next.isVideo && next.savedToGallery
-                            ? 'Download complete and saved to gallery'
-                            : 'Download complete'
-                      : 'Download complete. Auto save failed.';
+                  setStatus(
+                    next.externalSaveError != null
+                        ? 'statusCompleteSaveFailed'
+                        : next.type == DownloadType.image
+                        ? 'statusCompleteSavedPictures'
+                        : next.isVideo && next.savedToGallery
+                        ? 'statusCompleteSavedGallery'
+                        : 'statusComplete',
+                  );
                   unawaited(
                     _notifications.showDownloadComplete(
                       id: next.id.hashCode,
@@ -2506,7 +2955,7 @@ class DuckDownloadsController extends ChangeNotifier
             }
 
             if (update.status == DownloadStatus.failed) {
-              _cancelDownloadSubscription(id);
+              _finishDownload(id);
               final errText = update.error ?? '';
               final isLoginRequired = _isLoginRequiredError(errText);
 
@@ -2535,27 +2984,53 @@ class DuckDownloadsController extends ChangeNotifier
 
             if (update.status == DownloadStatus.paused) {
               await _saveItem(next.copyWith(status: DownloadStatus.paused));
-              status = 'Download paused';
+              setStatus('statusDownloadPaused');
               flow = DuckFlow.downloading;
             }
 
             if (update.status == DownloadStatus.cancelled) {
-              _cancelDownloadSubscription(id);
+              _finishDownload(id);
               await _store.delete(next.id);
               _downloads = _store.readDownloads();
               if (activeId == id) {
                 activeId = null;
                 flow = DuckFlow.idle;
-                status = 'Tap the duck';
+                setStatus('statusTapDuck');
               }
             }
             _syncActiveFlow();
             notifyListeners();
           },
           onError: (Object error) {
-            _cancelDownloadSubscription(id);
+            _finishDownload(id);
             flow = DuckFlow.error;
-            status = _cleanError(error);
+            _status = _errorStatus(error);
+            notifyListeners();
+          },
+          // The socket closing without ever reporting a terminal status.
+          //
+          // Nothing handled this, so the download kept its queue slot for the
+          // rest of the session: three of these and the queue stopped starting
+          // anything, with a row still reading "downloading" behind a
+          // connection that was gone.
+          onDone: () async {
+            if (_disposed) return;
+            _finishDownload(id);
+            final current = _downloads
+                .where((entry) => entry.id == id)
+                .firstOrNull;
+            if (current == null) return;
+            final unfinished = current.status == DownloadStatus.queued ||
+                current.status == DownloadStatus.downloading ||
+                current.status == DownloadStatus.processing;
+            if (!unfinished) return;
+            try {
+              await _saveItem(current.copyWith(status: DownloadStatus.failed));
+            } catch (error, stackTrace) {
+              reportError(error, stackTrace, reason: 'download-socket-closed');
+            }
+            flow = DuckFlow.error;
+            setStatus('statusServerClosed');
             notifyListeners();
           },
         );
@@ -2605,6 +3080,7 @@ class DuckDownloadsController extends ChangeNotifier
     );
     _downloads[index] = updated;
     if (updated.isPrivate) _privateMetadata[item.id] = updated;
+    _syncKeepAlive();
     notifyListeners();
 
     final lastWrite = _lastProgressPersist[item.id];
@@ -2629,6 +3105,10 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   Future<void> _saveItem(DownloadItem item) async {
+    // A late callback from a stream that outlived the controller. Its storage
+    // is closed, so writing here throws inside a stream handler nobody is
+    // listening to.
+    if (_disposed) return;
     if (item.isPrivate && !VaultEncryptionService.isUnlocked) {
       throw StateError(
         'Unlock the Secure Vault before saving private content.',
@@ -2652,6 +3132,7 @@ class DuckDownloadsController extends ChangeNotifier
     _downloads = _store.readDownloads();
     _mergePrivateMetadata();
     _syncActiveFlow();
+    _syncKeepAlive();
     notifyListeners();
   }
 
@@ -2683,16 +3164,18 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> _saveExternally(DownloadItem item, DownloadType type) async {
     if (externalSaveBusy) return;
     if (item.isPrivate && isVaultLocked) {
-      status = 'Unlock the Secure Vault first.';
+      setStatus('statusUnlockVaultFirst');
       notifyListeners();
       return;
     }
     externalSaveBusy = true;
-    status = type == DownloadType.video
-        ? 'Saving to gallery...'
-        : type == DownloadType.audio
-        ? 'Saving audio...'
-        : 'Saving image...';
+    setStatus(
+      type == DownloadType.video
+          ? 'statusSavingGallery'
+          : type == DownloadType.audio
+          ? 'statusSavingAudio'
+          : 'statusSavingImage',
+    );
     notifyListeners();
     try {
       final next = type == DownloadType.video
@@ -2700,11 +3183,13 @@ class DuckDownloadsController extends ChangeNotifier
           : type == DownloadType.audio
           ? await _saveAudioItem(item)
           : await _saveImageItem(item);
-      status = type == DownloadType.video
-          ? 'Saved to gallery'
-          : type == DownloadType.audio
-          ? 'Audio save action complete'
-          : 'Image saved to pictures';
+      setStatus(
+        type == DownloadType.video
+            ? 'statusSavedGallery'
+            : type == DownloadType.audio
+            ? 'statusSavedAudio'
+            : 'statusSavedImage',
+      );
       if (activeId == item.id) activeId = next.id;
     } catch (error) {
       final message = _cleanError(error);
@@ -2945,11 +3430,11 @@ class DuckDownloadsController extends ChangeNotifier
         } else {
           await audioPlayer.setFilePath(playablePath);
         }
-        await audioPlayer.setLoopMode(_loopMode);
+        await _applyPlayerLoopMode();
         await audioPlayer.play();
       } catch (error) {
         playingItem = null;
-        status = 'Failed to play audio: $error';
+        setStatus('statusPlayFailed', {'error': '$error'});
         await _clearActiveDecryptedAudio();
         notifyListeners();
       }
@@ -3069,6 +3554,7 @@ class DuckDownloadsController extends ChangeNotifier
     if (playingItem != null) {
       _buildAudioQueue(playingItem!, forceReshuffle: shuffleEnabled);
     }
+    unawaited(_store.writeShuffleEnabled(shuffleEnabled));
     notifyListeners();
   }
 
@@ -3078,8 +3564,35 @@ class DuckDownloadsController extends ChangeNotifier
       LoopMode.all => LoopMode.one,
       LoopMode.one => LoopMode.off,
     };
-    await audioPlayer.setLoopMode(_loopMode);
+    await _applyPlayerLoopMode();
+    unawaited(_store.writePlaybackLoopMode(_loopMode.name));
     notifyListeners();
+  }
+
+  /// Tells the player how to loop — which is not the same question this class
+  /// is answering.
+  ///
+  /// `audioPlayer` is driving one file at a time, not a playlist, so
+  /// `LoopMode.all` there means "repeat this file". Handing `_loopMode`
+  /// straight over made "repeat all" behave exactly like "repeat one": the
+  /// player looped the track itself, `ProcessingState.completed` never fired,
+  /// and the listener that calls [playNext] never ran.
+  ///
+  /// Only repeat-one maps onto the player. Moving through the queue is this
+  /// class's job, and it needs the player to report the end of a track to do
+  /// it.
+  static LoopMode _readStoredLoopMode(String? name) {
+    return switch (name) {
+      'all' => LoopMode.all,
+      'one' => LoopMode.one,
+      _ => LoopMode.off,
+    };
+  }
+
+  Future<void> _applyPlayerLoopMode() async {
+    await audioPlayer.setLoopMode(
+      _loopMode == LoopMode.one ? LoopMode.one : LoopMode.off,
+    );
   }
 
   Duration videoResumePosition(String id) {
@@ -3333,14 +3846,14 @@ class DuckDownloadsController extends ChangeNotifier
       activeId = active.isEmpty ? null : active.first.id;
       if (active.isEmpty && flow == DuckFlow.downloading) {
         flow = DuckFlow.idle;
-        status = 'Tap the duck';
+        setStatus('statusTapDuck');
       }
     }
     if (active.isNotEmpty &&
         (flow == DuckFlow.idle || flow == DuckFlow.success)) {
       activeId ??= active.first.id;
       flow = DuckFlow.downloading;
-      status = 'Downloading...';
+      setStatus('statusDownloading');
     }
   }
 
@@ -3509,16 +4022,24 @@ class DuckDownloadsController extends ChangeNotifier
     return 'Social';
   }
 
-  String _cleanError(Object error) {
-    final raw = error.toString();
-    final cleaned = raw
-        .replaceFirst('Exception: ', '')
-        .replaceFirst('WebSocketChannelException: ', '')
-        .trim();
+  /// True when the current error is the one a browser login would fix.
+  ///
+  /// The screen used to work this out by searching the status text for the
+  /// words "in-app browser", so the button that fixes the problem was tied to
+  /// one English phrasing.
+  bool get needsBrowserLogin =>
+      statusMessage.isKey('errorLoginRequired') ||
+      statusMessage.isKey('errorExtractFailed');
 
-    final lower = cleaned.toLowerCase();
-    if (lower.contains('blocked_adult_content')) {
-      return 'Blocked: Adult Content is not allowed.';
+  /// The key this error maps onto, or null when only the raw text is left.
+  ///
+  /// These are the sentences the user actually reads when something fails, and
+  /// they were the largest block of untranslated text in the app: an Arabic
+  /// user hit a private Instagram post and got an English paragraph.
+  String? _errorKeyFor(String lower) {
+    if (lower.contains('blocked_adult_content')) return 'errorAdultBlocked';
+    if (lower.contains('adult_check_unavailable')) {
+      return 'statusAdultCheckUnavailable';
     }
 
     // 1. YouTube specific bot/sign-in errors
@@ -3526,26 +4047,26 @@ class DuckDownloadsController extends ChangeNotifier
         lower.contains('bot') ||
         lower.contains('captcha') ||
         lower.contains('confirm you are not')) {
-      return 'YouTube is blocking this download. Please try again later or try another video.';
+      return 'errorYouTubeBlocking';
     }
 
     // 2. Facebook/Instagram/TikTok parse/extraction errors
     if (lower.contains('cannot parse data') ||
         lower.contains('extractor') ||
         lower.contains('unable to extract')) {
-      return 'Failed to extract media. The post might be private, restricted, or requires browser login.';
+      return 'errorExtractFailed';
     }
 
     // 3. Private/Login gated content
     if (lower.contains('login') ||
         lower.contains('private') ||
         lower.contains('cookies')) {
-      return 'This post requires authentication. Please log in first using the in-app browser.';
+      return 'errorLoginRequired';
     }
 
     // 4. Unsupported URLs
     if (lower.contains('unsupported url') || lower.contains('unsupported')) {
-      return 'Unsupported link. Please paste a valid YouTube, Instagram, Facebook, TikTok, or X/Twitter URL.';
+      return 'errorUnsupportedLink';
     }
 
     // 5. Network/Timeout errors
@@ -3553,21 +4074,43 @@ class DuckDownloadsController extends ChangeNotifier
         lower.contains('connection') ||
         lower.contains('http') ||
         lower.contains('socket')) {
-      return 'Connection error. Please check your internet connection and try again.';
+      return 'errorConnection';
     }
-
-    if (cleaned.isEmpty || cleaned == 'null') {
-      return 'Download failed. Please try again.';
-    }
-    return cleaned;
+    return null;
   }
 
-  Future<bool> _isAdultUrl(String url) async {
+  /// An error as something the status line can translate.
+  ///
+  /// Anything that does not match a known category stays as the backend's own
+  /// text: one English sentence from the server beats showing the user nothing.
+  DuckStatus _errorStatus(Object error) {
+    final cleaned = _rawError(error);
+    final key = _errorKeyFor(cleaned.toLowerCase());
+    if (key != null) return DuckStatus.key(key);
+    if (cleaned.isEmpty || cleaned == 'null') {
+      return const DuckStatus.key('errorDownloadFailed');
+    }
+    return DuckStatus.literal(cleaned);
+  }
+
+  String _rawError(Object error) {
+    return error
+        .toString()
+        .replaceFirst('Exception: ', '')
+        .replaceFirst('WebSocketChannelException: ', '')
+        .trim();
+  }
+
+  /// The English form, for the places that need a plain string — a thrown
+  /// exception message, or a log line.
+  String _cleanError(Object error) => _errorStatus(error).english;
+
+  Future<_AdultVerdict> _isAdultUrl(String url) async {
     try {
       final cleanUrl = url.trim();
       final uri = Uri.parse(cleanUrl);
       final host = uri.host;
-      if (host.isEmpty) return false;
+      if (host.isEmpty) return _AdultVerdict.allowed;
 
       // Reddit needs the post itself checked, not the domain: reddit.com is
       // mainstream, but individual posts and whole subreddits are marked adult.
@@ -3575,7 +4118,14 @@ class DuckDownloadsController extends ChangeNotifier
       // hostname keyword or DNS filter would wave the link straight through.
       if (RedditService.isRedditUrl(cleanUrl)) {
         final post = await _reddit.fetchPost(cleanUrl);
-        if (post != null) return post.isNsfw;
+        if (post != null) {
+          return post.isNsfw ? _AdultVerdict.blocked : _AdultVerdict.allowed;
+        }
+        // The flag could not be read. Everywhere else a failed check is a
+        // missing signal among several; here it is *the* signal, and letting
+        // the link through means the one authoritative source said nothing and
+        // nobody noticed. Refuse and say so, rather than guess.
+        return _AdultVerdict.unverified;
       }
 
       // 0. Check Twitter / X adult sensitive media
@@ -3586,8 +4136,11 @@ class DuckDownloadsController extends ChangeNotifier
         final tweetIdMatch = RegExp(r'status/(\d+)').firstMatch(cleanUrl);
         if (tweetIdMatch != null) {
           final tweetId = tweetIdMatch.group(1);
+          // Closed in the finally below. Three of these were opened per check
+          // and none was ever closed, so every link the user pasted leaked a
+          // connection pool that stayed alive for the rest of the session.
+          final client = HttpClient();
           try {
-            final client = HttpClient();
             client.connectionTimeout = const Duration(seconds: 4);
 
             // Source 1: Twitter Syndication API with Chrome User-Agent
@@ -3623,7 +4176,7 @@ class DuckDownloadsController extends ChangeNotifier
                   debugPrint(
                     '⚡ Duck Downloader: Twitter/X NSFW sensitive media detected for Tweet ID: $tweetId (Syndication)',
                   );
-                  return true;
+                  return _AdultVerdict.blocked;
                 }
               }
             }
@@ -3648,12 +4201,14 @@ class DuckDownloadsController extends ChangeNotifier
                   debugPrint(
                     '⚡ Duck Downloader: Twitter/X NSFW sensitive media detected for Tweet ID: $tweetId (FxTwitter)',
                   );
-                  return true;
+                  return _AdultVerdict.blocked;
                 }
               }
             }
           } catch (e) {
             debugPrint('Twitter NSFW check error: $e');
+          } finally {
+            client.close(force: true);
           }
         }
       }
@@ -3714,7 +4269,7 @@ class DuckDownloadsController extends ChangeNotifier
         'janitorai',
       ];
       for (final kw in localKeywords) {
-        if (lowerHost.contains(kw)) return true;
+        if (lowerHost.contains(kw)) return _AdultVerdict.blocked;
       }
 
       // 2. Query both Cloudflare Families and AdGuard Family DNS in parallel (DoH)
@@ -3723,16 +4278,20 @@ class DuckDownloadsController extends ChangeNotifier
         _queryAdGuardFamily(host),
       ]).timeout(const Duration(seconds: 4), onTimeout: () => [false, false]);
 
-      return results[0] || results[1];
+      return results[0] || results[1]
+          ? _AdultVerdict.blocked
+          : _AdultVerdict.allowed;
     } catch (_) {
-      // Fallback: safe to proceed or block on error? Typically false, as we don't want false blocks on random connectivity issues.
+      // A DNS lookup or a syndication API being unreachable is one missing
+      // signal out of several, on a link that is usually ordinary. Blocking
+      // every download whenever the network hiccups is its own failure.
     }
-    return false;
+    return _AdultVerdict.allowed;
   }
 
   Future<bool> _queryCloudflareFamilies(String host) async {
+    final client = HttpClient();
     try {
-      final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 3);
       final request = await client.getUrl(
         Uri.parse(
@@ -3764,13 +4323,17 @@ class DuckDownloadsController extends ChangeNotifier
           }
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // A filter being unreachable is not evidence about the link.
+    } finally {
+      client.close(force: true);
+    }
     return false;
   }
 
   Future<bool> _queryAdGuardFamily(String host) async {
+    final client = HttpClient();
     try {
-      final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 3);
       final request = await client.getUrl(
         Uri.parse(
@@ -3799,7 +4362,11 @@ class DuckDownloadsController extends ChangeNotifier
           }
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // A filter being unreachable is not evidence about the link.
+    } finally {
+      client.close(force: true);
+    }
     return false;
   }
 
@@ -3835,11 +4402,26 @@ class DuckDownloadsController extends ChangeNotifier
     }
     if (state == AppLifecycleState.resumed) {
       _checkClipboardOnResume();
+      unawaited(_drainShareInbox());
     }
+  }
+
+  /// Silently drops notifications once the controller is gone.
+  ///
+  /// Downloads outlive the widget that started them by design — a queue, a
+  /// socket and several awaits — so a job can land after dispose. The base
+  /// class asserts on that, turning a harmless late callback into a crash.
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _pendingDownloads.clear();
+    _runningDownloads.clear();
     _vaultIdleTimer?.cancel();
     _intentSub?.cancel();
     _sfxPlayer.dispose();
@@ -3851,7 +4433,6 @@ class DuckDownloadsController extends ChangeNotifier
       sub.cancel();
     }
     _downloadSubscriptions.clear();
-    DuckMediaChannel.instance.removeHandler(_handleNativeMediaCall);
     _reddit.dispose();
     audioPlayer.dispose();
     super.dispose();
@@ -3895,10 +4476,10 @@ class DuckDownloadsController extends ChangeNotifier
     detectedClipboardUrl = null;
     setTab(DuckTab.home);
 
-    if (busy) return;
+    if (_rejectIfBusy()) return;
     busy = true;
     flow = DuckFlow.extracting;
-    status = 'Checking link...';
+    setStatus('statusCheckingLink');
     metadata = null;
     batchItems = null;
     batchTitle = null;
@@ -3910,7 +4491,7 @@ class DuckDownloadsController extends ChangeNotifier
       await _extractUrlOrBatch(url);
     } catch (error) {
       flow = DuckFlow.error;
-      status = _cleanError(error);
+      _status = _errorStatus(error);
     } finally {
       busy = false;
       notifyListeners();
@@ -3919,10 +4500,10 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<void> extractCustomUrl(String url) async {
     setTab(DuckTab.home);
-    if (busy) return;
+    if (_rejectIfBusy()) return;
     busy = true;
     flow = DuckFlow.extracting;
-    status = 'Checking link...';
+    setStatus('statusCheckingLink');
     metadata = null;
     notifyListeners();
 
@@ -3933,18 +4514,20 @@ class DuckDownloadsController extends ChangeNotifier
         selectedType = DownloadType.image;
         quality = _firstQuality(media, DownloadType.image);
         flow = DuckFlow.ready;
-        status = 'Tap download to save image';
+        setStatus('statusTapDownloadForImage');
       } else {
         selectedType = _selectDefaultDownloadType(media, url);
         quality = _firstQuality(media, selectedType);
         flow = DuckFlow.ready;
-        status = selectedType == DownloadType.audio
-            ? 'Choose audio format'
-            : 'Choose video or audio';
+        setStatus(
+          selectedType == DownloadType.audio
+              ? 'statusChooseAudioFormat'
+              : 'statusChooseVideoOrAudio',
+        );
       }
     } catch (error) {
       flow = DuckFlow.error;
-      status = _cleanError(error);
+      _status = _errorStatus(error);
     } finally {
       busy = false;
       notifyListeners();
@@ -3966,29 +4549,28 @@ class DuckDownloadsController extends ChangeNotifier
     bool removeMusic = false,
   }) async {
     try {
-      final id = await _api.startDownload(
-        url: media.url,
-        type: type,
-        quality: quality,
-        removeMusic: removeMusic,
-        premiumNoWatermark: true,
+      await _enqueueDownload(
+        placeholder: DownloadItem(
+          id: _newLocalDownloadId(),
+          url: media.url,
+          title: media.title,
+          thumbnail: media.thumbnail,
+          platform: media.platform,
+          quality: quality,
+          type: type,
+          createdAt: DateTime.now(),
+          status: DownloadStatus.queued,
+          progress: 0,
+          favorite: false,
+        ),
+        begin: () => _api.startDownload(
+          url: media.url,
+          type: type,
+          quality: quality,
+          removeMusic: removeMusic,
+          premiumNoWatermark: true,
+        ),
       );
-      final item = DownloadItem(
-        id: id,
-        url: media.url,
-        title: media.title,
-        thumbnail: media.thumbnail,
-        platform: media.platform,
-        quality: quality,
-        type: type,
-        createdAt: DateTime.now(),
-        status: DownloadStatus.queued,
-        progress: 0,
-        favorite: false,
-      );
-      await _saveItem(item);
-      activeId = id;
-      _watchDownload(id, item);
       notifyListeners();
     } catch (error) {
       throw Exception(_cleanError(error));
@@ -4107,42 +4689,60 @@ class DuckDownloadsController extends ChangeNotifier
           platform = media.platform;
         }
 
-        final id = await _api.startDownload(
-          url: mediaUrl,
-          type: itemType,
-          quality: itemType == DownloadType.video ? 'Best' : quality,
-          removeMusic: removeMusic,
-          premiumNoWatermark: true,
+        final requestedQuality =
+            itemType == DownloadType.video ? 'Best' : quality;
+        final stripAudio = removeMusic;
+        await _enqueueDownload(
+          placeholder: DownloadItem(
+            id: _newLocalDownloadId(),
+            url: mediaUrl,
+            title: title,
+            thumbnail: thumbnail,
+            platform: platform,
+            quality: quality,
+            type: itemType,
+            createdAt: DateTime.now(),
+            status: DownloadStatus.queued,
+            progress: 0,
+            favorite: false,
+          ),
+          begin: () => _api.startDownload(
+            url: mediaUrl,
+            type: itemType,
+            quality: requestedQuality,
+            removeMusic: stripAudio,
+            premiumNoWatermark: true,
+          ),
         );
-        final item = DownloadItem(
-          id: id,
-          url: mediaUrl,
-          title: title,
-          thumbnail: thumbnail,
-          platform: platform,
-          quality: quality,
-          type: itemType,
-          createdAt: DateTime.now(),
-          status: DownloadStatus.queued,
-          progress: 0,
-          favorite: false,
-        );
-        await _saveItem(item);
-        activeId = id;
-        _watchDownload(id, item);
         started++;
       } catch (error) {
         failed++;
       }
     }
 
-    final noun = type == DownloadType.image ? 'image' : 'download';
+    // "Queued", not "Started": with a concurrency cap only the first
+    // [maxConcurrentDownloads] of these are actually running right now, and
+    // saying otherwise is how a progress bar that has not moved looks broken.
+    //
+    // A key per kind rather than one with a `{noun}` slot: English pluralises
+    // by adding an "s" to a noun the sentence can borrow, and Arabic does not
+    // work that way at all.
+    final images = type == DownloadType.image;
     if (started > 0 && failed > 0) {
-      status = 'Started $started ${noun}s, $failed failed';
+      setStatus(
+        images ? 'statusQueuedImagesPartial' : 'statusQueuedDownloadsPartial',
+        {'count': '$started', 'failed': '$failed'},
+      );
     } else if (started > 0) {
-      status = 'Started $started ${noun}s';
+      setStatus(
+        images ? 'statusQueuedImages' : 'statusQueuedDownloads',
+        {'count': '$started'},
+      );
     } else if (failed > 0) {
-      status = 'Failed to start $failed ${noun}s';
+      setStatus(
+        images ? 'statusQueueFailedImages' : 'statusQueueFailedDownloads',
+        {'failed': '$failed'},
+      );
       flow = DuckFlow.error;
     }
     notifyListeners();
@@ -4154,7 +4754,7 @@ class DuckDownloadsController extends ChangeNotifier
     required double endTime,
     Duration? totalDuration,
   }) async {
-    if (busy) return;
+    if (_rejectIfBusy()) return;
     final filePath = item.filePath;
     if (filePath == null) {
       throw TrimValidationException('File is not available locally.');
@@ -4167,7 +4767,7 @@ class DuckDownloadsController extends ChangeNotifier
     );
 
     busy = true;
-    status = 'Trimming file...';
+    setStatus('statusTrimmingFile');
     notifyListeners();
 
     String? trimmedTempPath;
@@ -4199,7 +4799,7 @@ class DuckDownloadsController extends ChangeNotifier
           await playItem(next, advanceQueue: true);
         }
       }
-      status = 'Trimming complete';
+      setStatus('statusTrimComplete');
     } catch (error) {
       if (trimmedTempPath != null) {
         final temp = File(trimmedTempPath);
@@ -4222,7 +4822,7 @@ class DuckDownloadsController extends ChangeNotifier
     batchTitle = null;
     batchPlatform = null;
     flow = DuckFlow.idle;
-    status = 'Tap the duck';
+    setStatus('statusTapDuck');
     notifyListeners();
   }
 
@@ -4240,10 +4840,10 @@ class DuckDownloadsController extends ChangeNotifier
       backendCookies = await _api.setCookies(content);
       await _store.writeYoutubeCookies(content);
       _ytExplode.updateCookies(content);
-      status = 'Cookies updated successfully';
+      setStatus('statusCookiesUpdated');
       notifyListeners();
     } catch (e) {
-      status = 'Failed to update cookies: $e';
+      setStatus('statusCookiesUpdateFailed', {'error': '$e'});
       notifyListeners();
       rethrow;
     }
@@ -4254,10 +4854,10 @@ class DuckDownloadsController extends ChangeNotifier
       backendCookies = await _api.deleteCookies();
       await _store.writeYoutubeCookies(null);
       _ytExplode.updateCookies(null);
-      status = 'Cookies cleared';
+      setStatus('statusCookiesCleared');
       notifyListeners();
     } catch (e) {
-      status = 'Failed to clear cookies: $e';
+      setStatus('statusCookiesClearFailed', {'error': '$e'});
       notifyListeners();
       rethrow;
     }
@@ -4281,12 +4881,11 @@ class DuckDownloadsController extends ChangeNotifier
       return;
     }
 
-    // For sharing while app is running/backgrounded
+    // A share arriving while the app is already open.
     _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen(
       (value) {
         if (value.isNotEmpty) {
-          final path = value.first.path;
-          _handleSharedText(path);
+          _handleSharedText(value.first.path);
         }
       },
       onError: (err) {
@@ -4294,30 +4893,17 @@ class DuckDownloadsController extends ChangeNotifier
       },
     );
 
-    // For sharing that triggers a cold start
+    // A share that started the app from cold.
     ReceiveSharingIntent.instance.getInitialMedia().then((value) {
       if (value.isNotEmpty) {
-        final path = value.first.path;
-        _handleSharedText(path);
+        _handleSharedText(value.first.path);
       }
+      // Without this the plugin keeps handing back the same link on every
+      // later cold start, so a video downloaded last week reappears as a fresh
+      // share sheet the next time the app is opened from the launcher.
+      ReceiveSharingIntent.instance.reset();
     });
 
-    DuckMediaChannel.instance.addHandler(_handleNativeMediaCall);
-  }
-
-  /// Native calls the controller owns. Everything else is ignored so other
-  /// listeners on the shared channel still get their turn.
-  Future<void> _handleNativeMediaCall(MethodCall call) async {
-    if (call.method != 'startDirectQuickDownload') return;
-    final String? url = call.arguments['url'];
-    final String? typeStr = call.arguments['type'];
-    if (url == null) return;
-    showAdOnOpen = true; // Trigger ad on next app open
-    var type = DownloadType.video;
-    if (typeStr == 'audio') type = DownloadType.audio;
-    if (typeStr == 'image') type = DownloadType.image;
-    selectedType = type;
-    unawaited(autoExtractAndDownload(url));
   }
 
   String? sharedQuickDownloadUrl;
@@ -4328,9 +4914,13 @@ class DuckDownloadsController extends ChangeNotifier
   List<FormatInfo> quickShareAudioQualities = [];
 
   void dismissQuickShare() {
+    // Bumping the generation makes any extraction still in flight a no-op, so
+    // a late result cannot reopen a sheet the user just closed.
+    _quickShareGeneration++;
     sharedQuickDownloadUrl = null;
     isQuickShareMode = false;
     isQuickShareExtracting = false;
+    quickShareError = null;
     quickShareVideoQualities.clear();
     quickShareAudioQualities.clear();
     _quickShareMetadata = null;
@@ -4381,35 +4971,51 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  Future<void> _handleSharedText(String text) async {
-    final regExp = RegExp(r'(https?://[^\s]+)');
-    final match = regExp.firstMatch(text);
-    final url = match?.group(0);
-    if (url != null) {
-      sharedQuickDownloadUrl = url;
-      isQuickShareMode = true;
-      isQuickShareExtracting = true;
-      quickShareVideoQualities.clear();
-      quickShareAudioQualities.clear();
-      notifyListeners();
+  /// Which share the sheet is currently showing.
+  ///
+  /// Extraction is slow and shares arrive whenever the user taps. Share link A,
+  /// then B a second later, and A's result used to land last and overwrite B's
+  /// quality list — leaving the sheet showing B's URL above A's formats, so
+  /// tapping "1080p" downloaded B at a resolution it may not even have. Every
+  /// result now checks it is still the current one before it is allowed to
+  /// touch any state.
+  int _quickShareGeneration = 0;
 
-      try {
-        if (YouTubeExplodeService.isYouTubeUrl(url)) {
-          final meta = await _ytExplode.extractMetadata(url);
-          if (meta != null) {
-            _quickShareMetadata = meta;
-            quickShareVideoQualities = meta.qualities;
-            quickShareAudioQualities = meta.audioFormats;
-          }
-        } else {
-          final meta = await _api.extract(url);
-          _quickShareMetadata = meta;
-          quickShareVideoQualities = meta.qualities;
-          quickShareAudioQualities = meta.audioFormats;
-        }
-      } catch (error, stackTrace) {
-        reportError(error, stackTrace, reason: 'quick-share-metadata');
-      } finally {
+  /// What went wrong extracting the shared link, if anything.
+  String? quickShareError;
+
+  Future<void> _handleSharedText(String text) async {
+    final url = RegExp(r'(https?://[^\s]+)').firstMatch(text)?.group(0);
+    if (url == null) return;
+
+    final generation = ++_quickShareGeneration;
+    sharedQuickDownloadUrl = url;
+    isQuickShareMode = true;
+    isQuickShareExtracting = true;
+    quickShareError = null;
+    quickShareVideoQualities = [];
+    quickShareAudioQualities = [];
+    notifyListeners();
+
+    try {
+      final meta = YouTubeExplodeService.isYouTubeUrl(url)
+          ? await _ytExplode.extractMetadata(url)
+          : await _api.extract(url);
+      if (generation != _quickShareGeneration) return;
+      if (meta != null) {
+        _quickShareMetadata = meta;
+        quickShareVideoQualities = meta.qualities;
+        quickShareAudioQualities = meta.audioFormats;
+      }
+    } catch (error, stackTrace) {
+      if (generation != _quickShareGeneration) return;
+      reportError(error, stackTrace, reason: 'quick-share-metadata');
+      // The sheet used to fail silently: spinner stops, no qualities, no
+      // reason. The default buttons still work, so say what happened and
+      // leave them.
+      quickShareError = _cleanError(error);
+    } finally {
+      if (generation == _quickShareGeneration) {
         isQuickShareExtracting = false;
         notifyListeners();
       }
@@ -4417,20 +5023,23 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   Future<void> autoExtractAndDownload(String url) async {
-    if (busy) return;
+    if (_rejectIfBusy()) return;
     busy = true;
     lastDownloadedItem = null;
     flow = DuckFlow.extracting;
-    status = 'Auto-downloading shared link...';
+    setStatus('statusAutoDownloading');
     notifyListeners();
 
     try {
       final cleanUrl = url.trim();
-      final isAdult = await _isAdultUrl(cleanUrl);
-      if (isAdult) {
+      final verdict = await _isAdultUrl(cleanUrl);
+      if (verdict == _AdultVerdict.blocked) {
         isAdultContentBlocked = true;
         notifyListeners();
         throw Exception('BLOCKED_ADULT_CONTENT');
+      }
+      if (verdict == _AdultVerdict.unverified) {
+        throw Exception('ADULT_CHECK_UNAVAILABLE');
       }
 
       // 1. YouTube links
@@ -4480,7 +5089,7 @@ class DuckDownloadsController extends ChangeNotifier
       notifyListeners();
     } catch (error) {
       flow = DuckFlow.error;
-      status = _cleanError(error);
+      _status = _errorStatus(error);
     } finally {
       busy = false;
       notifyListeners();
