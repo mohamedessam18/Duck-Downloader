@@ -32,12 +32,8 @@ class AdService {
       'ca-app-pub-8105551932366170/3705326736';
 
   /// Rewarded unit, for the music-removal gate.
-  ///
-  /// Empty until the unit exists in the AdMob console. While it is empty the
-  /// build keeps serving Google's test unit rather than requesting an ID that
-  /// does not exist, which fails every load and leaves the gate permanently
-  /// shut.
-  static const String _realAndroidRewardedUnitId = '';
+  static const String _realAndroidRewardedUnitId =
+      'ca-app-pub-8105551932366170/9835640296';
 
   // Real AdMob Unit IDs (iOS) — create these in the AdMob console for the iOS
   // app entry and paste them here. While they are empty the iOS build keeps

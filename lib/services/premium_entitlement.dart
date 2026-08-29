@@ -125,5 +125,17 @@ class SubscriptionProduct {
   String get id => details.id;
   String get title => details.title;
   String get description => details.description;
+
+  /// Already formatted for the user's country by the store — never build a
+  /// price string by hand, the currency and its placement are not ours.
   String get localizedPrice => details.price;
+
+  /// The same amount as a number, for comparing plans against each other.
+  ///
+  /// The only honest way to say what the yearly plan saves: work it out from
+  /// what the store is actually charging in this country, rather than printing
+  /// a percentage someone typed in once and that no longer matches.
+  double get rawPrice => details.rawPrice;
+
+  PremiumTier get tier => plan.tier;
 }

@@ -222,7 +222,15 @@ void main() {
     // The manager re-reads storage and tells its listeners, which is what the
     // real purchase flow does when Play confirms.
     await controller.premium.refresh();
-    await pumpEventQueue();
+
+    // refresh() also asks the store whether it is available, which throws on
+    // a platform channel that does not exist in tests — so how many event-loop
+    // turns it takes to settle is not fixed. Wait for the outcome rather than
+    // guessing at a number of pumps.
+    for (var attempt = 0; attempt < 100; attempt++) {
+      if (controller.runningDownloadCount == 5) break;
+      await pumpEventQueue(times: 5);
+    }
 
     expect(controller.runningDownloadCount, 5);
     expect(api.startedUrls.length, 5);

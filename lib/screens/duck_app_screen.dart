@@ -1108,36 +1108,121 @@ void showPremiumSheet(
   );
 }
 
-class _PremiumSheet extends StatelessWidget {
+/// The paywall, for two tiers and five plans.
+///
+/// It used to be a flat stack of one button per product, which worked while
+/// there were three of them and stopped working the moment Studio existed:
+/// five buttons in a column say nothing about which tier a plan belongs to,
+/// what the difference between them is, or which one the user is already on.
+///
+/// Tier first, then plan, then one action. Everything else — the benefit list,
+/// the prices, the button's own label — follows from those two choices, so
+/// there is only ever one thing to read next.
+class _PremiumSheet extends StatefulWidget {
   const _PremiumSheet({required this.controller});
 
   final DuckDownloadsController controller;
 
   @override
+  State<_PremiumSheet> createState() => _PremiumSheetState();
+}
+
+class _PremiumSheetState extends State<_PremiumSheet> {
+  PremiumTier? _tier;
+  SubscriptionPlan? _plan;
+
+  DuckDownloadsController get _controller => widget.controller;
+
+  /// The tier the sheet opens on.
+  ///
+  /// Someone already on Premium is here to see Studio — landing them on the
+  /// tier they have bought makes them find the upgrade themselves.
+  PremiumTier get _selectedTier {
+    final chosen = _tier;
+    if (chosen != null) return chosen;
+    return _controller.hasMusicRemovalSubscription ||
+            !_controller.isPremiumActive
+        ? PremiumTier.premium
+        : PremiumTier.studio;
+  }
+
+  List<SubscriptionPlan> _plansFor(PremiumTier tier) {
+    final plans = tier == PremiumTier.studio
+        ? [SubscriptionPlan.studioMonthly, SubscriptionPlan.studioYearly]
+        : [
+            SubscriptionPlan.monthly,
+            SubscriptionPlan.yearly,
+            SubscriptionPlan.lifetime,
+          ];
+    // A plan the store has not returned is a draft in Play, not an offer.
+    return plans
+        .where((plan) => _controller.subscriptionProduct(plan) != null)
+        .toList();
+  }
+
+  SubscriptionPlan? _selectedPlan(List<SubscriptionPlan> available) {
+    if (available.isEmpty) return null;
+    final chosen = _plan;
+    if (chosen != null && available.contains(chosen)) return chosen;
+    // Yearly by default: it is the one worth choosing and the one that gets
+    // skipped when monthly sits first and pre-selected.
+    return available.firstWhere(
+      (plan) =>
+          plan == SubscriptionPlan.yearly ||
+          plan == SubscriptionPlan.studioYearly,
+      orElse: () => available.first,
+    );
+  }
+
+  /// What the yearly plan actually saves, worked out from live store prices.
+  int? _yearlySavingFor(PremiumTier tier) {
+    final monthly = _controller.subscriptionProduct(
+      tier == PremiumTier.studio
+          ? SubscriptionPlan.studioMonthly
+          : SubscriptionPlan.monthly,
+    );
+    final yearly = _controller.subscriptionProduct(
+      tier == PremiumTier.studio
+          ? SubscriptionPlan.studioYearly
+          : SubscriptionPlan.yearly,
+    );
+    if (monthly == null || yearly == null) return null;
+    if (monthly.rawPrice <= 0 || yearly.rawPrice <= 0) return null;
+    final full = monthly.rawPrice * 12;
+    if (yearly.rawPrice >= full) return null;
+    final saving = ((1 - yearly.rawPrice / full) * 100).round();
+    return saving > 0 ? saving : null;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller,
+      animation: _controller,
       builder: (context, _) {
-        final monthly = controller.subscriptionProduct(
-          SubscriptionPlan.monthly,
-        );
-        final yearly = controller.subscriptionProduct(SubscriptionPlan.yearly);
-        final lifetime = controller.subscriptionProduct(
-          SubscriptionPlan.lifetime,
-        );
-        final busy = controller.premiumBusy;
-        final active = controller.isPremiumActive;
+        final l10n = AppLocalizations.of(context);
+        final tier = _selectedTier;
+        final plans = _plansFor(tier);
+        final plan = _selectedPlan(plans);
+        final product = plan == null
+            ? null
+            : _controller.subscriptionProduct(plan);
+
+        final hasStudio = _controller.hasMusicRemovalSubscription;
+        final hasPremium = _controller.isPremiumActive;
+        final ownsThisTier =
+            hasStudio || (hasPremium && tier == PremiumTier.premium);
+
         return Padding(
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
           child: Container(
             width: double.infinity,
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * .86,
+              maxHeight: MediaQuery.sizeOf(context).height * .88,
             ),
             decoration: BoxDecoration(
-              color: const Color(0xFF151617),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withValues(alpha: .08)),
+              color: _panel,
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: _border),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: .35),
@@ -1149,137 +1234,49 @@ class _PremiumSheet extends StatelessWidget {
             child: SafeArea(
               top: false,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: _gold.withValues(alpha: .16),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Icon(Icons.workspace_premium, color: _gold),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Duck Premium',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              Text(
-                                active
-                                    ? 'Your subscription is active.'
-                                    : 'Subscribe through the app store.',
-                                style: TextStyle(color: _muted, fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: Icon(Icons.close, color: _muted),
-                        ),
-                      ],
-                    ),
+                    _header(l10n, hasPremium: hasPremium, hasStudio: hasStudio),
                     const SizedBox(height: 18),
-                    const _PremiumBenefit(label: 'Ad-Free Experience'),
-                    // Says the number because the number is what is actually
-                    // enforced. "Faster Downloads" on its own was a claim
-                    // nothing in the app delivered.
-                    _PremiumBenefit(
-                      label:
-                          'Faster Downloads — '
-                          '${DuckDownloadsController.premiumConcurrentDownloads}'
-                          ' at once instead of '
-                          '${DuckDownloadsController.freeConcurrentDownloads}',
-                    ),
+                    _tierSwitch(l10n, tier),
                     const SizedBox(height: 18),
-                    if (controller.premiumError != null)
+                    _benefits(l10n, tier),
+                    const SizedBox(height: 18),
+                    if (plans.isEmpty)
+                      _PremiumMessage(
+                        icon: Icons.info_outline,
+                        color: _muted,
+                        text: l10n.translate('payNoProducts'),
+                      )
+                    else
+                      _planChips(l10n, tier, plans, plan),
+                    if (_controller.premiumError != null) ...[
+                      const SizedBox(height: 14),
                       _PremiumMessage(
                         icon: Icons.error_outline,
                         color: _danger,
-                        text: controller.premiumError!,
-                      )
-                    else
-                      _PremiumMessage(
-                        icon: active ? Icons.verified : Icons.info_outline,
-                        color: active ? _gold : _muted,
-                        text: controller.premiumStatus,
-                      ),
-                    const SizedBox(height: 16),
-                    _SubscriptionButton(
-                      label: 'Subscribe Monthly',
-                      price: monthly?.localizedPrice,
-                      loading: busy,
-                      enabled: monthly != null && !busy,
-                      onPressed: () => controller.subscribeToPremium(
-                        SubscriptionPlan.monthly,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _SubscriptionButton(
-                      label: 'Subscribe Yearly',
-                      price: yearly?.localizedPrice,
-                      loading: busy,
-                      enabled: yearly != null && !busy,
-                      onPressed: () => controller.subscribeToPremium(
-                        SubscriptionPlan.yearly,
-                      ),
-                    ),
-                    // Only rendered once the store actually returns it, so the
-                    // sheet does not advertise a product that is still a draft
-                    // in Play. The two above are unconditional because the app
-                    // has always had them.
-                    if (lifetime != null) ...[
-                      const SizedBox(height: 10),
-                      _SubscriptionButton(
-                        label: 'Buy once, keep forever',
-                        price: lifetime.localizedPrice,
-                        loading: busy,
-                        enabled: !busy,
-                        onPressed: () => controller.subscribeToPremium(
-                          SubscriptionPlan.lifetime,
-                        ),
+                        text: _controller.premiumError!,
                       ),
                     ],
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: BorderSide(
-                            color: Colors.white.withValues(alpha: .16),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                    const SizedBox(height: 16),
+                    _action(l10n, tier, plan, product, ownsThisTier: ownsThisTier),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton(
+                        onPressed: _controller.premiumBusy
+                            ? null
+                            : _controller.restorePurchases,
+                        child: Text(
+                          l10n.translate('payRestore'),
+                          style: TextStyle(
+                            color: _muted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        onPressed: busy ? null : controller.restorePurchases,
-                        icon: busy
-                            ? SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: _gold,
-                                ),
-                              )
-                            : const Icon(Icons.restore, size: 18),
-                        label: const Text('Restore Purchases'),
                       ),
                     ),
                   ],
@@ -1291,12 +1288,367 @@ class _PremiumSheet extends StatelessWidget {
       },
     );
   }
+
+  // ── Header ────────────────────────────────────────────────────────────────
+
+  Widget _header(
+    AppLocalizations l10n, {
+    required bool hasPremium,
+    required bool hasStudio,
+  }) {
+    final title = hasStudio
+        ? 'payTitleStudio'
+        : hasPremium
+        ? 'payTitlePremium'
+        : 'payTitleFree';
+    return Row(
+      children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: _gold.withValues(alpha: .16),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(
+            hasStudio ? Icons.graphic_eq : Icons.workspace_premium,
+            color: _gold,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.translate(title),
+                style: TextStyle(
+                  color: _text,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                l10n.translate(
+                  hasPremium ? 'paySubtitleActive' : 'paySubtitleFree',
+                ),
+                style: TextStyle(color: _muted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: Icon(Icons.close, color: _muted),
+        ),
+      ],
+    );
+  }
+
+  // ── Tier switch ───────────────────────────────────────────────────────────
+
+  Widget _tierSwitch(AppLocalizations l10n, PremiumTier selected) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _isLight
+            ? Colors.black.withValues(alpha: .04)
+            : Colors.white.withValues(alpha: .05),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          for (final tier in PremiumTier.values)
+            Expanded(
+              child: _tierTab(l10n, tier, isSelected: tier == selected),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tierTab(
+    AppLocalizations l10n,
+    PremiumTier tier, {
+    required bool isSelected,
+  }) {
+    final isStudio = tier == PremiumTier.studio;
+    return GestureDetector(
+      onTap: () {
+        DuckHaptics.tap();
+        setState(() {
+          _tier = tier;
+          // The plan belongs to the tier; carrying a Premium plan across to
+          // Studio would leave the sheet describing a product that is not on
+          // this tab.
+          _plan = null;
+        });
+      },
+      child: AnimatedContainer(
+        duration: DuckMotion.pressDuration,
+        curve: DuckMotion.pressCurve,
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          color: isSelected ? _gold : Colors.transparent,
+          borderRadius: BorderRadius.circular(13),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (isStudio) ...[
+              Icon(
+                Icons.auto_awesome,
+                size: 14,
+                color: isSelected ? const Color(0xFF151515) : _gold,
+              ),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              l10n.translate(isStudio ? 'payTierStudio' : 'payTierPremium'),
+              style: TextStyle(
+                color: isSelected ? const Color(0xFF151515) : _textMuted,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Benefits ──────────────────────────────────────────────────────────────
+
+  Widget _benefits(AppLocalizations l10n, PremiumTier tier) {
+    final faster = l10n
+        .translate('payBenefitFaster')
+        .replaceAll(
+          '{premium}',
+          '${DuckDownloadsController.premiumConcurrentDownloads}',
+        )
+        .replaceAll(
+          '{free}',
+          '${DuckDownloadsController.freeConcurrentDownloads}',
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _PremiumBenefit(label: l10n.translate('payBenefitAdFree')),
+        _PremiumBenefit(label: faster),
+        if (tier == PremiumTier.studio) ...[
+          const SizedBox(height: 2),
+          Text(
+            l10n.translate('payStudioIncludes'),
+            style: TextStyle(
+              color: _muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _PremiumBenefit(
+            label: l10n.translate('payBenefitMusic'),
+            highlighted: true,
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Plans ─────────────────────────────────────────────────────────────────
+
+  Widget _planChips(
+    AppLocalizations l10n,
+    PremiumTier tier,
+    List<SubscriptionPlan> plans,
+    SubscriptionPlan? selected,
+  ) {
+    final saving = _yearlySavingFor(tier);
+    return Row(
+      children: [
+        for (var i = 0; i < plans.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: _PlanChip(
+              plan: plans[i],
+              product: _controller.subscriptionProduct(plans[i]),
+              isSelected: plans[i] == selected,
+              savingPercent:
+                  (plans[i] == SubscriptionPlan.yearly ||
+                      plans[i] == SubscriptionPlan.studioYearly)
+                  ? saving
+                  : null,
+              onTap: () {
+                DuckHaptics.tap();
+                setState(() => _plan = plans[i]);
+              },
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Action ────────────────────────────────────────────────────────────────
+
+  Widget _action(
+    AppLocalizations l10n,
+    PremiumTier tier,
+    SubscriptionPlan? plan,
+    SubscriptionProduct? product, {
+    required bool ownsThisTier,
+  }) {
+    if (_controller.hasMusicRemovalSubscription) {
+      return _PremiumMessage(
+        icon: Icons.verified,
+        color: _gold,
+        text: l10n.translate('payOwnedEverything'),
+      );
+    }
+    if (ownsThisTier) {
+      return _PremiumMessage(
+        icon: Icons.verified,
+        color: _gold,
+        text: l10n.translate('payCurrentPlan'),
+      );
+    }
+
+    // "Upgrade" rather than "Subscribe" for someone already paying: Play bills
+    // them the difference, and calling that a new subscription reads like
+    // being charged twice.
+    final label = tier == PremiumTier.studio && _controller.isPremiumActive
+        ? 'payCtaUpgrade'
+        : plan == SubscriptionPlan.lifetime
+        ? 'payCtaBuy'
+        : 'payCtaSubscribe';
+
+    return _SubscriptionButton(
+      label: l10n.translate(label),
+      price: product?.localizedPrice,
+      loading: _controller.premiumBusy,
+      enabled: plan != null && !_controller.premiumBusy,
+      onPressed: () {
+        if (plan == null) return;
+        DuckHaptics.tap();
+        _controller.subscribeToPremium(plan);
+      },
+    );
+  }
+}
+
+/// One plan, priced.
+class _PlanChip extends StatelessWidget {
+  const _PlanChip({
+    required this.plan,
+    required this.product,
+    required this.isSelected,
+    required this.savingPercent,
+    required this.onTap,
+  });
+
+  final SubscriptionPlan plan;
+  final SubscriptionProduct? product;
+  final bool isSelected;
+  final int? savingPercent;
+  final VoidCallback onTap;
+
+  String get _nameKey => switch (plan) {
+    SubscriptionPlan.monthly || SubscriptionPlan.studioMonthly =>
+      'payPlanMonthly',
+    SubscriptionPlan.yearly || SubscriptionPlan.studioYearly => 'payPlanYearly',
+    SubscriptionPlan.lifetime => 'payPlanLifetime',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: DuckMotion.pressDuration,
+        curve: DuckMotion.pressCurve,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? _gold.withValues(alpha: .14)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? _gold : _border,
+            width: isSelected ? 1.6 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              l10n.translate(_nameKey),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isSelected ? _gold : _textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              product?.localizedPrice ?? '—',
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _text,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            // The saving is worked out from the live prices, so it cannot
+            // disagree with the numbers printed right above it.
+            if (savingPercent != null)
+              Text(
+                l10n
+                    .translate('paySave')
+                    .replaceAll('{percent}', '$savingPercent'),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _green,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                ),
+              )
+            else if (plan == SubscriptionPlan.lifetime)
+              Text(
+                l10n.translate('payPlanLifetimeNote'),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _muted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                ),
+              )
+            else
+              const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _PremiumBenefit extends StatelessWidget {
-  const _PremiumBenefit({required this.label});
+  const _PremiumBenefit({required this.label, this.highlighted = false});
 
   final String label;
+
+  /// The one line the higher tier exists for, marked so it does not read as
+  /// just another tick in a list of five.
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
@@ -1304,15 +1656,19 @@ class _PremiumBenefit extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Icon(Icons.check_circle, color: _gold, size: 19),
+          Icon(
+            highlighted ? Icons.auto_awesome : Icons.check_circle,
+            color: _gold,
+            size: 19,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
-                color: Color(0xFFEDEDED),
+              style: TextStyle(
+                color: highlighted ? _gold : _text,
                 fontSize: 14,
-                fontWeight: FontWeight.w700,
+                fontWeight: highlighted ? FontWeight.w900 : FontWeight.w700,
               ),
             ),
           ),
