@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -30,12 +31,21 @@ class AdService {
   static const String _realAndroidInterstitialUnitId =
       'ca-app-pub-8105551932366170/3705326736';
 
+  /// Rewarded unit, for the music-removal gate.
+  ///
+  /// Empty until the unit exists in the AdMob console. While it is empty the
+  /// build keeps serving Google's test unit rather than requesting an ID that
+  /// does not exist, which fails every load and leaves the gate permanently
+  /// shut.
+  static const String _realAndroidRewardedUnitId = '';
+
   // Real AdMob Unit IDs (iOS) — create these in the AdMob console for the iOS
   // app entry and paste them here. While they are empty the iOS build keeps
   // serving Google's test units instead of silently requesting Android units,
   // which AdMob rejects.
   static const String _realIosBannerUnitId = '';
   static const String _realIosInterstitialUnitId = '';
+  static const String _realIosRewardedUnitId = '';
 
   // Google Test Ad Unit IDs
   static const String _testAndroidBannerUnitId =
@@ -46,6 +56,10 @@ class AdService {
       'ca-app-pub-3940256099942544/2934735716';
   static const String _testIosInterstitialUnitId =
       'ca-app-pub-3940256099942544/4411468910';
+  static const String _testAndroidRewardedUnitId =
+      'ca-app-pub-3940256099942544/5224354917';
+  static const String _testIosRewardedUnitId =
+      'ca-app-pub-3940256099942544/1712485313';
 
   bool get _isIos => !kIsWeb && Platform.isIOS;
 
@@ -75,6 +89,21 @@ class AdService {
     return _realAndroidInterstitialUnitId;
   }
 
+  /// Rewarded unit for the current platform and mode.
+  String get rewardedAdUnitId {
+    if (useTestAds || kDebugMode) {
+      return _isIos ? _testIosRewardedUnitId : _testAndroidRewardedUnitId;
+    }
+    if (_isIos) {
+      return _realIosRewardedUnitId.isEmpty
+          ? _testIosRewardedUnitId
+          : _realIosRewardedUnitId;
+    }
+    return _realAndroidRewardedUnitId.isEmpty
+        ? _testAndroidRewardedUnitId
+        : _realAndroidRewardedUnitId;
+  }
+
   // Frequency capping for Interstitial Ads.
   DateTime? _lastInterstitialShowTime;
   static const Duration _interstitialCooldown = Duration(minutes: 5);
@@ -91,6 +120,7 @@ class AdService {
       await MobileAds.instance.initialize();
       _initialized = true;
       preloadInterstitial();
+      preloadRewarded();
     } catch (error, stackTrace) {
       reportError(error, stackTrace, reason: 'admob-init');
     }
@@ -189,6 +219,84 @@ class AdService {
       proceedOnce();
     }
   }
+
+  // ── Rewarded ads ──────────────────────────────────────────────────────────
+
+  RewardedAd? _rewardedAd;
+  bool _isRewardedLoading = false;
+
+  /// Fetches a rewarded ad so the next [showRewardedAd] does not stall.
+  void preloadRewarded() {
+    if (_rewardedAd != null || _isRewardedLoading) return;
+    _isRewardedLoading = true;
+    RewardedAd.load(
+      adUnitId: rewardedAdUnitId,
+      request: const AdRequest(),
+      rewardedAdLoadCallback: RewardedAdLoadCallback(
+        onAdLoaded: (ad) {
+          _rewardedAd = ad;
+          _isRewardedLoading = false;
+        },
+        onAdFailedToLoad: (error) {
+          _rewardedAd = null;
+          _isRewardedLoading = false;
+          debugPrint('AdMob: Rewarded failed to load: $error');
+        },
+      ),
+    );
+  }
+
+  /// Shows one rewarded ad and reports whether the user earned the reward.
+  ///
+  /// Earning is the user's choice and always has been: the SDK gives them a
+  /// close button, and closing early forfeits the reward. There is no way to
+  /// hold someone in an ad, and no way to ask for a longer one — the length
+  /// belongs to the creative, not to us. Trying to force either is a policy
+  /// violation, so the gate is built on "did they finish it", not "how long
+  /// did we keep them".
+  ///
+  /// Returns false when no ad could be shown at all, which the caller must
+  /// treat as *not* earned — otherwise an empty ad inventory silently becomes
+  /// a free pass.
+  Future<bool> showRewardedAd() async {
+    final ad = _rewardedAd;
+    if (ad == null) {
+      // Nothing warm. Start fetching for next time and tell the caller now
+      // rather than making them wait on a load that may never finish.
+      preloadRewarded();
+      return false;
+    }
+    _rewardedAd = null;
+
+    var earned = false;
+    final closed = Completer<bool>();
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        preloadRewarded();
+        if (!closed.isCompleted) closed.complete(earned);
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        ad.dispose();
+        preloadRewarded();
+        reportError(error, StackTrace.current, reason: 'admob-rewarded-show');
+        if (!closed.isCompleted) closed.complete(false);
+      },
+    );
+
+    try {
+      await ad.show(
+        onUserEarnedReward: (_, _) => earned = true,
+      );
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace, reason: 'admob-rewarded');
+      if (!closed.isCompleted) closed.complete(false);
+    }
+    return closed.future;
+  }
+
+  /// Whether a rewarded ad is ready to show right now.
+  bool get isRewardedReady => _rewardedAd != null;
 
   /// Creates and loads a new Banner Ad instance
   BannerAd createBannerAd({

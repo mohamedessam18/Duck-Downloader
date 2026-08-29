@@ -24,6 +24,7 @@ import '../services/crash_reporting_service.dart';
 import '../services/download_store.dart';
 import '../services/file_service.dart';
 import '../services/premium_entitlement.dart';
+import '../services/music_removal_service.dart';
 import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
 import '../services/trim_service.dart';
@@ -2139,9 +2140,146 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
+  // ── Music removal ─────────────────────────────────────────────────────────
+
+  final MusicRemovalService _musicRemoval = MusicRemovalService();
+
+  /// Whether this user runs it without watching anything.
+  bool get hasMusicRemovalSubscription =>
+      _musicRemoval.hasStudio(premium.entitlement);
+
+  /// The longest file this user may run it on.
+  Duration get musicRemovalMaxDuration => _musicRemoval.maxDurationFor(
+    hasStudio: hasMusicRemovalSubscription,
+  );
+
+  /// How many ads a free run currently costs, for the sheet to say so.
+  int get musicRemovalAdCount => MusicRemovalService.freeRunAdCount;
+
+  /// How far through the ads the user is, for the sheet to show progress.
+  int musicRemovalAdsWatched = 0;
+
+  /// True while the gate is collecting ads, so the UI can hold still.
+  bool musicRemovalPending = false;
+
+  /// Warms a rewarded ad so the gate does not open onto a spinner.
+  void prepareMusicRemoval() => _musicRemoval.prepare(premium.entitlement);
+
+  /// Decides whether one music-removal run may go ahead.
+  ///
+  /// Length first, then payment: there is no point taking two ads off someone
+  /// for a file the worker is going to refuse anyway.
+  Future<bool> clearMusicRemoval({Duration? duration}) async {
+    final studio = hasMusicRemovalSubscription;
+
+    final length = _musicRemoval.checkDuration(
+      duration: duration,
+      hasStudio: studio,
+    );
+    if (!length.isAllowed) {
+      _refuseMusicRemoval(length.block!, studio);
+      return false;
+    }
+
+    if (studio) return true;
+
+    musicRemovalPending = true;
+    musicRemovalAdsWatched = 0;
+    notifyListeners();
+    try {
+      final payment = await _musicRemoval.collectPayment(
+        entitlement: premium.entitlement,
+        onProgress: (watched, _) {
+          musicRemovalAdsWatched = watched;
+          notifyListeners();
+        },
+      );
+      if (!payment.isAllowed) {
+        _refuseMusicRemoval(payment.block!, studio);
+        return false;
+      }
+      return true;
+    } finally {
+      musicRemovalPending = false;
+      notifyListeners();
+    }
+  }
+
+  void _refuseMusicRemoval(MusicRemovalBlock block, bool studio) {
+    setStatus(
+      _musicRemoval.messageKeyFor(block, hasStudio: studio),
+      {'minutes': '${musicRemovalMaxDuration.inMinutes}'},
+    );
+    flow = DuckFlow.error;
+    notifyListeners();
+  }
+
+  /// Removes the music from something already in the library.
+  ///
+  /// The backend separates stems as part of a download, so this asks it to
+  /// fetch the same source again with the music stripped rather than uploading
+  /// the local copy — the server reaches the source far faster than a phone
+  /// uploads a video, and it costs the user no data.
+  ///
+  /// [titleSuffix] comes from the caller because it is shown to the user and
+  /// the controller has no localizations; the label is baked into the row at
+  /// creation the way a filename is.
+  Future<void> removeMusicFrom(
+    DownloadItem item, {
+    required String titleSuffix,
+  }) async {
+    // Anything browsed off the device carries a filesystem path as its url,
+    // and there is nothing for the backend to fetch.
+    if (!item.url.startsWith('http')) {
+      setStatus('musicRemovalNeedsSource');
+      flow = DuckFlow.error;
+      notifyListeners();
+      return;
+    }
+
+    final duration = await _musicRemoval.durationOf(item.filePath);
+    if (!await clearMusicRemoval(duration: duration)) return;
+
+    await _enqueueDownload(
+      placeholder: DownloadItem(
+        id: _newLocalDownloadId(),
+        url: item.url,
+        title: '${item.title} $titleSuffix',
+        thumbnail: item.thumbnail,
+        platform: item.platform,
+        quality: item.quality,
+        type: item.type,
+        createdAt: DateTime.now(),
+        status: DownloadStatus.queued,
+        progress: 0,
+        favorite: false,
+      ),
+      begin: () => _api.startDownload(
+        url: item.url,
+        type: item.type,
+        quality: item.quality ?? 'Best',
+        removeMusic: true,
+        premiumNoWatermark: true,
+      ),
+    );
+    setStatus('musicRemovalQueued');
+    notifyListeners();
+  }
+
   Future<void> startDownload() async {
     final media = metadata;
     if (media == null || busy) return;
+
+    // Before anything is queued: a run the user is not entitled to must not
+    // reach the backend, and the ads that pay for a free run happen here
+    // rather than after a download the user then cannot use.
+    if (removeMusic &&
+        !await clearMusicRemoval(
+          duration: MusicRemovalService.parseDuration(media.duration),
+        )) {
+      return;
+    }
+
     busy = true;
     flow = DuckFlow.downloading;
     setStatus('statusDownloading');

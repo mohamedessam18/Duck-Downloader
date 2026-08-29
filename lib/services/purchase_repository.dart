@@ -125,11 +125,20 @@ class PurchaseRepository {
     await _box.delete(_verifiedAtKey);
   }
 
+  /// What a given product actually unlocks.
+  ///
+  /// Studio is a superset of Premium rather than a separate list, so a feature
+  /// added to Premium later cannot be accidentally missing from the tier that
+  /// costs more.
   Set<PremiumFeature> _featuresFor(String productId) {
     if (!premiumProductIds.contains(productId)) return const {};
-    return const {
+    const premium = {
       PremiumFeature.adFreeExperience,
       PremiumFeature.fasterProcessing,
     };
+    if (tierFor(productId) == PremiumTier.studio) {
+      return const {...premium, PremiumFeature.musicRemoval};
+    }
+    return premium;
   }
 }

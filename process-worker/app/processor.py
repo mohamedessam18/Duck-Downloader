@@ -21,10 +21,17 @@ from typing import Callable, Optional
 # Stem names produced by the `htdemucs` 4-source model, in Demucs' order.
 STEM_NAMES = ("drums", "bass", "other", "vocals")
 
-# Stems that are considered "music" and get removed. vocals are always kept so
-# the speech/dialogue survives. "other" is kept by default because it often
-# carries sound effects / ambience that is not music; callers can drop it.
-DEFAULT_REMOVE_STEMS = ("drums", "bass")
+# What counts as "music". vocals are always kept — that is the whole point.
+#
+# "other" is everything melodic Demucs did not put in drums, bass or vocals:
+# guitar, piano, synths, strings. It used to be kept, so the feature stripped
+# the rhythm section and left the tune playing, which is not what anyone taps
+# the button for.
+#
+# The cost of dropping it is that ambience and sound effects live in "other"
+# too, so a film clip loses its background as well as its score. Callers can
+# pass their own tuple to keep it.
+DEFAULT_REMOVE_STEMS = ("drums", "bass", "other")
 
 
 @dataclass

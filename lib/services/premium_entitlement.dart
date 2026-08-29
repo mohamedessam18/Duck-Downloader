@@ -10,10 +10,30 @@ const yearlyPremiumProductId = 'duck_pro_yearly';
 /// expiry and grace windows applies to the two above and to none of this one.
 const lifetimePremiumProductId = 'duck_pro_lifetime';
 
-/// The two that renew, and so the two that can lapse.
+/// Studio: everything Premium has, plus music removal.
+///
+/// A higher tier rather than a parallel subscription, because someone who
+/// wants music removal almost always wants an ad-free app too. Two separate
+/// subscriptions would charge them twice for the overlap; a tier means Play
+/// bills an existing Premium subscriber only the difference when they upgrade.
+///
+/// No lifetime plan here on purpose. Music removal costs GPU time on every
+/// use, so a one-off payment for unlimited future separations is a bill with
+/// no ceiling.
+const monthlyStudioProductId = 'duck_studio_monthly';
+const yearlyStudioProductId = 'duck_studio_yearly';
+
+/// The products that grant music removal.
+const studioProductIds = <String>{
+  monthlyStudioProductId,
+  yearlyStudioProductId,
+};
+
+/// Everything that renews, and so everything that can lapse.
 const subscriptionProductIds = <String>{
   monthlyPremiumProductId,
   yearlyPremiumProductId,
+  ...studioProductIds,
 };
 
 /// Everything the store is asked about, and everything that grants premium.
@@ -26,24 +46,32 @@ const premiumProductIds = <String>{
 bool isRecurringProduct(String productId) =>
     subscriptionProductIds.contains(productId);
 
-enum SubscriptionPlan { monthly, yearly, lifetime }
+/// Which tier a product belongs to.
+enum PremiumTier { premium, studio }
+
+PremiumTier tierFor(String productId) =>
+    studioProductIds.contains(productId) ? PremiumTier.studio : PremiumTier.premium;
+
+enum SubscriptionPlan { monthly, yearly, lifetime, studioMonthly, studioYearly }
 
 extension SubscriptionPlanStoreId on SubscriptionPlan {
   String get productId => switch (this) {
     SubscriptionPlan.monthly => monthlyPremiumProductId,
     SubscriptionPlan.yearly => yearlyPremiumProductId,
     SubscriptionPlan.lifetime => lifetimePremiumProductId,
+    SubscriptionPlan.studioMonthly => monthlyStudioProductId,
+    SubscriptionPlan.studioYearly => yearlyStudioProductId,
   };
+
+  PremiumTier get tier => tierFor(productId);
 }
 
 /// What paying actually buys.
 ///
 /// Only what the app enforces belongs here. This list used to carry
-/// `priorityFeatures`, `futurePremiumTools`, `earlyAccess` and `musicRemoval`
-/// as well: every one of them was written into the entitlement on purchase and
-/// then never read by anything. `musicRemoval` was worse than unused — the one
-/// getter that asked for it could never be true, because the entitlement was
-/// never given it. Music removal is free for everyone and needs no flag.
+/// `priorityFeatures`, `futurePremiumTools` and `earlyAccess` as well: every
+/// one of them was written into the entitlement on purchase and then never
+/// read by anything.
 enum PremiumFeature {
   /// No banners, and no interstitial before a download starts.
   adFreeExperience,
@@ -54,6 +82,13 @@ enum PremiumFeature {
   /// It was granted and never read for as long as it existed, so a paying
   /// user's downloads ran at exactly the speed a free user's did.
   fasterProcessing,
+
+  /// Separating the vocals out of a track without watching ads for it.
+  ///
+  /// Studio only. A free user still gets the feature — they pay for each run
+  /// with rewarded ads and are held to a shorter file, because every run costs
+  /// real GPU time and two ads in a low-eCPM market do not cover a long one.
+  musicRemoval,
 }
 
 class PremiumEntitlement {
