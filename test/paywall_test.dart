@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Every string the paywall renders.
 const _paywallKeys = <String>[
-  'payTitleFree', 'payTitlePremium', 'payTitleStudio',
+  'payTitleDuckPremium', 'payTitleDuckStudio', 'badgePlans',
   'paySubtitleFree', 'paySubtitleActive',
   'payTierPremium', 'payTierStudio',
   'payBenefitAdFree', 'payBenefitFaster', 'payBenefitMusic',
@@ -82,7 +82,13 @@ void main() {
     /// Names, not sentences. A product is called the same thing in every
     /// language, and "translating" a brand is how you end up with two names
     /// for one thing in the store and in the app.
-    const brandNames = {'payTitleFree', 'payTierPremium', 'payTierStudio'};
+    const brandNames = {
+      'payTitleDuckPremium',
+      'payTitleDuckStudio',
+      'badgePlans',
+      'payTierPremium',
+      'payTierStudio',
+    };
 
     test('every key has text in both', () {
       for (final key in _paywallKeys) {

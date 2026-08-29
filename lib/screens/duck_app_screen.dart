@@ -978,7 +978,15 @@ class _ProBadgeState extends State<_ProBadge> {
   @override
   Widget build(BuildContext context) {
     final active = widget.controller.isPremiumActive;
+    final hasStudio = widget.controller.hasMusicRemovalSubscription;
     final isLight = Theme.of(context).brightness == Brightness.light;
+    final l10n = AppLocalizations.of(context);
+    final label = (hasStudio
+            ? l10n.translate('payTierStudio')
+            : active
+            ? l10n.translate('payTierPremium')
+            : l10n.translate('badgePlans'))
+        .toUpperCase();
 
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final useLiquidEffects = !reduceMotion;
@@ -1020,6 +1028,8 @@ class _ProBadgeState extends State<_ProBadge> {
                       active,
                       baseColor,
                       containerColor,
+                      label: label,
+                      hasStudio: hasStudio,
                     ),
                   )
                 : _buildContent(
@@ -1027,6 +1037,8 @@ class _ProBadgeState extends State<_ProBadge> {
                     active,
                     baseColor,
                     containerColor,
+                    label: label,
+                    hasStudio: hasStudio,
                     noBlur: true,
                   ),
           ),
@@ -1040,6 +1052,8 @@ class _ProBadgeState extends State<_ProBadge> {
     bool active,
     Color baseColor,
     Color containerColor, {
+    required String label,
+    required bool hasStudio,
     bool noBlur = false,
   }) {
     return DecoratedBox(
@@ -1064,7 +1078,9 @@ class _ProBadgeState extends State<_ProBadge> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              active
+              hasStudio
+                  ? Icons.graphic_eq
+                  : active
                   ? Icons.workspace_premium
                   : Icons.workspace_premium_outlined,
               color: active
@@ -1074,7 +1090,11 @@ class _ProBadgeState extends State<_ProBadge> {
             ),
             const SizedBox(width: 7),
             Text(
-              active ? 'PREMIUM' : 'DUCK PREMIUM',
+              // Their tier when they have one, and the door to the plans when
+              // they do not. It used to read "Duck Premium" to a subscriber
+              // and to someone who had never paid, which named neither of
+              // them correctly once a second tier existed.
+              label,
               style: TextStyle(
                 color: active
                     ? (isLight ? const Color(0xFF3D2D03) : _gold)
@@ -1207,10 +1227,9 @@ class _PremiumSheetState extends State<_PremiumSheet> {
             ? null
             : _controller.subscriptionProduct(plan);
 
-        final hasStudio = _controller.hasMusicRemovalSubscription;
-        final hasPremium = _controller.isPremiumActive;
         final ownsThisTier =
-            hasStudio || (hasPremium && tier == PremiumTier.premium);
+            _controller.hasMusicRemovalSubscription ||
+            (_controller.isPremiumActive && tier == PremiumTier.premium);
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
@@ -1239,7 +1258,7 @@ class _PremiumSheetState extends State<_PremiumSheet> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _header(l10n, hasPremium: hasPremium, hasStudio: hasStudio),
+                    _header(l10n, tier, ownsThisTier: ownsThisTier),
                     const SizedBox(height: 18),
                     _tierSwitch(l10n, tier),
                     const SizedBox(height: 18),
@@ -1291,16 +1310,18 @@ class _PremiumSheetState extends State<_PremiumSheet> {
 
   // ── Header ────────────────────────────────────────────────────────────────
 
+  /// Names the tier the user is looking at, not the one they have bought.
+  ///
+  /// The title used to be fixed, so tapping over to Studio left "Duck
+  /// Premium" sitting above a Studio price. The header answers "what is
+  /// this?" and the line under it answers "where do I stand?" — two
+  /// questions, two places, neither of them the tab bar's job.
   Widget _header(
-    AppLocalizations l10n, {
-    required bool hasPremium,
-    required bool hasStudio,
+    AppLocalizations l10n,
+    PremiumTier tier, {
+    required bool ownsThisTier,
   }) {
-    final title = hasStudio
-        ? 'payTitleStudio'
-        : hasPremium
-        ? 'payTitlePremium'
-        : 'payTitleFree';
+    final isStudio = tier == PremiumTier.studio;
     return Row(
       children: [
         Container(
@@ -1311,7 +1332,7 @@ class _PremiumSheetState extends State<_PremiumSheet> {
             borderRadius: BorderRadius.circular(14),
           ),
           child: Icon(
-            hasStudio ? Icons.graphic_eq : Icons.workspace_premium,
+            isStudio ? Icons.graphic_eq : Icons.workspace_premium,
             color: _gold,
           ),
         ),
@@ -1320,17 +1341,23 @@ class _PremiumSheetState extends State<_PremiumSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                l10n.translate(title),
-                style: TextStyle(
-                  color: _text,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
+              AnimatedSwitcher(
+                duration: DuckMotion.pressDuration,
+                child: Text(
+                  l10n.translate(
+                    isStudio ? 'payTitleDuckStudio' : 'payTitleDuckPremium',
+                  ),
+                  key: ValueKey(isStudio),
+                  style: TextStyle(
+                    color: _text,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
               Text(
                 l10n.translate(
-                  hasPremium ? 'paySubtitleActive' : 'paySubtitleFree',
+                  ownsThisTier ? 'paySubtitleActive' : 'paySubtitleFree',
                 ),
                 style: TextStyle(color: _muted, fontSize: 12),
               ),
