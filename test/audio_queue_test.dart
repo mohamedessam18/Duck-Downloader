@@ -1,4 +1,5 @@
 import 'package:duck_downloader/models/download_models.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:duck_downloader/services/api_client.dart';
 import 'package:duck_downloader/services/clipboard_service.dart';
 import 'package:duck_downloader/services/download_store.dart';
@@ -42,6 +43,44 @@ void main() {
       initializePlatformServices: false,
     );
   }
+
+  test('repeat-all is not handed to the player as repeat-all', () async {
+    final controller = createController();
+    addTearDown(controller.dispose);
+
+    // off -> all
+    await controller.toggleLoopMode();
+    expect(controller.loopMode, LoopMode.all);
+    // The player drives one file at a time, so LoopMode.all there would loop
+    // that file and the track would never end — which is exactly how
+    // "repeat all" used to behave like "repeat one".
+    expect(controller.audioPlayer.loopMode, LoopMode.off);
+
+    // all -> one, the only mode the player itself should handle
+    await controller.toggleLoopMode();
+    expect(controller.loopMode, LoopMode.one);
+    expect(controller.audioPlayer.loopMode, LoopMode.one);
+
+    // one -> off
+    await controller.toggleLoopMode();
+    expect(controller.loopMode, LoopMode.off);
+    expect(controller.audioPlayer.loopMode, LoopMode.off);
+  });
+
+  test('shuffle and repeat survive a restart', () async {
+    final first = createController();
+    await first.toggleShuffle();
+    await first.toggleLoopMode();
+    expect(first.shuffleEnabled, isTrue);
+    expect(first.loopMode, LoopMode.all);
+    first.dispose();
+
+    // Same storage, new controller — what a relaunch actually looks like.
+    final second = createController();
+    addTearDown(second.dispose);
+    expect(second.shuffleEnabled, isTrue);
+    expect(second.loopMode, LoopMode.all);
+  });
 
   test('markAudioBackgroundReady flips ready flag', () async {
     final controller = createController();

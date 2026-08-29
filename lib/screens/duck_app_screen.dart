@@ -126,16 +126,28 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
 
     final currentFlow = widget.controller.flow;
     if (_prevFlow != currentFlow) {
+      final l10n = AppLocalizations.of(context);
       if (currentFlow == DuckFlow.success) {
         DuckHaptics.success();
-        _showSettingToast(context, 'Download Completed!', true);
+        _showSettingToast(context, l10n.translate('statusComplete'), true);
       } else if (currentFlow == DuckFlow.error) {
         DuckHaptics.error();
-        final err = widget.controller.status;
-        if (err.isNotEmpty &&
-            err != 'null' &&
-            !err.contains('BLOCKED_ADULT_CONTENT')) {
-          _showSettingToast(context, err, false);
+        // `status` is the English form on purpose here: these two are internal
+        // markers thrown as exceptions, not sentences anyone should read.
+        final marker = widget.controller.status;
+        if (marker.contains('BLOCKED_ADULT_CONTENT')) {
+          // Already handled by the dialog above.
+        } else if (marker.contains('ADULT_CHECK_UNAVAILABLE')) {
+          _showSettingToast(
+            context,
+            l10n.translate('statusAdultCheckUnavailable'),
+            false,
+          );
+        } else {
+          final text = widget.controller.statusMessage.resolve(l10n);
+          if (text.isNotEmpty && text != 'null') {
+            _showSettingToast(context, text, false);
+          }
         }
       }
       _prevFlow = currentFlow;
@@ -564,12 +576,16 @@ class _HomeView extends StatelessWidget {
                 ],
                 _StatusBar(
                   flow: controller.flow,
-                  status: controller.status,
+                  status: controller.statusMessage.resolve(
+                    AppLocalizations.of(context),
+                  ),
                   progress: active?.progress ?? 0,
                 ),
-                if (controller.status.toLowerCase().contains(
-                  'in-app browser',
-                )) ...[
+                // Was `status.toLowerCase().contains('in-app browser')`, so
+                // the login button existed only as long as that exact English
+                // wording did — translating the message would have removed the
+                // only way out of the error it describes.
+                if (controller.needsBrowserLogin) ...[
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
@@ -1179,7 +1195,16 @@ class _PremiumSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 18),
                     const _PremiumBenefit(label: 'Ad-Free Experience'),
-                    const _PremiumBenefit(label: 'Faster Downloads'),
+                    // Says the number because the number is what is actually
+                    // enforced. "Faster Downloads" on its own was a claim
+                    // nothing in the app delivered.
+                    _PremiumBenefit(
+                      label:
+                          'Faster Downloads — '
+                          '${DuckDownloadsController.premiumConcurrentDownloads}'
+                          ' at once instead of '
+                          '${DuckDownloadsController.freeConcurrentDownloads}',
+                    ),
                     const SizedBox(height: 18),
                     if (controller.premiumError != null)
                       _PremiumMessage(

@@ -36,13 +36,24 @@ extension SubscriptionPlanStoreId on SubscriptionPlan {
   };
 }
 
+/// What paying actually buys.
+///
+/// Only what the app enforces belongs here. This list used to carry
+/// `priorityFeatures`, `futurePremiumTools`, `earlyAccess` and `musicRemoval`
+/// as well: every one of them was written into the entitlement on purchase and
+/// then never read by anything. `musicRemoval` was worse than unused — the one
+/// getter that asked for it could never be true, because the entitlement was
+/// never given it. Music removal is free for everyone and needs no flag.
 enum PremiumFeature {
+  /// No banners, and no interstitial before a download starts.
   adFreeExperience,
+
+  /// A higher ceiling on downloads running at once.
+  ///
+  /// This is what makes "Faster Downloads" on the paywall a true statement.
+  /// It was granted and never read for as long as it existed, so a paying
+  /// user's downloads ran at exactly the speed a free user's did.
   fasterProcessing,
-  priorityFeatures,
-  futurePremiumTools,
-  earlyAccess,
-  musicRemoval,
 }
 
 class PremiumEntitlement {
