@@ -1,6 +1,8 @@
 import 'package:duck_downloader/services/ad_service.dart';
 import 'package:duck_downloader/services/music_removal_service.dart';
 import 'package:duck_downloader/services/premium_entitlement.dart';
+import 'package:duck_downloader/l10n/app_localizations.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// An ad service that answers without touching the SDK.
@@ -218,6 +220,50 @@ void main() {
           MusicRemovalService.parseDuration(value),
           isNull,
           reason: 'parsed "$value"',
+        );
+      }
+    });
+  });
+
+  group('the copy the user reads', () {
+    final english = AppLocalizations(const Locale('en'));
+    final arabic = AppLocalizations(const Locale('ar'));
+
+    const keys = [
+      'musicRemovalTitle', 'musicRemovalSubtitle', 'musicRemovalNote',
+      'musicRemovalWatchAds', 'musicRemovalSubscribe', 'musicRemovalAdProgress',
+      'musicRemovalSuffix', 'musicRemovalQueued', 'musicRemovalNeedsSource',
+      'musicRemovalTooLongFree', 'musicRemovalTooLongStudio',
+      'musicRemovalAdsNotWatched', 'musicRemovalAdsUnavailable',
+    ];
+
+    test('every string exists in both languages', () {
+      for (final key in keys) {
+        expect(english.translate(key), isNot(key), reason: '$key: no English');
+        final ar = arabic.translate(key);
+        expect(ar, isNot(key), reason: '$key: no Arabic');
+        expect(ar, isNot(english.translate(key)), reason: '$key: not translated');
+      }
+    });
+
+    test('the numbers the sheet fills in survive translation', () {
+      // A gate that says "watch  ads" or a limit with no minutes in it is
+      // worse than no message at all.
+      for (final l10n in [english, arabic]) {
+        expect(l10n.translate('musicRemovalWatchAds'), contains('{count}'));
+        expect(l10n.translate('musicRemovalNote'), contains('{minutes}'));
+        expect(l10n.translate('musicRemovalTooLongFree'), contains('{minutes}'));
+        expect(l10n.translate('musicRemovalAdProgress'), contains('{watched}'));
+        expect(l10n.translate('musicRemovalAdProgress'), contains('{total}'));
+      }
+    });
+
+    test('the two ad failures do not say the same thing', () {
+      // One is the user closing an ad, the other is us having none to show.
+      for (final l10n in [english, arabic]) {
+        expect(
+          l10n.translate('musicRemovalAdsNotWatched'),
+          isNot(l10n.translate('musicRemovalAdsUnavailable')),
         );
       }
     });

@@ -13,6 +13,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/duck_media_channel.dart';
 import '../../models/download_models.dart';
 import '../../services/trim_service.dart';
+import '../../screens/duck_app_screen.dart';
+import '../music_removal_sheet.dart';
 import '../../state/downloads_controller.dart';
 import '../../services/vault_encryption_service.dart';
 import 'media_colors.dart';
@@ -1990,6 +1992,29 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                                 _trimEnd = duration.inSeconds.toDouble();
                                               });
                                             },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    // While they are listening is when the
+                                    // music being too loud is an actual
+                                    // feeling rather than a menu item.
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      icon: const Icon(Icons.graphic_eq,
+                                          color: Colors.white70, size: 18),
+                                      onPressed: () {
+                                        final item = widget.controller.playerItem;
+                                        if (item == null) return;
+                                        showMusicRemovalSheet(
+                                          context,
+                                          widget.controller,
+                                          item: item,
+                                          onSubscribe: () => showPremiumSheet(
+                                            context,
+                                            widget.controller,
+                                          ),
+                                        );
+                                      },
                                     ),
                                     const SizedBox(width: 8),
                                   ],

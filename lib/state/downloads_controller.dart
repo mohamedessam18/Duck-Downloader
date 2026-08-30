@@ -24,6 +24,7 @@ import '../services/crash_reporting_service.dart';
 import '../services/download_store.dart';
 import '../services/file_service.dart';
 import '../services/premium_entitlement.dart';
+import '../l10n/app_localizations.dart';
 import '../services/music_removal_service.dart';
 import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
@@ -2212,6 +2213,18 @@ class DuckDownloadsController extends ChangeNotifier
     );
     flow = DuckFlow.error;
     notifyListeners();
+  }
+
+  /// The single entry point every "remove the music" button goes through.
+  ///
+  /// The suffix is resolved by the caller because it is shown to the user and
+  /// the controller has no localizations — the label is baked into the row at
+  /// creation the way a filename is.
+  Future<void> startMusicRemoval(DownloadItem item, AppLocalizations l10n) {
+    return removeMusicFrom(
+      item,
+      titleSuffix: l10n.translate('musicRemovalSuffix'),
+    );
   }
 
   /// Removes the music from something already in the library.

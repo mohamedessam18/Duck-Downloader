@@ -227,6 +227,7 @@ class AppLocalizations {
       'payTitleDuckPremium': 'Duck Premium',
       'payTitleDuckStudio': 'Duck Studio',
       'badgePlans': 'Duck Plans',
+      'musicRemovalNote': 'Runs on our servers and takes a few minutes. Close the app — you will get a notification. Files up to {minutes} minutes.',
     },
     'ar': {
       'appName': 'Duck Downloader',
@@ -436,6 +437,7 @@ class AppLocalizations {
       'payTitleDuckPremium': 'Duck Premium',
       'payTitleDuckStudio': 'Duck Studio',
       'badgePlans': 'Duck Plans',
+      'musicRemovalNote': 'بيشتغل على السيرفر وبياخد كام دقيقة. اقفل التطبيق عادي — هيجيلك نوتفكيشن. الملفات لحد {minutes} دقيقة.',
     },
   };
 

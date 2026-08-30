@@ -23,6 +23,7 @@ import '../core/plurals.dart';
 import 'device_folder_sheet.dart';
 import '../widgets/duck_empty_state.dart';
 import '../widgets/duck_motion.dart';
+import '../widgets/music_removal_sheet.dart';
 import '../state/downloads_controller.dart';
 import '../services/device_media_service.dart';
 import '../services/download_store.dart';
@@ -569,9 +570,31 @@ class _HomeView extends StatelessWidget {
                 ),
                 if (controller.lastDownloadedItem != null) ...[
                   const SizedBox(height: 12),
-                  IconButton(
-                    onPressed: controller.shareLastDownloadedItem,
-                    icon: Icon(Icons.ios_share, color: _gold, size: 28),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        onPressed: controller.shareLastDownloadedItem,
+                        icon: Icon(Icons.ios_share, color: _gold, size: 28),
+                      ),
+                      // Catches whoever forgot the switch. The moment a
+                      // download finishes is when someone plays it and hears
+                      // the music they did not want.
+                      if (controller.lastDownloadedItem!.type !=
+                          DownloadType.image)
+                        IconButton(
+                          tooltip: AppLocalizations.of(context)
+                              .translate('musicRemovalTitle'),
+                          onPressed: () => showMusicRemovalSheet(
+                            context,
+                            controller,
+                            item: controller.lastDownloadedItem!,
+                            onSubscribe: () =>
+                                showPremiumSheet(context, controller),
+                          ),
+                          icon: Icon(Icons.graphic_eq, color: _gold, size: 28),
+                        ),
+                    ],
                   ),
                 ],
                 _StatusBar(
@@ -1815,6 +1838,81 @@ class _SubscriptionButton extends StatelessWidget {
   }
 }
 
+
+/// The "remove the music" switch in the download panel.
+///
+/// It only records intent. Nothing is charged and no ad is shown until the
+/// user actually taps Download — flipping a switch and changing your mind
+/// should cost nothing.
+class _RemoveMusicToggle extends StatelessWidget {
+  const _RemoveMusicToggle({required this.controller});
+
+  final DuckDownloadsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final on = controller.removeMusic;
+
+    return GestureDetector(
+      onTap: () {
+        DuckHaptics.toggle();
+        controller.toggleRemoveMusic(!on);
+        if (!on) controller.prepareMusicRemoval();
+      },
+      child: AnimatedContainer(
+        duration: DuckMotion.pressDuration,
+        curve: DuckMotion.pressCurve,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: on ? _gold.withValues(alpha: .12) : _dark,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: on ? _gold : _border),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.graphic_eq,
+              size: 18,
+              color: on ? _gold : _muted,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.translate('musicRemovalTitle'),
+                    style: TextStyle(
+                      color: on ? _gold : _text,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    l10n.translate('musicRemovalSubtitle'),
+                    style: TextStyle(color: _muted, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: on,
+              activeThumbColor: const Color(0xFF151515),
+              activeTrackColor: _gold,
+              onChanged: (value) {
+                DuckHaptics.toggle();
+                controller.toggleRemoveMusic(value);
+                if (value) controller.prepareMusicRemoval();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _StatusBar extends StatelessWidget {
   const _StatusBar({
     required this.flow,
@@ -2046,6 +2144,15 @@ class _OptionsCard extends StatelessWidget {
               ),
             ],
           ),
+
+          // Directly under the quality, not folded into an "advanced" section.
+          // A feature nobody can see is a feature nobody subscribes for, and
+          // this is the moment the user is already deciding what they want out
+          // of this download.
+          if (controller.selectedType != DownloadType.image) ...[
+            const SizedBox(height: 10),
+            _RemoveMusicToggle(controller: controller),
+          ],
 
           const SizedBox(height: 11),
           SizedBox(
@@ -3449,6 +3556,13 @@ class _DownloadRow extends StatelessWidget {
                   _showMetadataEditDialog(context, item, controller);
                 case 'convert_audio':
                   _showVideoToAudioDialog(context, item, controller);
+                case 'remove_music':
+                  showMusicRemovalSheet(
+                    context,
+                    controller,
+                    item: item,
+                    onSubscribe: () => showPremiumSheet(context, controller),
+                  );
                 case 'ringtone':
                   _showRingtoneCutterSheet(context, item, controller);
               }
@@ -3542,6 +3656,24 @@ class _DownloadRow extends StatelessWidget {
                       const SizedBox(width: 12),
                       Text(
                         'Convert to Audio',
+                        style: TextStyle(color: _text, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ),
+              // No crown and no padlock. A lock next to the name stops people
+              // trying it, and nobody subscribes to something they have never
+              // used — the ads are offered after the tap, not before.
+              if (item.type != DownloadType.image)
+                PopupMenuItem(
+                  value: 'remove_music',
+                  child: Row(
+                    children: [
+                      Icon(Icons.graphic_eq, color: _gold, size: 20),
+                      const SizedBox(width: 12),
+                      Text(
+                        AppLocalizations.of(context)
+                            .translate('musicRemovalTitle'),
                         style: TextStyle(color: _text, fontSize: 14),
                       ),
                     ],
