@@ -17,9 +17,21 @@ class Settings(BaseModel):
     cookies_file: str | None = os.getenv("DUCK_YTDLP_COOKIES")
     max_download_seconds: int = int(os.getenv("DUCK_MAX_DOWNLOAD_SECONDS", "1800"))
     max_concurrent_downloads: int = int(os.getenv("DUCK_MAX_CONCURRENT_DOWNLOADS", "3"))
-    # AI worker (music removal). Runs on the same host and shares storage_dir,
-    # so the main API posts an absolute path and the worker processes in place.
+    # AI worker (music removal).
+    #
+    # It needs a GPU and this API does not, so by default the two are separate
+    # services that only exchange URLs: the worker fetches the file over HTTP
+    # and streams the processed one back. Set
+    # DUCK_PROCESS_WORKER_SHARED_VOLUME=1 for a docker-compose setup where they
+    # genuinely mount the same disk, and the file is processed in place instead.
     process_worker_url: str = os.getenv("DUCK_PROCESS_WORKER_URL", "http://localhost:8001")
+    process_worker_shared_volume: bool = (
+        os.getenv("DUCK_PROCESS_WORKER_SHARED_VOLUME", "").strip().lower()
+        in {"1", "true", "yes"}
+    )
+    # Shared secret. Without it, a worker reachable from the internet is a free
+    # GPU for whoever finds it.
+    process_worker_token: str = os.getenv("DUCK_WORKER_TOKEN", "")
     music_removal_timeout_seconds: int = int(os.getenv("DUCK_MUSIC_REMOVAL_TIMEOUT_SECONDS", "900"))
 
     @property

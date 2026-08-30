@@ -1,14 +1,42 @@
+# Local development: API and worker on one machine, sharing a volume.
+#
+# Production does NOT look like this. The worker needs a GPU and the API does
+# not, so they are deployed as separate services that only exchange URLs —
+# DUCK_PROCESS_WORKER_SHARED_VOLUME is what switches between the two, and it is
+# only set here.
 services:
   duck-api:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-      DUCK_PUBLIC_BASE_URL: "https://api.duckdownloader.site"
+      DUCK_PUBLIC_BASE_URL: "http://duck-api:8000"
       DUCK_STORAGE_DIR: "/data/downloads"
       DUCK_MAX_CONCURRENT_DOWNLOADS: "3"
+      DUCK_PROCESS_WORKER_URL: "http://duck-worker:8000"
+      DUCK_PROCESS_WORKER_SHARED_VOLUME: "1"
+      DUCK_WORKER_TOKEN: "${DUCK_WORKER_TOKEN:-local-dev-token}"
     volumes:
       - duck_downloads:/data/downloads
+    depends_on:
+      - duck-worker
+
+  duck-worker:
+    build: ./process-worker
+    environment:
+      DUCK_STORAGE_DIR: "/data/downloads"
+      DUCK_WORKER_TOKEN: "${DUCK_WORKER_TOKEN:-local-dev-token}"
+    volumes:
+      - duck_downloads:/data/downloads
+    # No GPU on a laptop: Demucs falls back to the CPU and is slow but correct.
+    # Uncomment on a machine with a card.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
 volumes:
   duck_downloads:

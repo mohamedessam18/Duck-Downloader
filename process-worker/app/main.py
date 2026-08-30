@@ -1,10 +1,24 @@
 """Duck Downloader AI worker.
 
 A small FastAPI service whose only job is to remove background music from a
-media file using Demucs source separation. It reads from the same shared
-``/data/downloads`` volume as the main Duck API, so it never has to transfer
-files over HTTP: it receives an absolute path, processes it in place, and
-writes the cleaned file next to the original.
+media file using Demucs source separation.
+
+It accepts work two ways:
+
+``input_url``
+    Fetch the file over HTTP, process it, and stream the result back in the
+    response body. Nothing is shared between the two services, so the worker
+    can live wherever there is a GPU while the API stays where it is.
+
+``input_path``
+    Read a path on a volume both services mount, process it in place. Only
+    usable when they run on the same host, which is what ``docker-compose``
+    does for local work.
+
+The path mode was the only one that existed, and it quietly required the API
+and the GPU to be the same machine — so deploying the worker anywhere with a
+graphics card meant moving the whole API onto a GPU host and paying for a card
+to serve JSON.
 
 Concurrency is intentionally serial (a single asyncio lock) because Demucs is
 GPU/RAM heavy. The main API controls admission via its download semaphore and
@@ -21,8 +35,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import urllib.error
+import urllib.parse
+import urllib.request
+
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+from pydantic import BaseModel, model_validator
 
 from .processor import (
     DEFAULT_REMOVE_STEMS,
@@ -35,13 +55,34 @@ from .processor import (
 MAX_DURATION_SECONDS = float(os.getenv("DUCK_MAX_DURATION_SECONDS", "900"))   # 15 min
 MAX_FILE_SIZE_BYTES = int(os.getenv("DUCK_MAX_FILE_SIZE_BYTES", str(600 * 1024 * 1024)))
 
+# Shared secret with the main API.
+#
+# Once the worker is reachable over the internet rather than sitting on the
+# API's own host, an open /process endpoint is a free GPU for anyone who finds
+# it. Enforced whenever it is set; the startup hook below complains loudly when
+# it is not.
+WORKER_TOKEN = os.getenv("DUCK_WORKER_TOKEN", "").strip()
+
+# How long to wait on the API while pulling the input file.
+FETCH_TIMEOUT_SECONDS = float(os.getenv("DUCK_WORKER_FETCH_TIMEOUT", "120"))
+
 
 class ProcessRequest(BaseModel):
-    """Payload posted by the main Duck API to start a removal job."""
+    """Payload posted by the main Duck API to start a removal job.
 
-    input_path: str
+    Exactly one of ``input_url`` and ``input_path`` is required.
+    """
+
+    input_url: Optional[str] = None
+    input_path: Optional[str] = None
     output_format: str = "mp4"
     remove_stems: Optional[tuple[str, ...]] = None
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "ProcessRequest":
+        if bool(self.input_url) == bool(self.input_path):
+            raise ValueError("Provide exactly one of input_url or input_path.")
+        return self
 
 
 class ProcessResponse(BaseModel):
@@ -51,6 +92,18 @@ class ProcessResponse(BaseModel):
     vocals_kept: bool
     removed_stems: list[str]
     device: str
+
+
+
+def _warn_if_unprotected() -> None:
+    if WORKER_TOKEN:
+        return
+    print(
+        "WARNING: DUCK_WORKER_TOKEN is unset. /process and /process/stream will "
+        "accept work from anyone who can reach this service. Set it on the "
+        "worker and on the API before exposing this to the internet.",
+        flush=True,
+    )
 
 
 state: dict[str, Any] = {"separators": None}
@@ -164,6 +217,7 @@ def _separate_factory():
 async def lifespan(_app: FastAPI):
     # We deliberately do NOT pre-load the model here: /health must return
     # instantly and the model is heavy. It loads on first /process instead.
+    _warn_if_unprotected()
     yield
 
 
@@ -175,25 +229,111 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/process", response_model=ProcessResponse)
-async def process(body: ProcessRequest) -> ProcessResponse:
-    input_path = _resolve_shared_path(body.input_path)
-    if not input_path.exists():
-        raise HTTPException(status_code=404, detail="Input file not found.")
 
-    size = input_path.stat().st_size
-    if size > MAX_FILE_SIZE_BYTES:
+def _require_token(provided: Optional[str]) -> None:
+    """Rejects work from anyone who does not hold the shared secret."""
+    if not WORKER_TOKEN:
+        return
+    if provided != WORKER_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid worker token.")
+
+
+def _fetch_input(url: str, destination: Path) -> None:
+    """Pulls the file to process into ``destination``.
+
+    Size is checked twice on purpose: ``Content-Length`` is a hint the sender
+    controls, so it is also enforced while the bytes arrive. Otherwise a
+    truthful-looking header would let a 5GB file fill the disk before anyone
+    noticed.
+    """
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Input URL must be http(s).")
+
+    request = urllib.request.Request(url, headers={"User-Agent": "duck-worker"})
+    try:
+        with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
+            declared = response.headers.get("Content-Length")
+            if declared and int(declared) > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Input file exceeds the maximum allowed size for music removal.",
+                )
+
+            written = 0
+            with destination.open("wb") as out:
+                while chunk := response.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > MAX_FILE_SIZE_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="Input file exceeds the maximum allowed size for music removal.",
+                        )
+                    out.write(chunk)
+    except HTTPException:
+        raise
+    except urllib.error.HTTPError as exc:
         raise HTTPException(
-            status_code=413,
-            detail="Input file exceeds the maximum allowed size for music removal.",
-        )
+            status_code=502,
+            detail=f"Could not fetch the input file ({exc.code}).",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not fetch the input file: {exc}",
+        ) from exc
 
-    duration = probe_duration_seconds(input_path)
+    if written == 0:
+        raise HTTPException(status_code=502, detail="The input file was empty.")
+
+
+def _guard_duration(path: Path) -> None:
+    duration = probe_duration_seconds(path)
     if duration and duration > MAX_DURATION_SECONDS:
         raise HTTPException(
             status_code=413,
             detail="Input media exceeds the maximum allowed duration for music removal.",
         )
+
+
+def _separate(input_path: Path, output_path: Path, remove_stems: tuple[str, ...]) -> ProcessResult:
+    return remove_music(
+        input_path,
+        output_path,
+        _separate_factory(),
+        remove_stems,
+    )
+
+
+@app.post("/process", response_model=ProcessResponse)
+async def process(
+    body: ProcessRequest,
+    x_duck_worker_token: Optional[str] = Header(default=None),
+) -> ProcessResponse:
+    """Removes the music from a file the API already holds, in place.
+
+    Same-host mode. The response says where the file is, because it never
+    moved: the worker overwrote the original on the volume both services see.
+    """
+
+    _require_token(x_duck_worker_token)
+    if not body.input_path:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint takes input_path. Use /process/stream for a URL.",
+        )
+
+    input_path = _resolve_shared_path(body.input_path)
+    if not input_path.exists():
+        raise HTTPException(status_code=404, detail="Input file not found.")
+
+    if input_path.stat().st_size > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Input file exceeds the maximum allowed size for music removal.",
+        )
+    _guard_duration(input_path)
 
     # Write into a sibling temp file then atomically replace the original so a
     # half-written file is never visible to the StaticFiles server / clients.
@@ -209,11 +349,7 @@ async def process(body: ProcessRequest) -> ProcessResponse:
     async with _processing_lock:
         try:
             result: ProcessResult = await asyncio.to_thread(
-                remove_music,
-                input_path,
-                output_path,
-                _separate_factory(),
-                remove_stems,
+                _separate, input_path, output_path, remove_stems
             )
         except Exception as exc:  # surfaced to the main API's public_error mapping
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -231,4 +367,68 @@ async def process(body: ProcessRequest) -> ProcessResponse:
         vocals_kept=result.vocals_kept,
         removed_stems=list(result.removed_stems),
         device=device,
+    )
+
+
+@app.post("/process/stream")
+async def process_stream(
+    body: ProcessRequest,
+    x_duck_worker_token: Optional[str] = Header(default=None),
+):
+    """Fetches the file, removes the music, and streams the result back.
+
+    This is the mode that lets the worker live on its own machine. Nothing is
+    shared: the input arrives over HTTP and the output leaves the same way, so
+    the only thing the API and the GPU have in common is a URL.
+
+    The temp directory is cleaned by a background task rather than a `finally`,
+    because the response body is still being read when this function returns.
+    """
+
+    _require_token(x_duck_worker_token)
+    if not body.input_url:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint takes input_url. Use /process for a shared path.",
+        )
+
+    ext = ".mp3" if body.output_format == "mp3" else ".mp4"
+    work_dir = Path(tempfile.mkdtemp(prefix="duck-stream-"))
+    try:
+        source = work_dir / f"input{ext}"
+        _fetch_input(body.input_url, source)
+        _guard_duration(source)
+
+        output_path = work_dir / f"output{ext}"
+        remove_stems = (
+            tuple(body.remove_stems) if body.remove_stems else DEFAULT_REMOVE_STEMS
+        )
+
+        async with _processing_lock:
+            try:
+                result: ProcessResult = await asyncio.to_thread(
+                    _separate, source, output_path, remove_stems
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=str(exc) or "Music removal failed.",
+                ) from exc
+    except BaseException:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+
+    device = state.get("separators", {}).get("device", "cpu")
+    return FileResponse(
+        path=result.output_path,
+        media_type="audio/mpeg" if body.output_format == "mp3" else "video/mp4",
+        filename=f"nomusic{ext}",
+        headers={
+            # The API has no other way to learn what actually happened, since
+            # the body is the file rather than JSON.
+            "X-Duck-Device": device,
+            "X-Duck-Removed-Stems": ",".join(result.removed_stems),
+            "X-Duck-Vocals-Kept": "1" if result.vocals_kept else "0",
+        },
+        background=BackgroundTask(shutil.rmtree, work_dir, ignore_errors=True),
     )

@@ -530,44 +530,120 @@ class DownloadManager:
                 self.tasks.pop(download_id, None)
 
     async def _remove_music_via_worker(self, state: DownloadState, target_dir: Path) -> None:
+        """Hands the finished file to the GPU worker and takes back the result.
+
+        The worker used to be given a filesystem path, which quietly required
+        it to be the same machine as this API — so putting Demucs on a graphics
+        card meant moving the whole API onto a GPU host and renting a card to
+        serve JSON. It now gets a URL and streams the processed file back, and
+        the two only need to be able to reach each other.
+
+        ``DUCK_PROCESS_WORKER_SHARED_VOLUME`` switches back to the path mode for
+        a docker-compose setup where they really do share a disk.
+        """
+
         if not state.filename:
             return
         state.status = "processing"
         state.progress = 99
         await self._publish(state)
 
-        input_path = str(Path(target_dir / state.filename).resolve())
+        target = Path(target_dir / state.filename)
         output_format = "mp3" if state.download_type == DownloadType.audio else "mp4"
 
-        payload = {
-            "input_path": input_path,
-            "output_format": output_format,
-        }
-
-        def call_worker():
-            import urllib.request
-            import urllib.error
-            import json
-            req = urllib.request.Request(
-                f"{settings.process_worker_url}/process",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
+        if settings.process_worker_shared_volume:
+            await asyncio.to_thread(
+                self._call_worker_in_place, str(target.resolve()), output_format
             )
-            try:
-                with urllib.request.urlopen(req, timeout=settings.music_removal_timeout_seconds) as response:
-                    return json.loads(response.read().decode("utf-8"))
-            except urllib.error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="replace")
-                try:
-                    detail = json.loads(body).get("detail", "Music removal worker failed.")
-                except Exception:
-                    detail = body or "Music removal worker failed."
-                raise RuntimeError(detail) from exc
-            except Exception as exc:
-                raise RuntimeError(f"Could not connect to music removal worker: {exc}") from exc
+            return
 
-        await asyncio.to_thread(call_worker)
+        await asyncio.to_thread(
+            self._call_worker_streaming,
+            f"{settings.public_base_url}/files/{state.download_id}/{state.filename}",
+            target,
+            output_format,
+        )
+
+    @staticmethod
+    def _worker_headers() -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if settings.process_worker_token:
+            headers["X-Duck-Worker-Token"] = settings.process_worker_token
+        return headers
+
+    @staticmethod
+    def _worker_error(exc: Exception) -> RuntimeError:
+        import urllib.error
+        import json
+
+        if isinstance(exc, urllib.error.HTTPError):
+            body = exc.read().decode("utf-8", errors="replace")
+            try:
+                detail = json.loads(body).get("detail", "Music removal failed.")
+            except Exception:
+                detail = body or "Music removal failed."
+            return RuntimeError(detail)
+        return RuntimeError(f"Could not reach the music removal worker: {exc}")
+
+    def _call_worker_in_place(self, input_path: str, output_format: str) -> None:
+        """Same-host mode: the worker overwrites the file on the shared volume."""
+        import urllib.request
+        import json
+
+        request = urllib.request.Request(
+            f"{settings.process_worker_url}/process",
+            data=json.dumps(
+                {"input_path": input_path, "output_format": output_format}
+            ).encode("utf-8"),
+            headers=self._worker_headers(),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=settings.music_removal_timeout_seconds
+            ) as response:
+                json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise self._worker_error(exc) from exc
+
+    def _call_worker_streaming(
+        self, input_url: str, target: Path, output_format: str
+    ) -> None:
+        """Remote mode: send a URL, receive the processed file as the body.
+
+        Written to a sibling temp file and moved into place, so a transfer that
+        dies halfway never leaves a truncated file where the finished download
+        used to be — the client may already be downloading it.
+        """
+        import urllib.request
+        import json
+        import shutil
+        import tempfile
+
+        request = urllib.request.Request(
+            f"{settings.process_worker_url}/process/stream",
+            data=json.dumps(
+                {"input_url": input_url, "output_format": output_format}
+            ).encode("utf-8"),
+            headers=self._worker_headers(),
+            method="POST",
+        )
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="duck-nomusic-", dir=str(target.parent)))
+        temp_output = temp_dir / target.name
+        try:
+            with urllib.request.urlopen(
+                request, timeout=settings.music_removal_timeout_seconds
+            ) as response:
+                with temp_output.open("wb") as out:
+                    shutil.copyfileobj(response, out, 1024 * 1024)
+            if temp_output.stat().st_size == 0:
+                raise RuntimeError("The worker returned an empty file.")
+            shutil.move(str(temp_output), str(target))
+        except Exception as exc:
+            raise self._worker_error(exc) from exc
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     async def _download_image_directly(self, state: DownloadState, target_dir: Path) -> None:
         import urllib.request
