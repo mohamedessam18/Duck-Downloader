@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/download_store.dart';
@@ -15,6 +17,7 @@ import '../services/crash_reporting_service.dart';
 /// long as the app is published, and a second copy in the binary meant the two
 /// could quietly disagree about what Duck does with your data.
 const _privacyPolicyUrl = 'https://duckdownloader.site/privacy';
+const _reportAdUrl = 'https://duckdownloader.site/report-ad';
 
 /// Kept in step with pubspec.yaml by hand.
 const _appVersion = '1.2.1';
@@ -154,6 +157,17 @@ class SettingsScreen extends StatelessWidget {
                                 trailing: Icons.open_in_new_rounded,
                                 onTap: () => _openPolicy(context),
                               ),
+                              _Line(colors: colors),
+                              _Action(
+                                colors: colors,
+                                icon: Icons.flag_outlined,
+                                title: 'Report an ad',
+                                subtitle:
+                                    'Something offensive, a scam, or not '
+                                    'suitable for this app.',
+                                trailing: Icons.open_in_new_rounded,
+                                onTap: () => _reportAd(context),
+                              ),
                             ],
                           ),
                         ),
@@ -189,6 +203,60 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Opens the report page with what the app knows and the user could not
+  /// type accurately.
+  ///
+  /// Only facts about the app and the device: version, Android release, ad
+  /// format, language, and when. Nothing that identifies the person — an
+  /// advertiser gets blocked on the strength of "thirty people reported this",
+  /// and a name would not make that decision any easier while making the log
+  /// something worth stealing.
+  ///
+  /// The page shows every value and lets them drop the lot before sending, so
+  /// this is an offer rather than a collection.
+  Future<void> _reportAd(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final locale = Localizations.localeOf(context).languageCode;
+
+    var version = '';
+    try {
+      final info = await PackageInfo.fromPlatform();
+      version = '${info.version}+${info.buildNumber}';
+    } catch (_) {
+      // A missing version is not a reason to refuse the report.
+    }
+
+    final uri = Uri.parse(_reportAdUrl).replace(queryParameters: {
+      if (version.isNotEmpty) 'appVersion': version,
+      'platform': _deviceDescription(),
+      'locale': locale,
+      'seenAt': DateTime.now().toUtc().toIso8601String(),
+    });
+
+    var opened = false;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      opened = false;
+    }
+    if (!opened) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Open $_reportAdUrl in a browser.')),
+      );
+    }
+  }
+
+  /// "Android 13" rather than a fingerprint. Enough to reproduce an ad
+  /// problem, not enough to pick one phone out of a crowd.
+  String _deviceDescription() {
+    if (!Platform.isAndroid && !Platform.isIOS) return 'Desktop';
+    final version = Platform.operatingSystemVersion;
+    final match = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(version);
+    final release = match?.group(1);
+    final name = Platform.isAndroid ? 'Android' : 'iOS';
+    return release == null ? name : '$name $release';
   }
 
   Future<void> _openPolicy(BuildContext context) async {

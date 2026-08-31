@@ -24,6 +24,11 @@ dependencies:
   video_player: ^2.10.1
   web_socket_channel: ^3.0.3
   flutter_inappwebview: ^6.1.5
+  # Used by the ad report to send the app version. It was already present as a
+  # transitive dependency, which meant the build only worked as long as some
+  # other package kept pulling it in — declared here so that cannot change
+  # underneath us.
+  package_info_plus: ^9.0.1
   url_launcher: ^6.3.2
   flutter_local_notifications: ^18.0.1
   permission_handler: ^11.3.1

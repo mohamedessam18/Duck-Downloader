@@ -35,6 +35,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6
     },
     {
+      // Linked from inside the app rather than found by browsing, so it does
+      // not need to rank — but it must be reachable and must not 404 when
+      // someone taps the button while annoyed at an ad.
+      url: `${siteConfig.url}/report-ad`,
+      lastModified: new Date(),
+      changeFrequency: "yearly",
+      priority: 0.4
+    },
+    {
       // Google Play links to this from the store listing, so it needs to be
       // indexable and stable rather than an afterthought.
       url: `${siteConfig.url}/privacy`,

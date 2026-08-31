@@ -10,6 +10,7 @@ import asyncio
 from pathlib import Path
 
 from .config import settings
+from . import ad_reports
 from .downloads import download_manager, map_extract_response
 from .models import (
     DownloadRequest,
@@ -23,6 +24,8 @@ from .models import (
     TrimResponse,
     CookiesRequest,
     CookiesResponse,
+    AdReportRequest,
+    AdReportResponse,
 )
 
 limiter = Limiter(key_func=get_remote_address)
@@ -346,6 +349,49 @@ async def trim_file(body: TrimRequest) -> TrimResponse:
         return TrimResponse(**res)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=public_error(exc)) from exc
+
+
+@app.post("/api/ad-report", response_model=AdReportResponse, tags=["Ad Reports"])
+@limiter.limit("6/minute")
+async def submit_ad_report(request: Request, body: AdReportRequest) -> AdReportResponse:
+    """Records a user's report about an ad.
+
+    This is the developer's own record, not a channel to Google — AdMob has
+    its own reporting on the ad itself. The value here is seeing the same
+    complaint arrive repeatedly and having something concrete to act on in the
+    AdMob console.
+
+    Rate limited hard: there is nothing to gain from submitting a hundred of
+    these, and an open write endpoint is an invitation.
+    """
+    record = ad_reports.build_record(
+        reason=body.reason,
+        details=body.details,
+        ad_format=body.adFormat,
+        app_version=body.appVersion,
+        platform=body.platform,
+        locale=body.locale,
+        seen_at=body.seenAt,
+    )
+    try:
+        ad_reports.append(record, settings.storage_dir)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Could not save the report.") from exc
+    return AdReportResponse(accepted=True, id=record["id"])
+
+
+@app.get("/api/ad-report", tags=["Ad Reports"])
+async def read_ad_reports(request: Request, token: str = "") -> dict:
+    """Reads the reports back. Owner only.
+
+    Behind a token because these are complaints written by users, and an open
+    list would publish them. Returns 404 rather than 401 when the token is
+    unset or wrong, so the endpoint does not advertise that it exists.
+    """
+    expected = settings.ad_reports_token
+    if not expected or token != expected:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return ad_reports.summarise(settings.storage_dir)
 
 
 @app.websocket("/ws/download/{download_id}")

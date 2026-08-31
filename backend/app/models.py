@@ -94,3 +94,26 @@ class PlaylistExtractResponse(BaseModel):
     title: str
     platform: str
     items: list[PlaylistItemInfo]
+
+
+class AdReportRequest(BaseModel):
+    """One user's report about an ad they were shown.
+
+    Every field is optional except the reason. A report that arrives without
+    its technical context is still worth having — the person may have removed
+    it on the page, which is their right — and refusing it would trade real
+    signal for tidiness.
+    """
+
+    reason: str
+    details: str | None = None
+    adFormat: str | None = None
+    appVersion: str | None = None
+    platform: str | None = None
+    locale: str | None = None
+    seenAt: str | None = None
+
+
+class AdReportResponse(BaseModel):
+    accepted: bool
+    id: str

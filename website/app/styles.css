@@ -1181,3 +1181,87 @@ a { color: inherit; text-decoration: none; }
 /* Pending answers read as placeholder, not as content. */
 .bubble-pending { opacity: 0.55; }
 .bot-form input:disabled { opacity: 0.6; }
+
+/* ── Report an ad ───────────────────────────────────────────────────────── */
+
+.report-panel { padding: clamp(1.25rem, 4vw, 2rem); }
+.report-form { display: flex; flex-direction: column; gap: 1.5rem; }
+
+.report-reasons { border: 0; padding: 0; margin: 0; display: grid; gap: .5rem; }
+.report-reasons legend {
+  font-size: .95rem; font-weight: 700; margin-bottom: .75rem; padding: 0;
+}
+.report-reason {
+  display: flex; align-items: center; gap: .7rem;
+  padding: .8rem .95rem; border-radius: 12px;
+  border: 1px solid var(--line); cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.report-reason:hover { border-color: var(--accent); }
+.report-reason.is-picked {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.report-reason input { accent-color: var(--accent); flex: none; }
+.report-reason span { font-size: .93rem; }
+
+.report-field { display: flex; flex-direction: column; gap: .5rem; }
+.report-field > span { font-size: .95rem; font-weight: 700; }
+.report-field em { font-style: normal; font-weight: 500; opacity: .6; }
+.report-field textarea {
+  width: 100%; padding: .8rem .9rem; border-radius: 12px;
+  border: 1px solid var(--line); background: transparent;
+  color: inherit; font: inherit; resize: vertical;
+}
+.report-field textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-color: transparent;
+}
+
+.report-context {
+  border: 1px solid var(--line); border-radius: 14px; padding: 1rem;
+}
+.report-context-head {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 1rem; margin-bottom: .75rem;
+}
+.report-context-head > span { font-size: .82rem; font-weight: 700; opacity: .75; }
+.report-strip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  background: none; border: 0; cursor: pointer; padding: .2rem .35rem;
+  font: inherit; font-size: .78rem; font-weight: 700;
+  color: var(--accent); border-radius: 6px;
+}
+.report-strip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.report-context dl { margin: 0; display: grid; gap: .4rem; }
+/* Dimmed rather than removed when switched off, so the person can see exactly
+   what they are choosing not to send. */
+.report-context dl.is-off { opacity: .35; }
+.report-context dl > div {
+  display: grid; grid-template-columns: 8.5rem 1fr; gap: .75rem;
+  font-size: .85rem;
+}
+.report-context dt { opacity: .65; }
+.report-context dd { margin: 0; font-variant-numeric: tabular-nums; }
+.report-privacy { font-size: .78rem; opacity: .6; margin: .8rem 0 0; }
+
+.report-error {
+  display: flex; align-items: center; gap: .5rem;
+  font-size: .88rem; color: #E5484D; margin: 0;
+}
+.report-hint { font-size: .8rem; opacity: .6; margin: -.75rem 0 0; }
+
+.report-done { text-align: center; padding: 1.5rem 0; color: var(--accent); }
+.report-done h2 { margin: .75rem 0 .5rem; font-size: 1.35rem; }
+.report-done p { color: var(--text); max-width: 34rem; margin: 0 auto .75rem; }
+.report-note { font-size: .85rem; opacity: .7; }
+
+.report-explain ol { margin: 1rem 0 0; padding-inline-start: 1.2rem; }
+.report-explain li { margin-bottom: .7rem; }
+.report-explain h2 {
+  display: flex; align-items: center; gap: .5rem; font-size: 1.05rem; margin: 0;
+}
+
+@media (max-width: 30rem) {
+  .report-context dl > div { grid-template-columns: 1fr; gap: 0; }
+}

@@ -21,6 +21,10 @@ class Settings(BaseModel):
     # so the main API posts an absolute path and the worker processes in place.
     process_worker_url: str = os.getenv("DUCK_PROCESS_WORKER_URL", "http://localhost:8001")
     music_removal_timeout_seconds: int = int(os.getenv("DUCK_MUSIC_REMOVAL_TIMEOUT_SECONDS", "900"))
+    # Reading back ad reports. Unset means the read endpoint answers 404 to
+    # everyone, including you — complaints written by users are not something
+    # to publish by leaving a default in the code.
+    ad_reports_token: str = os.getenv("DUCK_AD_REPORTS_TOKEN", "")
 
     @property
     def resolved_cookies_file(self) -> str | None:
