@@ -133,38 +133,29 @@ class ShareActivity : AppCompatActivity() {
 
     private fun startDownload(type: String, quality: String) {
         val snapshot = meta
-        // Dismiss first: the user's answer is given, and holding the sheet
-        // open across a network call makes a fast tap feel unresponsive.
-        dialog?.dismiss()
-        Toast.makeText(this, str.starting, Toast.LENGTH_SHORT).show()
 
-        val appContext = applicationContext
-        // Deliberately not tied to this activity's lifetime — it is about to
-        // finish, and the request has to outlive it.
-        Executors.newSingleThreadExecutor().execute {
-            try {
-                val downloadId = DuckShareApi.startDownload(appContext, sharedUrl, type, quality)
-                DownloadService.enqueue(
-                    context = appContext,
-                    downloadId = downloadId,
-                    url = sharedUrl,
-                    title = snapshot?.title ?: "Download",
-                    thumbnail = snapshot?.thumbnail,
-                    platform = snapshot?.platform ?: "Public source",
-                    type = type,
-                    quality = quality,
-                )
-            } catch (error: Exception) {
-                // A toast is the only channel left once the sheet is gone.
-                android.os.Handler(mainLooper).post {
-                    Toast.makeText(
-                        appContext,
-                        error.message ?: str.startFailed,
-                        Toast.LENGTH_LONG,
-                    ).show()
-                }
-            }
-        }
+        // Start the service first, while this activity is still on screen.
+        //
+        // Android 12 refuses startForegroundService once the app is in the
+        // background, and dismissing the sheet finishes this activity — so
+        // doing the network call here and starting the service afterwards put
+        // the start on the wrong side of that rule. Every share on Android 12+
+        // was refused while the toast happily said the download had begun.
+        //
+        // The service asks the backend itself now. Nothing here waits on the
+        // network, so there is nothing to be wrong about.
+        DownloadService.enqueue(
+            context = applicationContext,
+            url = sharedUrl,
+            title = snapshot?.title ?: "Download",
+            thumbnail = snapshot?.thumbnail,
+            platform = snapshot?.platform ?: "Public source",
+            type = type,
+            quality = quality,
+        )
+
+        Toast.makeText(this, str.starting, Toast.LENGTH_SHORT).show()
+        dialog?.dismiss()
     }
 
     private fun openInApp() {

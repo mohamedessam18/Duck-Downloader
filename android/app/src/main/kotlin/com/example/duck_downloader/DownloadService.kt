@@ -68,9 +68,22 @@ class DownloadService : Service() {
         /// Where finished downloads wait for the app to pick them up.
         const val INBOX_KEY = "shareInbox"
 
+        /**
+         * Starts a share download.
+         *
+         * Must be called while the calling activity is still on screen.
+         * Android 12 refuses `startForegroundService` from the background, and
+         * ShareActivity finishes the moment its sheet is dismissed — so asking
+         * the backend for a download id first and starting the service after
+         * put the service start on the wrong side of that line. Every share on
+         * Android 12+ was silently refused while the toast said the download
+         * had begun.
+         *
+         * The network call moved inside the service for the same reason: the
+         * service is what has to be alive for it, not the sheet.
+         */
         fun enqueue(
             context: Context,
-            downloadId: String,
             url: String,
             title: String,
             thumbnail: String?,
@@ -80,7 +93,6 @@ class DownloadService : Service() {
         ) {
             val intent = Intent(context, DownloadService::class.java).apply {
                 action = ACTION_ENQUEUE
-                putExtra("downloadId", downloadId)
                 putExtra("url", url)
                 putExtra("title", title)
                 putExtra("thumbnail", thumbnail)
@@ -152,32 +164,45 @@ class DownloadService : Service() {
             }
         }
 
-        val downloadId = intent.getStringExtra("downloadId") ?: return START_NOT_STICKY
+        val url = intent.getStringExtra("url")
+        if (url.isNullOrBlank()) return START_NOT_STICKY
         val title = intent.getStringExtra("title") ?: "Download"
+
+        // A key for the notification and the maps until the backend gives us
+        // its own id. The two are swapped once the job is accepted.
+        val localId = "local-" + System.nanoTime()
 
         // Promote before any work starts. Android gives a service a few seconds
         // from startForegroundService to call this, and killing us for missing
         // it would take the download with it.
-        titles[downloadId] = title
-        percents[downloadId] = 0
+        titles[localId] = title
+        percents[localId] = 0
         queued.incrementAndGet()
         goForeground()
 
-        val url = intent.getStringExtra("url").orEmpty()
         val thumbnail = intent.getStringExtra("thumbnail")
         val platform = intent.getStringExtra("platform") ?: "Public source"
         val type = intent.getStringExtra("type") ?: "video"
         val quality = intent.getStringExtra("quality") ?: "Best"
 
         pool.execute {
+            var backendId: String? = null
             try {
-                runDownload(downloadId, url, title, thumbnail, platform, type, quality)
+                // Asking the backend from here rather than from the sheet is
+                // what keeps the service start legal on Android 12+.
+                val accepted = DuckShareApi.startDownload(this, url, type, quality)
+                backendId = accepted
+                titles[accepted] = title
+                percents[accepted] = percents.remove(localId) ?: 0
+                titles.remove(localId)
+                runDownload(accepted, url, title, thumbnail, platform, type, quality)
             } catch (error: Exception) {
-                recordFailure(downloadId, url, title, platform, type, error.message)
+                recordFailure(backendId ?: localId, url, title, platform, type, error.message)
             } finally {
-                sockets.remove(downloadId)
-                percents.remove(downloadId)
-                titles.remove(downloadId)
+                val key = backendId ?: localId
+                sockets.remove(key)
+                percents.remove(key)
+                titles.remove(key)
                 finished.incrementAndGet()
                 if (queued.get() == finished.get()) {
                     maybeStop()
