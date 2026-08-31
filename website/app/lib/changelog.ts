@@ -29,7 +29,7 @@ export const releases: Release[] = [
   {
     version: "1.2.1",
     build: 10,
-    date: null,
+    date: "2026-08-31",
     summary:
       "File management works again, and the vault stops locking you out mid-video.",
     changes: [

@@ -6,13 +6,18 @@ export const siteConfig = {
     "Duck Downloader saves video, photos and audio from public social links straight to your phone. Files stay on your device, and the private vault is encrypted with a passcode only you know.",
   url: "https://duckdownloader.site",
 
-  // Flip `live` to true and fill in `playUrl` the moment the listing is public.
-  // Nothing else on the page needs editing: the hero CTA, the platform card and
-  // the footer all read this one object, so the site cannot end up claiming
-  // "available" in one place and "coming soon" in another the way it used to.
+  // Live since 31 August 2026.
+  //
+  // The hero CTA, the platform card and the footer all read this one object,
+  // so the site cannot end up claiming "available" in one place and "coming
+  // soon" in another the way it used to.
+  //
+  // The `?pli=1` the Play Console hands you is a UI hint for a signed-in
+  // browser and means nothing to anyone arriving from here — left off so the
+  // link that gets shared is the short, canonical one.
   play: {
-    live: false,
-    url: null as string | null,
+    live: true,
+    url: "https://play.google.com/store/apps/details?id=com.duck.downloader" as string | null,
     label: "Get it on Google Play"
   },
 
