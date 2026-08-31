@@ -16,6 +16,8 @@ type Turn = {
   related?: string[];
   /** True when nothing matched and the only honest next step is a person. */
   handoff?: boolean;
+  /** Placeholder shown while the answer is being written. */
+  pending?: boolean;
 };
 
 /** Two of each, so an Arabic speaker sees their own language offered first. */
@@ -35,6 +37,7 @@ const GREETING: Turn = {
 export function SupportBot() {
   const [turns, setTurns] = useState<Turn[]>([GREETING]);
   const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -45,34 +48,63 @@ export function SupportBot() {
     }
   }, [turns]);
 
-  function ask(question: string) {
+  async function ask(question: string) {
     const query = question.trim();
-    if (!query) return;
+    if (!query || busy) return;
 
-    // Answer in whichever language the question arrived in. The index holds
-    // both, so an Arabic question can still match on a Latin-script product
-    // name and come back in Arabic.
     const ar = isArabic(query);
-    const matches = search(query);
-    const reply: Turn = matches.length
-      ? {
-          from: "duck",
-          text: ar ? matches[0].article.answerAr : matches[0].article.answer,
-          related: matches
-            .slice(1)
-            .map((m) => (ar ? m.article.questionAr : m.article.question))
-        }
-      : {
-          from: "duck",
-          // Saying nothing useful is a real answer. Inventing one is not.
-          text: ar
-            ? "ملقيتش دي في التوثيق. حد من الدعم هيساعدك أسرع من إني أخمّن."
-            : "I could not find that in the documentation. A person can help you faster than I can guess.",
-          handoff: true
-        };
-
-    setTurns((prev) => [...prev, { from: "you", text: query }, reply]);
+    setBusy(true);
     setDraft("");
+    setTurns((prev) => [
+      ...prev,
+      { from: "you", text: query },
+      { from: "duck", text: ar ? "بكتب..." : "Typing...", pending: true }
+    ]);
+
+    // The suggestion chips still come from the local index. They are a menu of
+    // questions the documentation definitely answers, so they should not
+    // depend on a network call to appear.
+    const related = search(query)
+      .slice(1)
+      .map((m) => (ar ? m.article.questionAr : m.article.question));
+
+    let reply: Turn;
+    try {
+      const res = await fetch("/api/support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: query,
+          history: turns
+            .filter((t) => !t.pending)
+            .slice(-6)
+            .map((t) => ({
+              role: t.from === "you" ? "user" : "assistant",
+              content: t.text
+            }))
+        })
+      });
+      const data = await res.json();
+      reply = {
+        from: "duck",
+        text: data.answer ?? "",
+        related: data.grounded ? related : undefined,
+        handoff: !data.grounded
+      };
+    } catch {
+      // Offline, or the route is down. Say so rather than showing an empty
+      // bubble, and put the human route in front of them.
+      reply = {
+        from: "duck",
+        text: ar
+          ? "مش قادر أوصل للسيرفر دلوقتي. جرّب تاني أو كلّم الدعم."
+          : "I could not reach the server. Try again, or message support.",
+        handoff: true
+      };
+    }
+
+    setTurns((prev) => [...prev.slice(0, -1), reply]);
+    setBusy(false);
     inputRef.current?.focus();
   }
 
@@ -92,7 +124,7 @@ export function SupportBot() {
         {turns.map((turn, i) => (
           <div
             key={i}
-            className={`bubble bubble-${turn.from}`}
+            className={`bubble bubble-${turn.from}${turn.pending ? " bubble-pending" : ""}`}
             dir={isArabic(turn.text) ? "rtl" : "ltr"}
           >
             <p className="bubble-text">{turn.text}</p>
@@ -145,9 +177,10 @@ export function SupportBot() {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Ask a question"
+          disabled={busy}
           autoComplete="off"
         />
-        <button type="submit" aria-label="Send" disabled={!draft.trim()}>
+        <button type="submit" aria-label="Send" disabled={!draft.trim() || busy}>
           <ArrowUpIcon size={17} weight="bold" />
         </button>
       </form>

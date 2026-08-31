@@ -9,6 +9,7 @@
     "test": "tsc app/lib/search.ts app/lib/knowledge.ts --outDir .build-test --module esnext --target es2022 --moduleResolution bundler && sed -i '' 's#from \"./knowledge\"#from \"./knowledge.js\"#' .build-test/search.js && echo '{\"type\":\"module\"}' > .build-test/package.json && node --test \"tests/**/*.test.mjs\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "@phosphor-icons/react": "^2.1.10",
     "geist": "^1.7.2",
     "motion": "^13.1.1",

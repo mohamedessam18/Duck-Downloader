@@ -132,4 +132,9 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
+
+    // The share sheet and the download service talk to the backend before any
+    // Flutter engine exists, so they need an HTTP client and a WebSocket of
+    // their own. Same endpoints as api_client.dart — one backend, two clients.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

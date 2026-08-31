@@ -130,9 +130,6 @@ class PurchaseRepository {
     return const {
       PremiumFeature.adFreeExperience,
       PremiumFeature.fasterProcessing,
-      PremiumFeature.priorityFeatures,
-      PremiumFeature.futurePremiumTools,
-      PremiumFeature.earlyAccess,
     };
   }
 }

@@ -20,7 +20,47 @@ class DownloadStore {
     return downloads;
   }
 
+  /// The tail of the chain of in-flight writes to the downloads list.
+  ///
+  /// Every mutation here is read-modify-write of the *whole* list with an
+  /// `await` in the middle, so two overlapping callers each read the same
+  /// starting state and the second one's write erases the first one's change.
+  /// Nothing overlapped while downloads ran one at a time; running three at
+  /// once made items vanish from the library moments after being added.
+  ///
+  /// Chaining is enough — these are short, and the box is the only writer.
+  Future<void> _pendingWrites = Future<void>.value();
+
+  Future<T> _serialised<T>(Future<T> Function() mutate) {
+    final result = _pendingWrites.then((_) => mutate());
+    // The chain must survive a failed write, or one error would wedge every
+    // later save behind it.
+    _pendingWrites = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
   Future<void> writeDownloads(List<DownloadItem> downloads) {
+    return _serialised(() => _writeDownloadsNow(downloads));
+  }
+
+  /// Rewrites the list from what is on disk right now.
+  ///
+  /// [transform] is handed the stored rows *inside* the write lock, so a
+  /// caller cannot base its new list on a snapshot that another save has
+  /// already moved past. Passing a list held in memory instead is how rows
+  /// added a moment earlier get erased — which, with three downloads running
+  /// at once, is most of them.
+  Future<List<DownloadItem>> rewrite(
+    List<DownloadItem> Function(List<DownloadItem> stored) transform,
+  ) {
+    return _serialised(() async {
+      final next = transform(readDownloads());
+      await _writeDownloadsNow(next);
+      return next;
+    });
+  }
+
+  Future<void> _writeDownloadsNow(List<DownloadItem> downloads) {
     return _box.put('downloads', [
       for (final item in downloads) _storedItem(item).toJson(),
     ]);
@@ -114,7 +154,11 @@ class DownloadStore {
     return _box.put('crashReportingEnabled', enabled);
   }
 
-  Future<DownloadItem> upsert(DownloadItem item) async {
+  Future<DownloadItem> upsert(DownloadItem item) {
+    return _serialised(() => _upsertNow(item));
+  }
+
+  Future<DownloadItem> _upsertNow(DownloadItem item) async {
     final items = readDownloads();
     final index = items.indexWhere((existing) => existing.id == item.id);
     if (index >= 0) {
@@ -140,13 +184,15 @@ class DownloadStore {
     } else {
       items.insert(0, item);
     }
-    await writeDownloads(items);
+    await _writeDownloadsNow(items);
     return item;
   }
 
-  Future<void> delete(String id) async {
-    final items = readDownloads()..removeWhere((item) => item.id == id);
-    await writeDownloads(items);
+  Future<void> delete(String id) {
+    return _serialised(() async {
+      final items = readDownloads()..removeWhere((item) => item.id == id);
+      await _writeDownloadsNow(items);
+    });
   }
 
   List<Playlist> readPlaylists() {
@@ -207,6 +253,27 @@ class DownloadStore {
     final positions = readVideoResumePositions();
     positions[id] = milliseconds;
     return _box.put('videoResumePositions', positions);
+  }
+
+  bool readShuffleEnabled() {
+    final value = _box.get('shuffleEnabled');
+    return value is bool ? value : false;
+  }
+
+  Future<void> writeShuffleEnabled(bool enabled) {
+    return _box.put('shuffleEnabled', enabled);
+  }
+
+  /// Stored by name rather than index: `LoopMode`'s ordering belongs to
+  /// just_audio, and a reorder there would silently turn everyone's
+  /// repeat-one into repeat-all.
+  String? readPlaybackLoopMode() {
+    final value = _box.get('playbackLoopMode');
+    return value is String ? value : null;
+  }
+
+  Future<void> writePlaybackLoopMode(String name) {
+    return _box.put('playbackLoopMode', name);
   }
 
   String? readYoutubeCookies() {

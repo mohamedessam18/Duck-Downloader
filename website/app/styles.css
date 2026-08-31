@@ -1177,3 +1177,7 @@ a { color: inherit; text-decoration: none; }
 
 /* The greeting carries a blank line between its two languages. */
 .bubble-text { white-space: pre-line; }
+
+/* Pending answers read as placeholder, not as content. */
+.bubble-pending { opacity: 0.55; }
+.bot-form input:disabled { opacity: 0.6; }
