@@ -1,0 +1,14 @@
+# app-ads.txt — who is allowed to sell ads in Duck Downloader.
+#
+# Buyers fetch this file before bidding. Without it, anyone can claim to be
+# selling this app's inventory and the demand that checks simply does not bid,
+# so a missing file costs revenue quietly rather than breaking anything.
+#
+# Google finds it by reading the developer website on the Play listing, so the
+# listing must point at duckdownloader.site for this to be seen at all.
+#
+# Fields: <domain>, <publisher id>, <relationship>, <certification authority>
+# f08c47fec0942fa0 is Google's certification authority id and is the same for
+# every AdMob publisher.
+
+google.com, pub-8105551932366170, DIRECT, f08c47fec0942fa0
