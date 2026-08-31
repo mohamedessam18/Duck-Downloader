@@ -1,6 +1,12 @@
 # Build the local PO-token provider recommended by yt-dlp for YouTube.
 # It runs beside the API and is never exposed outside this container.
-FROM node:20-bullseye-slim AS pot-provider
+#
+# Node 22, not 20, because this same binary is what yt-dlp uses to solve
+# YouTube's JavaScript challenge, and NodeJsRuntime.MIN_SUPPORTED_VERSION is
+# (22, 0, 0). On 20 the runtime is found, rejected as too old, and yt-dlp
+# silently falls back to its JS-less client — which extracts fine and then
+# cannot fetch the media, so every download ended in `HTTP Error 403`.
+FROM node:22-bullseye-slim AS pot-provider
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
