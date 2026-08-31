@@ -10,6 +10,7 @@ from typing import Any
 from yt_dlp import YoutubeDL
 
 from .config import settings
+from .media_type import direct_image_extension, failure_means_no_video
 from .models import StatusResponse, DownloadType
 from .security import sanitize_filename, ensure_inside, validate_public_url
 
@@ -56,6 +57,8 @@ class DownloadState:
             filename=self.filename,
             error=self.error,
         ).model_dump(by_alias=True)
+
+
 
 
 class BaseScraper:
@@ -219,25 +222,34 @@ class DownloadManager:
         try:
             return await asyncio.to_thread(run)
         except Exception as exc:
-            # Fallback 1: Direct image with extension anywhere in path or url
-            path_lower = parsed.path.lower()
-            if any(ext in path_lower or ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]):
-                ext = "jpg"
-                for possible_ext in ["jpg", "jpeg", "png", "webp", "gif", "bmp"]:
-                    if possible_ext in path_lower or possible_ext in url.lower():
-                        ext = possible_ext
-                        break
+            # Fallback 1: the link really is a direct image.
+            #
+            # This used to search the *whole* URL for ".jpg" and friends, query
+            # string included, so any video link carrying a thumbnail parameter
+            # came back as an image:
+            #
+            #   /watch?v=abc&thumb=cover.jpg   ->  "Original Image"
+            #
+            # It fired whenever yt-dlp failed for any reason, so a video that
+            # was merely blocked was handed to the user as a picture. Only the
+            # path's own extension counts now.
+            if image_ext := direct_image_extension(parsed.path):
                 return {
                     "title": "Image",
                     "thumbnail": url,
                     "duration": None,
                     "platform": parsed.netloc or "Direct Image",
-                    "qualities": [{"id": "best", "label": "Original Image", "ext": ext}],
+                    "qualities": [{"id": "best", "label": "Original Image", "ext": image_ext}],
                     "audio_formats": []
                 }
 
-            # Fallback 2: Extract images from the webpage (skip for major video/private platforms)
-            if not any(domain in host for domain in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch"]):
+            # Fallback 2: scrape the page for images.
+            #
+            # Only when the failure means "there is no video here". A link that
+            # yt-dlp recognises and then cannot fetch — private, age-gated,
+            # blocked, rate-limited — is a video, and answering with a picture
+            # off the page hides the real reason from the user.
+            if failure_means_no_video(exc) and not any(domain in host for domain in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch"]):
                 try:
                     images_info = await self.extract_images(url)
                     if images_info and images_info.get("items"):
@@ -312,6 +324,18 @@ class DownloadManager:
                 ),
                 "Accept-Language": "en-US,en;q=0.9",
             },
+            # YouTube hands out its stream URLs behind a JavaScript challenge,
+            # and yt-dlp needs a JS runtime to solve it. It enables only `deno`
+            # by default and this image does not ship one, so every YouTube
+            # download failed at the last step with `HTTP Error 403: Forbidden`
+            # after appearing to start — extraction succeeded and only the media
+            # fetch was refused, which is why it read as a network problem
+            # rather than a missing dependency.
+            #
+            # Node is already in the image for the PO token provider. Pointed at
+            # by path rather than trusting PATH, because it is copied in from
+            # another build stage rather than installed by the package manager.
+            "js_runtimes": {"node": {"path": "/usr/local/bin/node"}},
             # Do not force a particular YouTube player client here. yt-dlp's
             # current defaults choose the most compatible clients for each
             # video, while the local bgutil provider supplies PO tokens when a
@@ -922,6 +946,19 @@ class DownloadManager:
         ]
         if has_impersonate:
             args.extend(["--impersonate", "chrome"])
+
+        # YouTube serves its stream URLs behind a JavaScript challenge, and
+        # yt-dlp needs a runtime to solve it. It enables only `deno` by
+        # default and this image ships none, so the *download* failed with
+        # `HTTP Error 403: Forbidden` while extraction — which runs through the
+        # Python API in another method — succeeded. The user saw the real title
+        # and the real qualities, picked one, and got nothing.
+        #
+        # Node is already here for the PO token provider. Appended rather than
+        # replacing the default, so a future image that does ship deno keeps
+        # using it: yt-dlp picks the highest-priority runtime that is both
+        # enabled and actually present.
+        args.extend(["--js-runtimes", "node:/usr/local/bin/node"])
 
         args.extend([
             "--continue",
