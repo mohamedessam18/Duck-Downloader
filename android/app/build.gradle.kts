@@ -137,4 +137,11 @@ dependencies {
     // Flutter engine exists, so they need an HTTP client and a WebSocket of
     // their own. Same endpoints as api_client.dart — one backend, two clients.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Signed-in sessions are mirrored to the native side so the share sheet
+    // can use them, and a session is a credential: it goes in
+    // EncryptedSharedPreferences, not a plain prefs file. Already on the
+    // classpath by way of flutter_secure_storage; declared here because this
+    // module uses it directly.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }

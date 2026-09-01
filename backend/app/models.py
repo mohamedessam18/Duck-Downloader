@@ -21,11 +21,14 @@ class DownloadType(str, Enum):
     image = "image"
 
 
-class CookiesRequest(BaseModel):
-    cookies: str
-
-
 class CookiesResponse(BaseModel):
+    """Whether the *operator* configured cookies, via DUCK_YTDLP_COOKIES.
+
+    It says nothing about any user's session. Users' cookies arrive with the
+    request that needs them and are deleted with it, so there is no per-user
+    state here to report.
+    """
+
     active: bool
     size: int
     filename: str | None = None
@@ -33,6 +36,11 @@ class CookiesResponse(BaseModel):
 
 class ExtractRequest(BaseModel):
     url: HttpUrl
+    # The caller's own cookies for this link's site, in Netscape format.
+    #
+    # Sent per request rather than stored, because a server-side cookie jar on
+    # a shared deployment is a shared login: see app/cookies.py.
+    cookies: str | None = None
 
 
 class DownloadRequest(BaseModel):
@@ -41,6 +49,7 @@ class DownloadRequest(BaseModel):
     quality: str | None = None
     premium_no_watermark: bool = Field(default=False, alias="premiumNoWatermark")
     remove_music: bool = Field(default=False, alias="removeMusic")
+    cookies: str | None = None
 
 
 class FormatInfo(BaseModel):
@@ -101,6 +110,7 @@ class PlaylistItemInfo(BaseModel):
 
 class PlaylistExtractRequest(BaseModel):
     url: HttpUrl
+    cookies: str | None = None
 
 
 class PlaylistExtractResponse(BaseModel):

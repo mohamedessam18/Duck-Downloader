@@ -5,7 +5,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/download_store.dart';
 import '../state/downloads_controller.dart';
+import '../l10n/app_localizations.dart';
 import '../theme/duck_theme.dart';
+import 'linked_accounts_screen.dart';
 import '../widgets/ambient_background.dart';
 import '../widgets/duck_motion.dart';
 import '../services/crash_reporting_service.dart';
@@ -156,6 +158,24 @@ class SettingsScreen extends StatelessWidget {
                                     'touches.',
                                 trailing: Icons.open_in_new_rounded,
                                 onTap: () => _openPolicy(context),
+                              ),
+                              _Line(colors: colors),
+                              _Action(
+                                colors: colors,
+                                icon: Icons.account_circle_outlined,
+                                title: AppLocalizations.of(
+                                  context,
+                                ).translate('settingsLinkedAccounts'),
+                                subtitle: AppLocalizations.of(
+                                  context,
+                                ).translate('settingsLinkedAccountsBody'),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => LinkedAccountsScreen(
+                                      controller: controller,
+                                    ),
+                                  ),
+                                ),
                               ),
                               _Line(colors: colors),
                               _Action(

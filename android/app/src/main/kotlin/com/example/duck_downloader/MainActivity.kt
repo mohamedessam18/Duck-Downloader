@@ -124,6 +124,21 @@ class MainActivity : AudioServiceFragmentActivity() {
                     // Dart side resolved, including a --dart-define override.
                     // Without this the share sheet would talk to whatever URL
                     // was compiled into DuckShareApi months ago.
+                    // Mirrors the signed-in sessions to the native side.
+                    // ShareActivity and DownloadService call the backend
+                    // without a Flutter isolate, so without this a private
+                    // post shared *into* Duck failed even while the app itself
+                    // was signed in.
+                    "syncSessions" -> {
+                        val payload = call.argument<String>("sessions")
+                        if (payload.isNullOrBlank()) {
+                            SessionStore.clear(this)
+                        } else {
+                            SessionStore.replaceAll(this, payload)
+                        }
+                        result.success(true)
+                    }
+
                     // Dart's own downloads run in the Flutter isolate, which
                     // Android freezes once the app is backgrounded. The service
                     // keeps the process — and therefore those transfers — alive.

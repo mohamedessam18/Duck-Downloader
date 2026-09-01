@@ -10,6 +10,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:youtube_explode_dart/src/reverse_engineering/youtube_http_client.dart';
 
 import '../models/download_models.dart';
+import 'stream_quality.dart';
 import './crash_reporting_service.dart';
 
 /// Extracts YouTube video metadata and downloads streams **directly on the
@@ -23,6 +24,15 @@ import './crash_reporting_service.dart';
 ///    audio track instantly using FFmpeg.
 class YouTubeExplodeService {
   YouTubeExplodeService() : _yt = YoutubeExplode(), _dio = Dio();
+
+  /// How long a stream may go without delivering a byte before it is
+  /// abandoned and retried a different way.
+  ///
+  /// YouTube throttles streams it does not like down to a standstill rather
+  /// than refusing them, so "stopped moving" is a distinct failure from "the
+  /// connection dropped" and needs its own bound. 45s is long enough to ride
+  /// out a bad moment on mobile data and short enough to not look hung.
+  static const _stallSeconds = 45;
 
   YoutubeExplode _yt;
   final Dio _dio;
@@ -220,7 +230,7 @@ class YouTubeExplodeService {
       final ext = audioStream.container.name; // webm or mp4
       final rawPath = await _getUniqueFilePath(folder.path, '$safeTitle.$ext');
 
-      await _downloadStreamWithTimeout(
+      await downloadStreamWithStallTimeout(
         streamUrl: audioStream.url.toString(),
         savePath: rawPath,
         onProgress: onProgress,
@@ -255,7 +265,7 @@ class YouTubeExplodeService {
     }
     final lowestMuxed = sortedMuxed.last;
     final muxedPath = await _getUniqueFilePath(folder.path, '${safeTitle}_muxed.mp4');
-    await _downloadStreamWithTimeout(
+    await downloadStreamWithStallTimeout(
       streamUrl: lowestMuxed.url.toString(),
       savePath: muxedPath,
       onProgress: onProgress,
@@ -268,6 +278,43 @@ class YouTubeExplodeService {
       await _deleteQuietly(muxedPath);
     }
     return m4aPath;
+  }
+
+  /// True when this stream can be dropped into an MP4 without re-encoding.
+  ///
+  /// The merge runs `-c:v copy` into a `.mp4`, and VP9 and AV1 have no MP4
+  /// tag in most FFmpeg builds — the merge fails outright rather than falling
+  /// back. YouTube offers all three codecs at the same resolutions, so which
+  /// one gets picked was previously a matter of luck.
+  static bool _isMp4Friendly(VideoOnlyStreamInfo stream) {
+    final codec = stream.videoCodec.toLowerCase();
+    return codec.startsWith('avc') || codec.startsWith('h264');
+  }
+
+  /// The stream to download for a request of [ceiling] pixels high.
+  ///
+  /// Resolution is decided first and codec second. Picking the codec first
+  /// looks tempting — H.264 copies straight into the MP4 while VP9 and AV1
+  /// have to be re-encoded — but YouTube only offers 1440p and 2160p in those
+  /// newer codecs, so preferring copyable streams outright means asking for 4K
+  /// and silently getting 1080p. That is the same class of bug as the sort
+  /// order this replaced; a slow download is better than a quiet downgrade.
+  static VideoOnlyStreamInfo? _pickVideoOnly(
+    Iterable<VideoOnlyStreamInfo> streams, {
+    int? ceiling,
+  }) {
+    final target = bestAtOrBelow<VideoOnlyStreamInfo>(
+      streams,
+      (s) => s.videoResolution.height,
+      ceiling: ceiling,
+    );
+    if (target == null) return null;
+
+    final height = target.videoResolution.height;
+    final sameHeight =
+        streams.where((s) => s.videoResolution.height == height);
+    final copyable = sameHeight.where(_isMp4Friendly);
+    return copyable.isNotEmpty ? copyable.first : target;
   }
 
   Future<String> downloadVideoNative({
@@ -288,118 +335,165 @@ class YouTubeExplodeService {
 
     final safeTitle = _sanitizeFilename(title);
 
-    // Look for matching stream in muxed first
-    final sortedMuxed = manifest.muxed.sortByVideoQuality();
-    MuxedStreamInfo? selectedMuxed;
-    if (preferredHeight != null && sortedMuxed.isNotEmpty) {
-      final matches = sortedMuxed.where((s) => s.videoResolution.height == preferredHeight);
-      if (matches.isNotEmpty) {
-        selectedMuxed = matches.first;
+    // A muxed stream needs no merge at all, so take one when it is exactly
+    // what was asked for.
+    if (preferredHeight != null) {
+      final exact = manifest.muxed
+          .where((s) => s.videoResolution.height == preferredHeight);
+      if (exact.isNotEmpty) {
+        final filePath = await _getUniqueFilePath(
+          folder.path,
+          '$safeTitle.${preferredExt ?? 'mp4'}',
+        );
+        await downloadStreamWithStallTimeout(
+          streamUrl: exact.first.url.toString(),
+          savePath: filePath,
+          onProgress: onProgress,
+          timeoutSeconds: _stallSeconds,
+        );
+        return filePath;
       }
     }
 
-    // If a muxed stream exists for this resolution (e.g. 720p or 360p), download directly!
-    if (selectedMuxed != null) {
-      final ext = preferredExt ?? 'mp4';
-      final filePath = await _getUniqueFilePath(folder.path, '$safeTitle.$ext');
-      await _downloadStreamWithTimeout(
-        streamUrl: selectedMuxed.url.toString(),
-        savePath: filePath,
-        onProgress: onProgress,
-      );
-      return filePath;
-    }
+    // Otherwise merge the best video-only stream with the best audio.
+    final selectedVideoOnly = _pickVideoOnly(
+      manifest.videoOnly,
+      ceiling: preferredHeight,
+    );
 
-    // Otherwise (e.g. 1080p, 1440p, 4K), we pick from videoOnly and merge with audioOnly via FFmpeg
-    final sortedVideoOnly = manifest.videoOnly.sortByVideoQuality();
-    VideoOnlyStreamInfo? selectedVideoOnly;
-    if (preferredHeight != null && sortedVideoOnly.isNotEmpty) {
-      final matches = sortedVideoOnly.where((s) => s.videoResolution.height <= preferredHeight);
-      if (matches.isNotEmpty) {
-        selectedVideoOnly = matches.last;
-      } else {
-        selectedVideoOnly = sortedVideoOnly.last;
-      }
-    } else if (sortedVideoOnly.isNotEmpty) {
-      selectedVideoOnly = sortedVideoOnly.last; // highest available
-    }
-
-    // The audio check belongs in the condition, not inside the branch: a
-    // video-only stream with no audio track to merge used to throw StateError
-    // out of `withHighestBitrate()` instead of falling through to the muxed
-    // fallback sitting right below, which would have worked.
     if (selectedVideoOnly != null && manifest.audioOnly.isNotEmpty) {
       final bestAudio = manifest.audioOnly.withHighestBitrate();
-      final tempVideoPath = await _getUniqueFilePath(folder.path, '${safeTitle}_temp_v.mp4');
-      final tempAudioPath = await _getUniqueFilePath(folder.path, '${safeTitle}_temp_a.m4a');
-      final finalFilePath = await _getUniqueFilePath(folder.path, '$safeTitle.mp4');
-
-      // 1. Download Video stream (0 - 70%)
-      await _downloadStreamWithTimeout(
-        streamUrl: selectedVideoOnly.url.toString(),
-        savePath: tempVideoPath,
-        onProgress: (rx, total) {
-          if (total > 0 && onProgress != null) {
-            onProgress((rx / total * 70).toInt(), 100);
-          }
-        },
+      final tempVideoPath =
+          await _getUniqueFilePath(folder.path, '${safeTitle}_temp_v.mp4');
+      // Named for what it is. Calling an Opus/WebM stream ".m4a" left FFmpeg
+      // to work it out, and left a mislabelled orphan behind on failure.
+      final tempAudioPath = await _getUniqueFilePath(
+        folder.path,
+        '${safeTitle}_temp_a.${bestAudio.container.name}',
       );
+      final finalFilePath =
+          await _getUniqueFilePath(folder.path, '$safeTitle.mp4');
 
-      // 2. Download Audio stream (70 - 90%)
-      await _downloadStreamWithTimeout(
-        streamUrl: bestAudio.url.toString(),
-        savePath: tempAudioPath,
-        onProgress: (rx, total) {
-          if (total > 0 && onProgress != null) {
-            onProgress(70 + (rx / total * 20).toInt(), 100);
-          }
-        },
-      );
-
-      // 3. Merge Video + Audio using FFmpeg (90 - 100%)
-      //
-      // The cleanup has to be in a finally. It used to sit after the merge, so
-      // any failure past this point — an ffmpeg error, a cancelled job, the
-      // process being killed mid-download — left `<title>_temp_a.m4a` behind.
-      // That orphan is named after the video and carries an audio extension,
-      // so it then showed up in the user's audio folders as a phantom copy.
       try {
+        // 1. Video stream (0 - 70%)
+        await downloadStreamWithStallTimeout(
+          streamUrl: selectedVideoOnly.url.toString(),
+          savePath: tempVideoPath,
+          timeoutSeconds: _stallSeconds,
+          onProgress: (rx, total) {
+            if (total > 0 && onProgress != null) {
+              onProgress((rx / total * 70).toInt(), 100);
+            }
+          },
+        );
+
+        // 2. Audio stream (70 - 90%)
+        await downloadStreamWithStallTimeout(
+          streamUrl: bestAudio.url.toString(),
+          savePath: tempAudioPath,
+          timeoutSeconds: _stallSeconds,
+          onProgress: (rx, total) {
+            if (total > 0 && onProgress != null) {
+              onProgress(70 + (rx / total * 20).toInt(), 100);
+            }
+          },
+        );
+
+        // 3. Merge (90 - 100%)
+        //
+        // The cleanup has to be in a finally. It used to sit after the merge,
+        // so any failure past this point — an FFmpeg error, a cancelled job,
+        // the process being killed mid-download — left `<title>_temp_a.m4a`
+        // behind. That orphan is named after the video and carried an audio
+        // extension, so it showed up in the user's audio folders as a phantom
+        // copy.
         onProgress?.call(95, 100);
-        await mergeVideoAndAudio(tempVideoPath, tempAudioPath, finalFilePath);
+        await mergeVideoAndAudio(
+          tempVideoPath,
+          tempAudioPath,
+          finalFilePath,
+          copyVideo: _isMp4Friendly(selectedVideoOnly),
+        );
+        return finalFilePath;
+      } catch (error, stackTrace) {
+        await _deleteQuietly(finalFilePath);
+        // The audio path has always had a second attempt for exactly this —
+        // a refused or stalled stream. Video had none, so one 403 on one of
+        // two streams ended the download with nothing to show for it.
+        reportError(error, stackTrace, reason: 'youtube-merge-download');
+        final fallback = await _downloadBestMuxed(
+          manifest: manifest,
+          folder: folder,
+          safeTitle: safeTitle,
+          preferredHeight: preferredHeight,
+          onProgress: onProgress,
+        );
+        if (fallback != null) return fallback;
+        rethrow;
       } finally {
         await _deleteQuietly(tempVideoPath);
         await _deleteQuietly(tempAudioPath);
       }
-
-      return finalFilePath;
     }
 
-    // Ultimate fallback if no videoOnly stream was found either: fallback to highest muxed
-    if (sortedMuxed.isNotEmpty) {
-      final fallbackMuxed = sortedMuxed.last;
-      final filePath = await _getUniqueFilePath(folder.path, '$safeTitle.mp4');
-      await _downloadStreamWithTimeout(
-        streamUrl: fallbackMuxed.url.toString(),
-        savePath: filePath,
-        onProgress: onProgress,
-      );
-      return filePath;
-    }
+    final fallback = await _downloadBestMuxed(
+      manifest: manifest,
+      folder: folder,
+      safeTitle: safeTitle,
+      preferredHeight: preferredHeight,
+      onProgress: onProgress,
+    );
+    if (fallback != null) return fallback;
 
     throw Exception('No playable video stream found for YouTube video.');
   }
 
+  /// Downloads the best muxed stream, which needs no merge and no FFmpeg.
+  ///
+  /// Returns null when the video has no muxed stream at all — increasingly
+  /// common, and the reason this is a nullable helper rather than a `.last`
+  /// on a list that is often empty.
+  Future<String?> _downloadBestMuxed({
+    required StreamManifest manifest,
+    required Directory folder,
+    required String safeTitle,
+    int? preferredHeight,
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final best = bestAtOrBelow<MuxedStreamInfo>(
+      manifest.muxed,
+      (s) => s.videoResolution.height,
+      ceiling: preferredHeight,
+    );
+    if (best == null) return null;
+    final filePath = await _getUniqueFilePath(folder.path, '$safeTitle.mp4');
+    await downloadStreamWithStallTimeout(
+      streamUrl: best.url.toString(),
+      savePath: filePath,
+      onProgress: onProgress,
+      timeoutSeconds: _stallSeconds,
+    );
+    return filePath;
+  }
+
   /// Merges a video-only file and an audio-only file into a single MP4 container using FFmpeg.
+  /// Muxes a video-only and an audio-only file into one MP4.
+  ///
+  /// [copyVideo] must be false for VP9 and AV1. Those have no MP4 tag in most
+  /// FFmpeg builds, so `-c:v copy` fails the whole merge — and YouTube serves
+  /// them at the same resolutions as H.264, so whether a download worked came
+  /// down to which codec happened to be chosen.
   Future<void> mergeVideoAndAudio(
     String videoPath,
     String audioPath,
-    String outputPath,
-  ) async {
+    String outputPath, {
+    bool copyVideo = true,
+  }) async {
     final args = [
       '-y',
       '-i', videoPath,
       '-i', audioPath,
-      '-c:v', 'copy',
+      '-c:v', if (copyVideo) 'copy' else 'libx264',
       '-c:a', 'aac',
       '-movflags', '+faststart',
       outputPath,
@@ -497,8 +591,18 @@ class YouTubeExplodeService {
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  /// Downloads a stream URL to [savePath] with an optional chunk-timeout.
-  Future<void> _downloadStreamWithTimeout({
+  /// Downloads a stream URL to [savePath], abandoning it if it stops moving.
+  ///
+  /// The previous version built a `Completer` and a `Timer` that completed it
+  /// with a `TimeoutException`, but nothing ever raced them: the code did
+  /// `await dio.download(...)` and only reached `await completer.future`
+  /// afterwards. A stream that stalled forever blocked on the first await and
+  /// the timer's error was never seen, so the chunk timeout the audio fallback
+  /// depends on did nothing at all — the download hung until Dio's own
+  /// 15-minute receive timeout, and then reported a network problem.
+  ///
+  /// A `CancelToken` is what actually interrupts an in-flight Dio request.
+  Future<void> downloadStreamWithStallTimeout({
     required String streamUrl,
     required String savePath,
     void Function(int received, int total)? onProgress,
@@ -515,48 +619,46 @@ class YouTubeExplodeService {
     ));
 
     if (timeoutSeconds == null) {
-      await dio.download(
-        streamUrl,
-        savePath,
-        onReceiveProgress: onProgress,
-      );
+      await dio.download(streamUrl, savePath, onReceiveProgress: onProgress);
       return;
     }
 
-    final completer = Completer<void>();
-    Timer? chunkTimer;
+    final cancelToken = CancelToken();
+    var stalled = false;
+    Timer? stallTimer;
 
-    void resetTimer() {
-      chunkTimer?.cancel();
-      chunkTimer = Timer(Duration(seconds: timeoutSeconds), () {
-        if (!completer.isCompleted) {
-          completer.completeError(
-            TimeoutException('No chunks received within ${timeoutSeconds}s'),
-          );
-        }
+    void restartStallTimer() {
+      stallTimer?.cancel();
+      stallTimer = Timer(Duration(seconds: timeoutSeconds), () {
+        stalled = true;
+        cancelToken.cancel('stalled');
       });
     }
 
-    resetTimer();
-
+    restartStallTimer();
     try {
       await dio.download(
         streamUrl,
         savePath,
+        cancelToken: cancelToken,
         onReceiveProgress: (received, total) {
-          resetTimer();
+          restartStallTimer();
           onProgress?.call(received, total);
         },
       );
-      chunkTimer?.cancel();
-      if (!completer.isCompleted) completer.complete();
-    } catch (e) {
-      chunkTimer?.cancel();
-      if (!completer.isCompleted) completer.completeError(e);
+    } on DioException catch (error) {
+      // Say which one it was. "Cancelled" tells the caller nothing, and this
+      // message is what ends up in front of the user.
+      if (stalled) {
+        throw TimeoutException(
+          'The stream stopped sending data for ${timeoutSeconds}s.',
+        );
+      }
       rethrow;
+    } finally {
+      stallTimer?.cancel();
+      dio.close(force: true);
     }
-
-    await completer.future;
   }
 
   String _formatDuration(Duration? d) {

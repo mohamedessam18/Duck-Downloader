@@ -73,7 +73,9 @@ object DuckShareApi {
     )
 
     fun extract(context: Context, url: String): Meta {
-        val body = JSONObject().put("url", url).toString().toRequestBody(JSON)
+        val body = SessionStore.attach(context, url, JSONObject().put("url", url))
+            .toString()
+            .toRequestBody(JSON)
         val request = Request.Builder()
             .url(baseUrl(context) + "/api/extract")
             .post(body)
@@ -96,14 +98,16 @@ object DuckShareApi {
         type: String,
         quality: String,
     ): String {
-        val body = JSONObject()
-            .put("url", url)
-            .put("type", type)
-            .put("quality", quality)
-            .put("removeMusic", false)
-            .put("premiumNoWatermark", true)
-            .toString()
-            .toRequestBody(JSON)
+        val body = SessionStore.attach(
+            context,
+            url,
+            JSONObject()
+                .put("url", url)
+                .put("type", type)
+                .put("quality", quality)
+                .put("removeMusic", false)
+                .put("premiumNoWatermark", true),
+        ).toString().toRequestBody(JSON)
         val request = Request.Builder()
             .url(baseUrl(context) + "/api/download")
             .post(body)

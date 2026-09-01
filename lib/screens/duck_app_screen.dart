@@ -13,7 +13,6 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../l10n/app_localizations.dart';
-import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/premium_entitlement.dart';
 import '../constants/asset_paths.dart';
@@ -36,7 +35,8 @@ import '../widgets/glass_panel.dart';
 import '../widgets/media/media_thumb.dart';
 import '../widgets/media/mini_player.dart';
 import '../services/ad_service.dart';
-import 'locked_social_browser_screen.dart';
+import '../services/platform_sessions.dart';
+import 'platform_login_screen.dart';
 import 'settings_screen.dart';
 
 
@@ -235,32 +235,19 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
     );
   }
 
-  Future<void> _openLockedBrowser(
-    BuildContext context,
-    LockedBrowserRequest request,
-  ) async {
-    if (widget.controller.lockedBrowserRequest != request) return;
-    widget.controller.clearLockedBrowserRequest();
-    final result = await Navigator.of(context).push<dynamic>(
+  Future<void> _openLogin(BuildContext context, LoginRequest request) async {
+    if (widget.controller.loginRequest != request) return;
+    widget.controller.clearLoginRequest();
+    final signedIn = await Navigator.of(context).push<bool>(
       DuckPageRoute(
-        builder: (_) => LockedSocialBrowserScreen(
-          initialUrl: request.url,
-          platform: request.platform,
-          controller: widget.controller,
-        ),
+        builder: (_) => PlatformLoginScreen(platform: request.platform),
       ),
     );
-    if (!context.mounted || result == null) return;
-    if (result is String) {
-      // fromLockedBrowser: true prevents re-opening the browser on failure
-      await widget.controller.extractUrl(result, fromLockedBrowser: true);
-    } else if (result is List<BrowserImageCandidate>) {
-      if (result.isEmpty) return;
-      await widget.controller.startBrowserImageDownloads(
-        candidates: result,
-        platform: request.platform,
-      );
-    }
+    if (!context.mounted || signedIn != true) return;
+    // Picks the original link back up. The browser used to hand back whatever
+    // it had scraped off the page that happened to be open instead, so
+    // navigating during the login changed what got downloaded.
+    await widget.controller.completeLogin(request);
   }
 
   @override
@@ -268,11 +255,11 @@ class _DuckAppScreenState extends State<DuckAppScreen> {
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
-        final browserRequest = widget.controller.lockedBrowserRequest;
-        if (browserRequest != null) {
+        final loginRequest = widget.controller.loginRequest;
+        if (loginRequest != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
-              unawaited(_openLockedBrowser(context, browserRequest));
+              unawaited(_openLogin(context, loginRequest));
             }
           });
         }
@@ -599,29 +586,19 @@ class _HomeView extends StatelessWidget {
                         vertical: 12,
                       ),
                     ),
-                    onPressed: () {
-                      final url =
-                          controller.lastAttemptedUrl ??
-                          'https://www.instagram.com';
-                      final lower = url.toLowerCase();
-                      final platform = lower.contains('instagram')
-                          ? 'Instagram'
-                          : lower.contains('facebook')
-                          ? 'Facebook'
-                          : lower.contains('youtube')
-                          ? 'YouTube'
-                          : lower.contains('twitter') || lower.contains('x.com')
-                          ? 'X'
-                          : 'Social';
-                      controller.lockedBrowserRequest = LockedBrowserRequest(
-                        url: url,
-                        platform: platform,
-                      );
-                    },
-                    icon: const Icon(Icons.open_in_browser),
-                    label: const Text(
-                      'Open In-App Browser',
-                      style: TextStyle(
+                    // Goes through the controller so the change is announced.
+                    // This used to assign `controller.lockedBrowserRequest`
+                    // directly — a plain field, so no `notifyListeners` ran,
+                    // the AnimatedBuilder above never rebuilt, and pressing
+                    // the button did nothing whatsoever until some unrelated
+                    // change happened to notify. It also carried its own copy
+                    // of the platform table, missing Threads and Udemy, which
+                    // then opened as a generic "Social".
+                    onPressed: controller.openLoginForLastAttempt,
+                    icon: const Icon(Icons.login_rounded),
+                    label: Text(
+                      AppLocalizations.of(context).translate('openLoginButton'),
+                      style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
                       ),

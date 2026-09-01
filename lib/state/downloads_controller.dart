@@ -16,13 +16,15 @@ import '../core/notifications/notification_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../core/permissions/permission_service.dart';
-import '../models/browser_image_candidate.dart';
 import '../models/download_models.dart';
 import '../services/api_client.dart';
 import '../services/clipboard_service.dart';
 import '../services/crash_reporting_service.dart';
 import '../services/download_store.dart';
 import '../services/file_service.dart';
+import '../models/instagram_post.dart';
+import '../services/instagram_service.dart';
+import '../services/platform_sessions.dart';
 import '../services/premium_entitlement.dart';
 import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
@@ -74,6 +76,7 @@ class DuckDownloadsController extends ChangeNotifier
     NotificationService? notificationService,
     PermissionService? permissionService,
     YouTubeExplodeService? ytExplode,
+    InstagramService? instagram,
     bool initializePremium = true,
     bool initializePlatformServices = true,
   }) : _api = api,
@@ -84,11 +87,9 @@ class DuckDownloadsController extends ChangeNotifier
        premium = premiumManager,
        _notifications = notificationService ?? NotificationService(),
        _permissions = permissionService ?? PermissionService(),
-       _ytExplode = ytExplode ?? YouTubeExplodeService() {
-    final initialCookies = _store.readYoutubeCookies();
-    if (initialCookies != null) {
-      _ytExplode.updateCookies(initialCookies);
-    }
+       _ytExplode = ytExplode ?? YouTubeExplodeService(),
+       _instagram = instagram ?? InstagramService() {
+    unawaited(_loadYouTubeSession());
     _downloads = _store.readDownloads();
     for (final item in _downloads.where((item) => item.isPrivate)) {
       _privateMetadata[item.id] = item;
@@ -330,11 +331,36 @@ class DuckDownloadsController extends ChangeNotifier
   String? batchPlatform;
   DownloadType selectedType = DownloadType.video;
   BackendCookiesInfo? backendCookies;
-  LockedBrowserRequest? lockedBrowserRequest;
+
+  /// The sign-in the app is asking for, or null.
+  ///
+  /// Private with an explicit setter because the previous public field was
+  /// assigned directly from the "Open In-App Browser" button, which meant no
+  /// `notifyListeners` ran and the screen listening for it never rebuilt.
+  /// Tapping the button did nothing at all until some unrelated change
+  /// happened to notify, and then a browser appeared out of nowhere.
+  LoginRequest? _loginRequest;
+  LoginRequest? get loginRequest => _loginRequest;
+
+  /// Signed-in sessions, per platform, encrypted on this device.
+  final PlatformSessionStore _sessions = const PlatformSessionStore();
+
+  final InstagramService _instagram;
+
+  /// The Instagram post the current options or batch came from.
+  ///
+  /// Held because its items carry direct CDN URLs, which download on this
+  /// device instead of being posted to the backend for it to fetch.
+  InstagramPost? _instagramPost;
+
   String? lastAttemptedUrl;
   String quality = 'Best';
   bool busy = false;
-  bool _justReturnedFromLockedBrowser = false;
+
+  /// True while re-running an extraction that a sign-in was supposed to fix.
+  ///
+  /// Guards the obvious loop: fail, sign in, fail again, ask to sign in again.
+  bool _justSignedIn = false;
   bool autoSaveVideos = true;
   bool enableClipboardDetection = true;
   bool crashReportingEnabled = true;
@@ -703,54 +729,115 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
-  void clearLockedBrowserRequest() {
-    lockedBrowserRequest = null;
+  /// Hands the saved YouTube session to the on-device extractor at startup.
+  ///
+  /// Also moves the one left by older builds. That copy lived in the plain
+  /// Hive box beside the download list — a Google session in clear text, in
+  /// the same file as everything else — so it is read once, written to the
+  /// encrypted per-platform store, and deleted.
+  Future<void> _loadYouTubeSession() async {
+    final legacy = _store.readYoutubeCookies();
+    if (legacy != null && legacy.trim().isNotEmpty) {
+      if (!await _sessions.hasSession(SocialPlatform.youtube)) {
+        await _sessions.write(SocialPlatform.youtube, legacy);
+      }
+      await _store.writeYoutubeCookies(null);
+    }
+    final cookies = await _sessions.read(SocialPlatform.youtube);
+    if (cookies != null) _ytExplode.updateCookies(cookies);
+    await _syncSessionsToNative();
+  }
+
+  /// Drops a pending sign-in request. Called once the screen has taken it.
+  void clearLoginRequest() {
+    if (_loginRequest == null) return;
+    _loginRequest = null;
     notifyListeners();
   }
 
-  void _requestLockedBrowser(String url, String platform) {
-    lockedBrowserRequest = LockedBrowserRequest(url: url, platform: platform);
+  /// Asks the user to sign in, so the link they pasted can be retried.
+  ///
+  /// Returns false when nothing here can sign into this link's site, so the
+  /// caller reports the real error instead of opening a sign-in screen that
+  /// could not possibly help.
+  bool _requestLogin(String url) {
+    final profile = profileForUrl(url);
+    if (profile == null) return false;
+    _loginRequest = LoginRequest(platform: profile.platform, retryUrl: url);
     flow = DuckFlow.ready;
-    setStatus('statusOpenBrowserForImages');
+    setStatus('statusSignInRequired');
+    return true;
   }
 
-  Future<void> startBrowserImageDownloads({
-    required List<BrowserImageCandidate> candidates,
-    required String platform,
-  }) async {
-    final items = <PlaylistItem>[];
-    for (final candidate in candidates) {
-      if (candidate.isPreview) continue;
-      items.add(candidate.toPlaylistItem(items.length + 1));
-    }
-    if (items.isEmpty) {
-      flow = DuckFlow.error;
-      setStatus('statusNoFullSizeImages');
-      notifyListeners();
-      return;
-    }
-
-    if (items.length == 1) {
-      final singleItem = items[0];
-      batchItems = items;
-      batchPlatform = platform;
-      await startBatchDownload(
-        urls: [singleItem.url],
-        type: singleItem.isVideo ? DownloadType.video : DownloadType.image,
-        quality: 'Best',
-      );
-      clearBatch();
-      return;
-    }
-
-    batchTitle = '$platform Images';
-    batchPlatform = platform;
-    batchItems = items;
-    selectedType = DownloadType.image;
-    quality = 'Best';
-    flow = DuckFlow.ready;
-    setStatus('statusChooseImages');
+  /// Re-opens the sign-in the app last asked for.
+  ///
+  /// This is what the button on the home screen calls. It goes through the
+  /// setter so the change is announced — assigning the field from the button
+  /// was the reason pressing it appeared to do nothing.
+  void openLoginForLastAttempt() {
+    final url = _loginRequest?.retryUrl ?? lastAttemptedUrl;
+    if (url == null) return;
+    final profile = profileForUrl(url);
+    if (profile == null) return;
+    _loginRequest = LoginRequest(platform: profile.platform, retryUrl: url);
     notifyListeners();
+  }
+
+  /// Called once the user has signed in: pick the link back up.
+  ///
+  /// The sign-in exists to finish a download that was already asked for, so
+  /// finishing it is this method's whole job. The old screen ended by handing
+  /// back a list of images it had scraped out of whatever page happened to be
+  /// open, which is why navigating anywhere during the login changed what got
+  /// downloaded.
+  Future<void> completeLogin(LoginRequest request) async {
+    _loginRequest = null;
+    await _syncSessionsToNative();
+    if (request.platform == SocialPlatform.youtube) {
+      // youtube_explode extracts on the device, so it needs the session too —
+      // handing it only to the backend would leave the on-device path signed
+      // out.
+      _ytExplode.updateCookies(await _sessions.read(SocialPlatform.youtube));
+    }
+    setStatus('statusSignedInRetrying');
+    notifyListeners();
+    await extractUrl(request.retryUrl, afterSignIn: true);
+  }
+
+  /// True when this platform already has a saved session.
+  Future<bool> hasSessionFor(SocialPlatform platform) =>
+      _sessions.hasSession(platform);
+
+  /// Which platforms are currently signed in.
+  Future<Set<SocialPlatform>> signedInPlatforms() => _sessions.signedIn();
+
+  /// Mirrors the saved sessions to the native side.
+  ///
+  /// A link shared from another app is handled by ShareActivity and
+  /// DownloadService, which call the backend directly and never start a
+  /// Flutter isolate. Without this, signing into Instagram inside Duck did
+  /// nothing for a private post shared *into* Duck: the two entry points
+  /// disagreed about who the user was.
+  ///
+  /// The hosts travel with each jar so the native side never needs its own
+  /// copy of the platform table — a second copy is what let the old code
+  /// forget about Threads and Udemy.
+  Future<void> _syncSessionsToNative() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final entries = <Map<String, Object>>[];
+      for (final profile in allPlatformProfiles) {
+        final cookies = await _sessions.read(profile.platform);
+        if (cookies == null) continue;
+        entries.add({'hosts': profile.hosts, 'cookies': cookies});
+      }
+      await _channel.invokeMethod<bool>('syncSessions', {
+        'sessions': entries.isEmpty ? null : jsonEncode(entries),
+      });
+    } catch (_) {
+      // Older installs and every non-Android platform land here. Downloads
+      // started from the share sheet simply run signed out.
+    }
   }
 
   bool get isPremiumActive => premium.isPremium;
@@ -1839,7 +1926,7 @@ class DuckDownloadsController extends ChangeNotifier
     batchItems = null;
     batchTitle = null;
     batchPlatform = null;
-    lockedBrowserRequest = null;
+    _loginRequest = null;
     lastDownloadedItem = null;
 
     var cleanUrl = url.trim();
@@ -1949,8 +2036,7 @@ class DuckDownloadsController extends ChangeNotifier
             'or unavailable in your region.',
           );
         } catch (error) {
-          if (_shouldUseLockedBrowserFallback(cleanUrl, error)) {
-            _requestLockedBrowser(cleanUrl, _browserPlatformFor(cleanUrl));
+          if (_shouldAskToSignIn(cleanUrl, error) && _requestLogin(cleanUrl)) {
             return;
           }
           rethrow;
@@ -1988,37 +2074,9 @@ class DuckDownloadsController extends ChangeNotifier
         // Fall through to the backend for galleries and text posts.
       }
 
-      if (cleanUrl.contains('instagram.com')) {
-        try {
-          final playlist = await _api.extractPlaylist(cleanUrl);
-          if (playlist.items.isNotEmpty) {
-            if (playlist.items.length > 1) {
-              // Carousel - show all images as batch
-              batchTitle = playlist.title;
-              batchPlatform = playlist.platform;
-              batchItems = playlist.items;
-              selectedType = DownloadType.image;
-              quality = 'Best';
-              flow = DuckFlow.ready;
-              setStatus('statusChooseImages');
-            } else {
-              // Single image post - download directly as image
-              batchTitle = playlist.title;
-              batchPlatform = playlist.platform;
-              batchItems = playlist.items;
-              selectedType = DownloadType.image;
-              quality = 'Best';
-              flow = DuckFlow.ready;
-              setStatus('statusTapDownloadForImage');
-            }
-            return;
-          }
-        } catch (error) {
-          if (_shouldUseLockedBrowserFallback(cleanUrl, error)) {
-            _requestLockedBrowser(cleanUrl, _browserPlatformFor(cleanUrl));
-            return;
-          }
-        }
+      if (InstagramService.isInstagramUrl(cleanUrl)) {
+        await _extractInstagram(cleanUrl);
+        return;
       }
       try {
         final media = await _api.extract(cleanUrl);
@@ -2053,15 +2111,168 @@ class DuckDownloadsController extends ChangeNotifier
             rethrow;
           }
         } catch (fallbackError) {
-          if (_shouldUseLockedBrowserFallback(cleanUrl, error) ||
-              _shouldUseLockedBrowserFallback(cleanUrl, fallbackError)) {
-            _requestLockedBrowser(cleanUrl, _browserPlatformFor(cleanUrl));
+          if ((_shouldAskToSignIn(cleanUrl, error) ||
+                  _shouldAskToSignIn(cleanUrl, fallbackError)) &&
+              _requestLogin(cleanUrl)) {
             return;
           }
           rethrow;
         }
       }
     }
+  }
+
+  /// Reads an Instagram post, trying the device before the server.
+  ///
+  /// Three tiers, in this order for a reason. Meta answers a request from a
+  /// datacentre address as a stranger no matter whose cookies it carries, so
+  /// the phone — on a residential connection, with the user's own session —
+  /// is the only one of the two that reliably gets an answer. The backend is
+  /// still worth asking when the device call fails, and the page itself is the
+  /// last resort when both do.
+  Future<void> _extractInstagram(String cleanUrl) async {
+    Object? deviceError;
+    try {
+      _presentInstagramPost(await _instagram.fetchPost(cleanUrl), cleanUrl);
+      return;
+    } catch (error, stackTrace) {
+      deviceError = error;
+      if (error is! InstagramAuthRequired && error is! InstagramPostUnavailable) {
+        reportError(error, stackTrace, reason: 'instagram-on-device');
+      }
+    }
+
+    // A post that Instagram itself says is gone will not be found by anything
+    // else either, and pretending otherwise costs the user two more timeouts.
+    if (deviceError is InstagramPostUnavailable) {
+      throw Exception(deviceError.toString());
+    }
+
+    try {
+      final playlist = await _api.extractPlaylist(cleanUrl);
+      if (playlist.items.isNotEmpty) {
+        _presentInstagramPlaylist(playlist, cleanUrl);
+        return;
+      }
+    } catch (_) {
+      // Falls through to the page.
+    }
+
+    try {
+      final scraped = await _instagram.fetchPostFromPage(cleanUrl);
+      _presentInstagramPost(scraped, cleanUrl);
+      return;
+    } catch (error, stackTrace) {
+      if (error is! InstagramAuthRequired && error is! InstagramPostUnavailable) {
+        reportError(error, stackTrace, reason: 'instagram-page-read');
+      }
+    }
+
+    // Only now is a sign-in worth offering, and only if a session is actually
+    // what was missing. Offering it for every failure is what put a signed-in
+    // user in a loop: sign in, fail, be asked to sign in again.
+    if (deviceError is InstagramAuthRequired &&
+        !_justSignedIn &&
+        _requestLogin(cleanUrl)) {
+      return;
+    }
+    throw Exception(
+      deviceError?.toString() ??
+          'Could not read this Instagram post. Try again in a moment.',
+    );
+  }
+
+  /// Puts a post on screen: one item becomes options, several become a batch.
+  void _presentInstagramPost(InstagramPost post, String sourceUrl) {
+    _instagramPost = post;
+    batchPlatform = 'Instagram';
+    lastAttemptedUrl = sourceUrl;
+
+    if (post.isSingle) {
+      final media = post.items.single;
+      metadata = MediaMetadata(
+        // The direct CDN URL, so the file downloads on this device rather than
+        // being fetched a second time by the backend on the user's behalf.
+        url: media.url,
+        title: post.title,
+        platform: 'Instagram',
+        thumbnail: media.thumbnail ?? media.url,
+        qualities: [
+          FormatInfo(
+            id: 'best',
+            label: media.isVideo
+                ? (media.height == null ? 'Original' : '${media.height}p')
+                : 'Original Image',
+            ext: media.isVideo ? 'mp4' : 'jpg',
+            width: media.width,
+            height: media.height,
+          ),
+        ],
+        // A Reel can also be saved as sound, and as its cover picture — the
+        // Image chip on a video post means the cover.
+        audioFormats: media.isVideo
+            ? const [FormatInfo(id: 'mp3', label: 'MP3 192kbps', ext: 'mp3')]
+            : const [],
+      );
+      selectedType = media.isVideo ? DownloadType.video : DownloadType.image;
+      quality = metadata!.qualities.first.label;
+      flow = DuckFlow.ready;
+      setStatus(
+        media.isVideo ? 'statusChooseVideoOrAudio' : 'statusTapDownloadForImage',
+      );
+      return;
+    }
+
+    batchTitle = post.title;
+    batchItems = [
+      for (var i = 0; i < post.items.length; i++)
+        PlaylistItem(
+          url: post.items[i].url,
+          title: '${post.title} ${i + 1}',
+          thumbnail: post.items[i].thumbnail ?? post.items[i].url,
+          width: post.items[i].width,
+          height: post.items[i].height,
+          source: 'instagram_device',
+          isVideo: post.items[i].isVideo,
+        ),
+    ];
+    // A mixed post opens on "everything as it is". Opening on one type means
+    // the careless tap downloads four copies of the wrong thing.
+    selectedType = post.hasVideo ? DownloadType.video : DownloadType.image;
+    quality = 'Best';
+    flow = DuckFlow.ready;
+    setStatus('statusChooseImages');
+  }
+
+  /// The same presentation, for a post the backend read instead.
+  void _presentInstagramPlaylist(
+    PlaylistExtractResponse playlist,
+    String sourceUrl,
+  ) {
+    _presentInstagramPost(
+      InstagramPost(
+        shortcode: InstagramService.shortcodeOf(sourceUrl) ?? '',
+        title: playlist.title.isEmpty ? 'Instagram Post' : playlist.title,
+        items: [
+          for (final item in playlist.items)
+            InstagramMedia(
+              url: item.url,
+              isVideo: item.isVideo,
+              width: item.width,
+              height: item.height,
+              thumbnail: item.thumbnail,
+            ),
+        ],
+      ),
+      sourceUrl,
+    );
+  }
+
+  /// True when [url] is a file this device already knows how to fetch itself.
+  bool _isDirectInstagramMedia(String url) {
+    final post = _instagramPost;
+    if (post == null) return false;
+    return post.items.any((item) => item.url == url);
   }
 
   Future<void> _playQuack() async {
@@ -2096,7 +2307,10 @@ class DuckDownloadsController extends ChangeNotifier
     batchItems = null;
     batchTitle = null;
     batchPlatform = null;
-    lockedBrowserRequest = null;
+    // Held only for as long as the options it produced are on screen; a stale
+    // one would let the next link download the previous post's files.
+    _instagramPost = null;
+    _loginRequest = null;
     notifyListeners();
 
     try {
@@ -2114,17 +2328,17 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  Future<void> extractUrl(String url, {bool fromLockedBrowser = false}) async {
+  Future<void> extractUrl(String url, {bool afterSignIn = false}) async {
     if (_rejectIfBusy()) return;
     busy = true;
-    _justReturnedFromLockedBrowser = fromLockedBrowser;
+    _justSignedIn = afterSignIn;
     flow = DuckFlow.extracting;
     setStatus('statusCheckingLink');
     metadata = null;
     batchItems = null;
     batchTitle = null;
     batchPlatform = null;
-    lockedBrowserRequest = null;
+    _loginRequest = null;
     notifyListeners();
 
     try {
@@ -2134,7 +2348,7 @@ class DuckDownloadsController extends ChangeNotifier
       _status = _errorStatus(error);
     } finally {
       busy = false;
-      _justReturnedFromLockedBrowser = false;
+      _justSignedIn = false;
       notifyListeners();
     }
   }
@@ -2149,6 +2363,15 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
 
     try {
+      // Instagram: the extraction already produced the direct CDN URL, so the
+      // file comes straight to this device. Posting it to the backend would
+      // ask the server to fetch a public file the phone can reach itself, on
+      // a connection Meta is more likely to refuse.
+      if (_isDirectInstagramMedia(media.url)) {
+        await _startInstagramDownload(media);
+        return;
+      }
+
       // 1. YouTube: Download directly on-device using YouTubeExplodeService!
       // This runs on the user's residential connection (never blocked by datacenter IP checks),
       // downloads at maximum speed directly to the phone, and avoids 403 Forbidden.
@@ -2208,11 +2431,205 @@ class DuckDownloadsController extends ChangeNotifier
       flow = DuckFlow.error;
       _status = _errorStatus(error);
       if (_isLoginRequiredError(error.toString()) &&
-          !_justReturnedFromLockedBrowser) {
-        _requestLockedBrowser(media.url, _browserPlatformFor(media.url));
+          !_justSignedIn &&
+          _requestLogin(media.url)) {
         return;
       }
     } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// One item of an Instagram carousel, fetched by this device.
+  ///
+  /// [type] is already per-item when the user chose "everything as it is", so
+  /// a photo in a mixed post saves as a photo and the video beside it saves as
+  /// a video.
+  Future<void> _startInstagramBatchItem({
+    required String url,
+    required String title,
+    required PlaylistItem? item,
+    required DownloadType type,
+  }) async {
+    final itemId = _newLocalDownloadId();
+    var entry = DownloadItem(
+      id: itemId,
+      url: url,
+      title: title.isEmpty ? 'Instagram' : title,
+      thumbnail: item?.thumbnail ?? url,
+      platform: 'Instagram',
+      quality: 'Best',
+      type: type,
+      createdAt: DateTime.now(),
+      status: DownloadStatus.downloading,
+      progress: 0,
+      favorite: false,
+      isPrivate: downloadDirectToVault,
+    );
+    await _saveItem(entry);
+
+    try {
+      final filePath = await _ytExplode.downloadStream(
+        streamUrl: url,
+        title: entry.title,
+        type: type,
+        ext: type == DownloadType.image ? 'jpg' : 'mp4',
+        onProgress: (received, total) async {
+          if (total <= 0) return;
+          await _publishProgress(
+            entry,
+            ((received / total) * 100).clamp(0, 100).toInt(),
+          );
+        },
+      );
+
+      entry = entry.copyWith(
+        filePath: filePath,
+        progress: 100,
+        status: DownloadStatus.completed,
+      );
+      if (entry.isPrivate) {
+        entry = entry.copyWith(
+          filePath: await _files.moveFileToVault(
+            currentPath: filePath,
+            filename: p.basename(filePath),
+          ),
+        );
+      }
+      await _saveItem(entry);
+      if (!entry.isPrivate && autoSaveVideos) {
+        entry = await _trySaveMediaAfterDownload(entry);
+      }
+      lastDownloadedItem = entry;
+    } catch (error) {
+      await _saveItem(entry.copyWith(status: DownloadStatus.failed));
+      rethrow;
+    }
+  }
+
+  /// Downloads one Instagram item as whichever of the three the user picked.
+  ///
+  /// On a Reel the Image chip means the cover frame and the Audio chip means
+  /// the sound, so the same post answers all three without a second trip to
+  /// Instagram.
+  Future<void> _startInstagramDownload(MediaMetadata media) async {
+    final post = _instagramPost;
+    final item = post?.items.firstWhere(
+      (candidate) => candidate.url == media.url,
+      orElse: () => InstagramMedia(url: media.url, isVideo: true),
+    );
+    if (item == null) return;
+
+    if (selectedType == DownloadType.image) {
+      await _startCobaltDownload(
+        media,
+        item.isVideo ? (item.thumbnail ?? item.url) : item.url,
+      );
+      return;
+    }
+    if (selectedType == DownloadType.audio && item.isVideo) {
+      await _startInstagramAudioDownload(media, item);
+      return;
+    }
+    await _startCobaltDownload(media, item.url);
+  }
+
+  /// Saves a Reel as sound: fetch the video, keep the audio, drop the file.
+  ///
+  /// Instagram serves no audio-only rendition, so the choice is this or no
+  /// Audio chip at all on a platform where saving the sound is most of why
+  /// people download Reels.
+  Future<void> _startInstagramAudioDownload(
+    MediaMetadata media,
+    InstagramMedia item,
+  ) async {
+    final itemId = _newLocalDownloadId();
+    var entry = DownloadItem(
+      id: itemId,
+      url: media.url,
+      title: media.title,
+      thumbnail: item.thumbnail ?? media.thumbnail,
+      platform: 'Instagram',
+      quality: quality,
+      type: DownloadType.audio,
+      createdAt: DateTime.now(),
+      status: DownloadStatus.downloading,
+      progress: 0,
+      favorite: false,
+      isPrivate: downloadDirectToVault,
+    );
+    await _saveItem(entry);
+    activeId = itemId;
+
+    String? videoPath;
+    try {
+      videoPath = await _ytExplode.downloadStream(
+        streamUrl: item.url,
+        title: media.title,
+        type: DownloadType.video,
+        ext: 'mp4',
+        onProgress: (received, total) async {
+          if (total <= 0) return;
+          // Stops at 90: the conversion after this is not instant, and a bar
+          // that sat at 100% while ffmpeg ran read as a finished download that
+          // had produced no file.
+          await _publishProgress(
+            entry,
+            ((received / total) * 90).clamp(0, 90).toInt(),
+          );
+        },
+      );
+
+      setStatus('statusConvertingToAudio');
+      await _publishProgress(entry, 95, status: DownloadStatus.processing);
+      final audioPath = await ConversionService.convertVideoToAudio(
+        inputPath: videoPath,
+        format: 'mp3',
+        bitrate: 192,
+      );
+
+      entry = entry.copyWith(
+        filePath: audioPath,
+        progress: 100,
+        status: DownloadStatus.completed,
+      );
+      if (entry.isPrivate) {
+        entry = entry.copyWith(
+          filePath: await _files.moveFileToVault(
+            currentPath: audioPath,
+            filename: p.basename(audioPath),
+          ),
+        );
+      }
+      await _saveItem(entry);
+      if (!entry.isPrivate && autoSaveVideos) {
+        entry = await _trySaveMediaAfterDownload(entry);
+      }
+
+      lastDownloadedItem = entry;
+      flow = DuckFlow.success;
+      setStatus('statusConversionComplete');
+      unawaited(
+        _notifications.showDownloadComplete(
+          id: entry.id.hashCode,
+          title: entry.title,
+          type: 'Audio',
+          downloadId: entry.id,
+        ),
+      );
+    } catch (error) {
+      await _saveItem(entry.copyWith(status: DownloadStatus.failed));
+      flow = DuckFlow.error;
+      _status = _errorStatus(error);
+    } finally {
+      // The video was only ever a means to the sound.
+      if (videoPath != null) {
+        try {
+          final file = File(videoPath);
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
       busy = false;
       notifyListeners();
     }
@@ -2986,11 +3403,9 @@ class DuckDownloadsController extends ChangeNotifier
                 errText.isNotEmpty ? errText : 'Download failed.',
               );
 
-              if (isLoginRequired && !_justReturnedFromLockedBrowser) {
-                _requestLockedBrowser(
-                  baseItem.url,
-                  _browserPlatformFor(baseItem.url),
-                );
+              if (isLoginRequired &&
+                  !_justSignedIn &&
+                  _requestLogin(baseItem.url)) {
                 return;
               }
 
@@ -3999,106 +4414,144 @@ class DuckDownloadsController extends ChangeNotifier
         lower.contains('joined');
   }
 
-  bool _shouldUseLockedBrowserFallback(String url, Object error) {
-    // If we already tried the locked browser once, do NOT loop back into it.
-    // Show an error instead so the user understands the server limitation.
-    if (_justReturnedFromLockedBrowser) return false;
-    final lowerUrl = url.toLowerCase();
-
-    final isYouTube =
-        lowerUrl.contains('youtube.com') || lowerUrl.contains('youtu.be');
-    if (isYouTube) {
-      final errStr = error.toString().toLowerCase();
-      return _isLoginRequiredError(errStr) ||
-          errStr.contains('unplayable') ||
-          errStr.contains('age-restricted') ||
-          errStr.contains('restricted') ||
-          errStr.contains('forbidden');
-    }
-
-    final isBrowserPlatform =
-        lowerUrl.contains('instagram.com') ||
-        lowerUrl.contains('threads.net') ||
-        lowerUrl.contains('threads.com') ||
-        lowerUrl.contains('x.com') ||
-        lowerUrl.contains('twitter.com') ||
-        lowerUrl.contains('facebook.com') ||
-        lowerUrl.contains('fb.watch') ||
-        lowerUrl.contains('udemy.com');
-
-    if (isBrowserPlatform) return true;
-
-    // Check if error explicitly demands login or captcha for any platform
-    return _isLoginRequiredError(error.toString());
-  }
-
-  String _browserPlatformFor(String url) {
-    final lower = url.toLowerCase();
-    if (lower.contains('instagram.com')) return 'Instagram';
-    if (lower.contains('threads.net') || lower.contains('threads.com'))
-      return 'Threads';
-    if (lower.contains('x.com') || lower.contains('twitter.com')) return 'X';
-    if (lower.contains('youtube.com') || lower.contains('youtu.be'))
-      return 'YouTube';
-    if (lower.contains('facebook.com') || lower.contains('fb.watch'))
-      return 'Facebook';
-    if (lower.contains('udemy.com')) return 'Udemy';
-    return 'Social';
-  }
-
-  /// True when the current error is the one a browser login would fix.
+  /// Whether signing in is a plausible fix for this failure.
   ///
-  /// The screen used to work this out by searching the status text for the
-  /// words "in-app browser", so the button that fixes the problem was tied to
-  /// one English phrasing.
+  /// The host list this used to carry was a second copy of the platform table
+  /// and had already drifted from it — Threads and Udemy were missing from the
+  /// button that opened the browser, so they opened as a generic "Social" and
+  /// took the wrong path from there. `profileForUrl` is the only list now.
+  bool _shouldAskToSignIn(String url, Object error) {
+    // One attempt. Fail, sign in, fail again is an error to report, not a
+    // reason to ask for another sign-in.
+    if (_justSignedIn) return false;
+
+    final profile = profileForUrl(url);
+    if (profile == null) return _isLoginRequiredError(error.toString());
+
+    if (profile.platform == SocialPlatform.youtube) {
+      // YouTube fails for reasons a sign-in cannot fix far more often than the
+      // others, so it has to actually look like an access problem.
+      final message = error.toString().toLowerCase();
+      return _isLoginRequiredError(message) ||
+          message.contains('unplayable') ||
+          message.contains('age-restricted') ||
+          message.contains('restricted') ||
+          message.contains('forbidden');
+    }
+    return true;
+  }
+
+  /// True when signing in is the way out of what is currently on screen.
+  ///
+  /// Two things had to be added to this. It used to search the status text for
+  /// the words "in-app browser", so the only way out of an error was tied to
+  /// one English phrasing. And it did not include the status the app sets when
+  /// it asks for a sign-in, so backing out of the sign-in screen left the user
+  /// with no button at all — the link had to be pasted again from scratch.
+  ///
+  /// The last clause is the load-bearing one: a site nothing here can sign
+  /// into must not be offered a sign-in button.
   bool get needsBrowserLogin =>
-      statusMessage.isKey('errorLoginRequired') ||
-      statusMessage.isKey('errorExtractFailed');
+      (statusMessage.isKey('errorLoginRequired') ||
+          statusMessage.isKey('errorExtractFailed') ||
+          statusMessage.isKey('statusSignInRequired')) &&
+      profileForUrl(_loginRequest?.retryUrl ?? lastAttemptedUrl ?? '') != null;
 
   /// The key this error maps onto, or null when only the raw text is left.
   ///
   /// These are the sentences the user actually reads when something fails, and
   /// they were the largest block of untranslated text in the app: an Arabic
   /// user hit a private Instagram post and got an English paragraph.
+  /// Real network failures, as the platform actually words them.
+  ///
+  /// Deliberately specific. The list this replaces ended with
+  /// `lower.contains('http')`, and every Dio failure prints the request URL in
+  /// its message — so a 403 from googlevideo, a missing format, an ffmpeg
+  /// error carrying a log line, all arrived at the user as "Connection
+  /// problem. Check your internet and try again." while their internet was
+  /// fine. The real reason never reached the screen, and never reached a bug
+  /// report either.
+  static const _networkSignals = <String>[
+    'socketexception',
+    'handshakeexception',
+    'timeoutexception',
+    'connectiontimeout',
+    'receivetimeout',
+    'sendtimeout',
+    'connectionerror',
+    'connection timed out',
+    'connection refused',
+    'connection reset',
+    'connection closed',
+    'connection terminated',
+    'failed host lookup',
+    'network is unreachable',
+    'no address associated',
+    'software caused connection abort',
+    'os error',
+  ];
+
+  /// The HTTP status a failure is reporting, when it names one.
+  ///
+  /// Dio spells this out in prose — "status code of 403" — so the number is
+  /// recoverable, and a refusal by the server is a different problem from the
+  /// phone having no signal.
+  static int? _statusCodeIn(String lower) {
+    final match = RegExp(
+      r'status code (?:of )?(\d{3})',
+    ).firstMatch(lower);
+    if (match != null) return int.tryParse(match.group(1)!);
+    final http = RegExp(r'http (?:error )?(\d{3})').firstMatch(lower);
+    return http == null ? null : int.tryParse(http.group(1)!);
+  }
+
   String? _errorKeyFor(String lower) {
     if (lower.contains('blocked_adult_content')) return 'errorAdultBlocked';
     if (lower.contains('adult_check_unavailable')) {
       return 'statusAdultCheckUnavailable';
     }
 
-    // 1. YouTube specific bot/sign-in errors
+    // 1. Sign-in walls and bot checks.
+    //
+    // `bot` is matched as a whole word. As a bare substring it also matched
+    // "robot", "bots" and anything else that happened to contain it.
     if (lower.contains('sign in') ||
-        lower.contains('bot') ||
+        RegExp(r'\bbots?\b').hasMatch(lower) ||
         lower.contains('captcha') ||
         lower.contains('confirm you are not')) {
       return 'errorYouTubeBlocking';
     }
 
-    // 2. Facebook/Instagram/TikTok parse/extraction errors
+    // 2. The server refused us rather than the network failing. Checked before
+    //    the network bucket, because these carry a URL and used to be filed as
+    //    "check your internet".
+    final status = _statusCodeIn(lower);
+    if (status == 403 || status == 429) return 'errorYouTubeBlocking';
+    if (status == 401) return 'errorLoginRequired';
+    if (status == 404 || status == 410) return 'errorUnsupportedLink';
+
+    // 3. Extraction failures.
     if (lower.contains('cannot parse data') ||
         lower.contains('extractor') ||
         lower.contains('unable to extract')) {
       return 'errorExtractFailed';
     }
 
-    // 3. Private/Login gated content
+    // 4. Private or login-gated content.
     if (lower.contains('login') ||
         lower.contains('private') ||
         lower.contains('cookies')) {
       return 'errorLoginRequired';
     }
 
-    // 4. Unsupported URLs
+    // 5. Unsupported URLs.
     if (lower.contains('unsupported url') || lower.contains('unsupported')) {
       return 'errorUnsupportedLink';
     }
 
-    // 5. Network/Timeout errors
-    if (lower.contains('timeout') ||
-        lower.contains('connection') ||
-        lower.contains('http') ||
-        lower.contains('socket')) {
-      return 'errorConnection';
+    // 6. And only now, an actual network problem.
+    for (final signal in _networkSignals) {
+      if (lower.contains(signal)) return 'errorConnection';
     }
     return null;
   }
@@ -4508,7 +4961,7 @@ class DuckDownloadsController extends ChangeNotifier
     batchItems = null;
     batchTitle = null;
     batchPlatform = null;
-    lockedBrowserRequest = null;
+    _loginRequest = null;
     notifyListeners();
 
     try {
@@ -4684,6 +5137,19 @@ class DuckDownloadsController extends ChangeNotifier
             }
           } catch (_) {}
         }
+        // Instagram carousel items are direct CDN files. Same reasoning as
+        // the single case: the phone can fetch them, and Meta answers it.
+        if (_isDirectInstagramMedia(url)) {
+          await _startInstagramBatchItem(
+            url: url,
+            title: title,
+            item: batchItem,
+            type: itemType,
+          );
+          started++;
+          continue;
+        }
+
         // YouTube playlist/batch items: ALWAYS download on-device
         if (YouTubeExplodeService.isYouTubeUrl(url)) {
           await _startYouTubeExplodeBatchDownload(
@@ -4845,6 +5311,7 @@ class DuckDownloadsController extends ChangeNotifier
     batchItems = null;
     batchTitle = null;
     batchPlatform = null;
+    _instagramPost = null;
     flow = DuckFlow.idle;
     setStatus('statusTapDuck');
     notifyListeners();
@@ -4859,32 +5326,29 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
-  Future<void> updateCookies(String content) async {
-    try {
-      backendCookies = await _api.setCookies(content);
-      await _store.writeYoutubeCookies(content);
-      _ytExplode.updateCookies(content);
-      setStatus('statusCookiesUpdated');
-      notifyListeners();
-    } catch (e) {
-      setStatus('statusCookiesUpdateFailed', {'error': '$e'});
-      notifyListeners();
-      rethrow;
+  /// Forgets one platform's saved session.
+  ///
+  /// Replaces `updateCookies`/`clearCookies`, which pushed whatever cookies
+  /// the browser had harvested to a single file on the server and to the
+  /// on-device YouTube extractor at the same time. Signing into Instagram
+  /// therefore erased the YouTube session, and on a shared server it handed
+  /// one user's login to the next person who downloaded anything.
+  Future<void> signOutOf(SocialPlatform platform) async {
+    await _sessions.clear(platform);
+    await _syncSessionsToNative();
+    if (platform == SocialPlatform.youtube) {
+      _ytExplode.updateCookies(null);
     }
+    setStatus('accountsCleared');
+    notifyListeners();
   }
 
-  Future<void> clearCookies() async {
-    try {
-      backendCookies = await _api.deleteCookies();
-      await _store.writeYoutubeCookies(null);
-      _ytExplode.updateCookies(null);
-      setStatus('statusCookiesCleared');
-      notifyListeners();
-    } catch (e) {
-      setStatus('statusCookiesClearFailed', {'error': '$e'});
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> signOutOfEverything() async {
+    await _sessions.clearAll();
+    await _syncSessionsToNative();
+    _ytExplode.updateCookies(null);
+    setStatus('accountsCleared');
+    notifyListeners();
   }
 
   DateTime? _lastBackPressTime;

@@ -126,7 +126,7 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
-    await pumpEventQueue();
+    await _pumpUntil(() => controller.runningDownloadCount == 3);
 
     // Only the cap reaches the backend. Before there was a queue, all eight
     // opened at once.
@@ -150,7 +150,7 @@ void main() {
 
     // A finished download hands its slot to the next in line, in order.
     await api.finishOldest();
-    await pumpEventQueue();
+    await _pumpUntil(() => api.startedUrls.length == 4);
     expect(api.startedUrls.last, 'https://cdn.example.com/clip-3.jpg');
     expect(controller.runningDownloadCount, 3);
     expect(controller.queuedDownloadCount, 4);
@@ -173,13 +173,11 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
-    for (var i = 0; i < 40; i++) {
-      if (controller.queuedDownloadCount == 0 &&
-          controller.runningDownloadCount == 0) {
-        break;
-      }
-      await pumpEventQueue(times: 5);
-    }
+    await _pumpUntil(
+      () =>
+          controller.queuedDownloadCount == 0 &&
+          controller.runningDownloadCount == 0,
+    );
 
     // A server that hangs up without saying completed or failed used to hold
     // its slot forever, and three of those stopped the queue for good.
@@ -212,7 +210,7 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
-    await pumpEventQueue();
+    await _pumpUntil(() => controller.runningDownloadCount == 3);
 
     // Free: the paywall's "Faster Downloads" has to be a difference from
     // something, and this is the something.
@@ -222,7 +220,7 @@ void main() {
     // The manager re-reads storage and tells its listeners, which is what the
     // real purchase flow does when Play confirms.
     await controller.premium.refresh();
-    await pumpEventQueue();
+    await _pumpUntil(() => controller.runningDownloadCount == 5);
 
     expect(controller.runningDownloadCount, 5);
     expect(api.startedUrls.length, 5);
@@ -248,7 +246,7 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
-    await pumpEventQueue();
+    await _pumpUntil(() => controller.runningDownloadCount == 3);
 
     await controller.clearDownloadQueue();
 
@@ -294,6 +292,22 @@ Future<void> _grantPremium(Box box) async {
     'subscriptionVerifiedAt',
     DateTime.now().toUtc().toIso8601String(),
   );
+}
+
+/// Pumps until [done] holds, or gives up after [timeout].
+///
+/// Replaces a fixed count of pumps. The number that was enough on an idle
+/// machine was not enough when the suite ran this file alongside others, so
+/// the test failed on load rather than on behaviour — and passed again on a
+/// re-run, which is the worst kind of red.
+Future<void> _pumpUntil(
+  bool Function() done, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!done() && DateTime.now().isBefore(deadline)) {
+    await pumpEventQueue(times: 5);
+  }
 }
 
 DuckDownloadsController _controller(Box box, DuckApiClient api) {

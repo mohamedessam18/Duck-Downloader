@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:duck_downloader/models/browser_image_candidate.dart';
 import 'package:duck_downloader/models/download_models.dart';
+import 'package:duck_downloader/models/instagram_post.dart';
+import 'package:duck_downloader/services/instagram_service.dart';
+import 'package:duck_downloader/services/platform_sessions.dart';
 import 'package:duck_downloader/services/api_client.dart';
 import 'package:duck_downloader/services/clipboard_service.dart';
 import 'package:duck_downloader/services/download_store.dart';
@@ -574,127 +576,33 @@ void main() {
     expect(controller.flow, DuckFlow.error);
   });
 
-  test(
-    'full-size Instagram failure requests locked browser fallback',
-    () async {
-      final box = await Hive.openBox('media-save-controller-locked-browser');
-      addTearDown(box.close);
-      await box.clear();
-      final controller = _controller(
-        box,
-        FakeMediaSaveService(),
-        api: FakeLockedBrowserApiClient(),
-      );
-      addTearDown(controller.dispose);
-
-      controller.detectedClipboardUrl =
-          'https://www.instagram.com/p/DZtZmxknHtG/';
-      await controller.acceptClipboardDetection();
-
-      expect(controller.lockedBrowserRequest, isNotNull);
-      expect(controller.lockedBrowserRequest!.platform, 'Instagram');
-      expect(controller.flow, DuckFlow.ready);
-      expect(controller.status, contains('Duck Downloader browser'));
-    },
-  );
-
-  test(
-    'browser image candidates start downloads from candidate urls',
-    () async {
-      final box = await Hive.openBox('media-save-controller-browser-images');
-      addTearDown(box.close);
-      await box.clear();
-      final api = FakeBatchApiClient();
-      final controller = _controller(box, FakeMediaSaveService(), api: api);
-      addTearDown(controller.dispose);
-
-      await controller.startBrowserImageDownloads(
-        platform: 'Instagram',
-        candidates: const [
-          BrowserImageCandidate(
-            url: 'https://scontent.cdninstagram.com/full-1.jpg',
-            width: 853,
-            height: 1280,
-            source: 'img_srcset',
-          ),
-          BrowserImageCandidate(
-            url: 'https://instagram.com/preview.jpg',
-            width: 615,
-            height: 614,
-            source: 'meta_preview',
-            isPreview: true,
-          ),
-        ],
-      );
-
-      expect(api.startedUrls, ['https://scontent.cdninstagram.com/full-1.jpg']);
-      expect(controller.downloads.single.url, api.startedUrls.single);
-      expect(controller.downloads.single.thumbnail, api.startedUrls.single);
-      expect(controller.downloads.single.platform, 'Instagram');
-    },
-  );
-
-  test('browser carousel candidates become ordered image downloads', () async {
-    final box = await Hive.openBox('media-save-controller-browser-carousel');
+  test('full-size Instagram failure asks the user to sign in', () async {
+    final box = await Hive.openBox('media-save-controller-locked-browser');
     addTearDown(box.close);
     await box.clear();
-    final api = FakeBatchApiClient();
-    final controller = _controller(box, FakeMediaSaveService(), api: api);
+    final controller = _controller(
+      box,
+      FakeMediaSaveService(),
+      api: FakeLockedBrowserApiClient(),
+    );
     addTearDown(controller.dispose);
 
-    await controller.startBrowserImageDownloads(
-      platform: 'Instagram',
-      candidates: List.generate(
-        10,
-        (index) => BrowserImageCandidate(
-          url: 'https://scontent.cdninstagram.com/full-$index.jpg',
-          width: 853,
-          height: 1280,
-          source: 'img_srcset',
-          order: index,
-          slideIndex: index,
-        ),
-      ),
-    );
+    controller.detectedClipboardUrl = 'https://www.instagram.com/p/DZtZmxknHtG/';
+    await controller.acceptClipboardDetection();
 
+    expect(controller.loginRequest, isNotNull);
+    expect(controller.loginRequest!.platform, SocialPlatform.instagram);
+    // The link is carried through the sign-in, so finishing it resumes the
+    // download the user actually asked for.
+    expect(
+      controller.loginRequest!.retryUrl,
+      'https://www.instagram.com/p/DZtZmxknHtG/',
+    );
     expect(controller.flow, DuckFlow.ready);
-    expect(controller.batchItems, hasLength(10));
-    expect(api.startedUrls, isEmpty);
-
-    final urls = controller.batchItems!.map((item) => item.url).toList();
-    await controller.startBatchDownload(
-      urls: urls,
-      type: DownloadType.image,
-      quality: 'Best',
-    );
-    await _drainDownloadQueue(controller);
-
-    expect(api.startedUrls, [
-      'https://scontent.cdninstagram.com/full-0.jpg',
-      'https://scontent.cdninstagram.com/full-1.jpg',
-      'https://scontent.cdninstagram.com/full-2.jpg',
-      'https://scontent.cdninstagram.com/full-3.jpg',
-      'https://scontent.cdninstagram.com/full-4.jpg',
-      'https://scontent.cdninstagram.com/full-5.jpg',
-      'https://scontent.cdninstagram.com/full-6.jpg',
-      'https://scontent.cdninstagram.com/full-7.jpg',
-      'https://scontent.cdninstagram.com/full-8.jpg',
-      'https://scontent.cdninstagram.com/full-9.jpg',
-    ]);
-    expect(controller.downloads.length, 10);
-    expect(controller.downloads.map((item) => item.title).toSet(), {
-      'Image 1',
-      'Image 2',
-      'Image 3',
-      'Image 4',
-      'Image 5',
-      'Image 6',
-      'Image 7',
-      'Image 8',
-      'Image 9',
-      'Image 10',
-    });
+    expect(controller.needsBrowserLogin, isTrue);
   });
+
+
   test('file service updateMp3Metadata writes ID3v1 tag to file', () async {
     final file = File('${hiveDir.path}/test_metadata.mp3');
     await file.writeAsBytes(List<int>.filled(500, 0));
@@ -738,6 +646,7 @@ DuckDownloadsController _controller(
 }) {
   return DuckDownloadsController(
     api: api ?? DuckApiClient(),
+    instagram: _SignedOutInstagram(),
     clipboard: DuckClipboardService(),
     files: FakeFileService(),
     mediaSaver: saver,
@@ -764,4 +673,16 @@ DownloadItem _item({required String filePath}) {
     progress: 100,
     favorite: false,
   );
+}
+
+/// Instagram, signed out. Every tier refuses for want of a session.
+class _SignedOutInstagram extends InstagramService {
+  _SignedOutInstagram()
+    : super(pageReader: (_, _) async => null);
+
+  @override
+  Future<InstagramPost> fetchPost(String url) async =>
+      throw const InstagramAuthRequired(
+        'Instagram needs you to be signed in to open this post.',
+      );
 }

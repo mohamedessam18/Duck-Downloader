@@ -17,8 +17,12 @@ import '../models/download_models.dart';
 const _defaultApiBaseUrl = 'https://api.duckdownloader.site';
 
 class DuckApiClient {
-  DuckApiClient({Dio? dio, String? apiBaseUrl})
-    : apiBaseUrl =
+  DuckApiClient({
+    Dio? dio,
+    String? apiBaseUrl,
+    Future<String?> Function(String url)? cookiesForUrl,
+  }) : _cookiesForUrl = cookiesForUrl,
+      apiBaseUrl =
           apiBaseUrl ??
           const String.fromEnvironment(
             'DUCK_API_BASE_URL',
@@ -42,11 +46,42 @@ class DuckApiClient {
   final String apiBaseUrl;
   final Dio _dio;
 
+  /// Supplies the caller's cookies for one link, or null.
+  ///
+  /// A callback rather than a direct dependency on the session store: this
+  /// client is constructed in tests that have no secure storage behind them,
+  /// and the store is the thing that decides which platform a link belongs to.
+  final Future<String?> Function(String url)? _cookiesForUrl;
+
+  /// Cookies for [url], attached to the one request that needs them.
+  ///
+  /// They are never uploaded to be kept. The server used to hold a single
+  /// cookies.txt that every download read, which on a shared backend made one
+  /// user's session everyone's; it now writes them to a private file for the
+  /// life of the request and deletes it.
+  Future<Map<String, dynamic>> _withCookies(
+    String url,
+    Map<String, dynamic> body,
+  ) async {
+    final resolve = _cookiesForUrl;
+    if (resolve == null) return body;
+    String? cookies;
+    try {
+      cookies = await resolve(url);
+    } catch (_) {
+      // Not being able to read a saved session is not a reason to refuse the
+      // download — it just means trying it signed out.
+      cookies = null;
+    }
+    if (cookies == null || cookies.trim().isEmpty) return body;
+    return {...body, 'cookies': cookies};
+  }
+
   Future<MediaMetadata> extract(String url) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/api/extract',
-        data: {'url': url},
+        data: await _withCookies(url, {'url': url}),
       );
       return MediaMetadata.fromJson(url, response.data ?? const {});
     } on DioException catch (error) {
@@ -71,7 +106,7 @@ class DuckApiClient {
       };
       final response = await _dio.post<Map<String, dynamic>>(
         '/api/download',
-        data: data,
+        data: await _withCookies(url, data),
       );
       final id = response.data?['downloadId']?.toString();
       if (id == null || id.isEmpty) {
@@ -138,7 +173,7 @@ class DuckApiClient {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/api/playlist/extract',
-        data: {'url': url},
+        data: await _withCookies(url, {'url': url}),
       );
       return PlaylistExtractResponse.fromJson(response.data ?? const {});
     } on DioException catch (error) {
@@ -186,6 +221,11 @@ class DuckApiClient {
     return cleaned;
   }
 
+  /// Whether the *operator* configured server-side cookies.
+  ///
+  /// It reports the server's own configuration and says nothing about the
+  /// user's sessions, which never leave the device except as part of the
+  /// request that needs them.
   Future<BackendCookiesInfo> getCookies() async {
     try {
       final response = await _dio.get<Map<String, dynamic>>('/api/cookies');
@@ -195,24 +235,4 @@ class DuckApiClient {
     }
   }
 
-  Future<BackendCookiesInfo> setCookies(String content) async {
-    try {
-      final response = await _dio.post<Map<String, dynamic>>(
-        '/api/cookies',
-        data: {'cookies': content},
-      );
-      return BackendCookiesInfo.fromJson(response.data ?? const {});
-    } on DioException catch (error) {
-      throw Exception(_readApiError(error));
-    }
-  }
-
-  Future<BackendCookiesInfo> deleteCookies() async {
-    try {
-      final response = await _dio.delete<Map<String, dynamic>>('/api/cookies');
-      return BackendCookiesInfo.fromJson(response.data ?? const {});
-    } on DioException catch (error) {
-      throw Exception(_readApiError(error));
-    }
-  }
 }

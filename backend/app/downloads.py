@@ -14,6 +14,8 @@ except ImportError:
     YoutubeDL = None
 
 from .config import settings
+from . import cookies as cookies_module
+from .cookies import active_cookies_file
 from .media_type import direct_image_extension, failure_means_no_video
 from .models import StatusResponse, DownloadType
 from .security import sanitize_filename, ensure_inside, validate_public_url, validate_not_adult_content
@@ -32,6 +34,7 @@ class DownloadState:
         quality: str | None,
         premium_no_watermark: bool,
         remove_music: bool = False,
+        cookies_path: str | None = None,
     ) -> None:
         self.download_id = download_id
         self.url = url
@@ -39,6 +42,11 @@ class DownloadState:
         self.quality = quality
         self.premium_no_watermark = premium_no_watermark
         self.remove_music = remove_music
+        # This download's own cookie file, or None. A download outlives the
+        # request that created it, so the file cannot be scoped to the request
+        # the way extraction's is — the state holds it and `_download` binds it
+        # for the task, then deletes it once the download stops for good.
+        self.cookies_path = cookies_path
         self.progress = 0
         self.speed: str | None = None
         self.eta: str | None = None
@@ -404,13 +412,14 @@ class TikTokScraper(BaseScraper):
 
 
 def _build_cookie_opener() -> urllib.request.OpenerDirector | None:
-    if not settings.resolved_cookies_file:
+    cookies_file = active_cookies_file()
+    if not cookies_file:
         return None
-    if settings.resolved_cookies_file.startswith("browser:"):
+    if cookies_file.startswith("browser:"):
         return None
     try:
         from http.cookiejar import MozillaCookieJar
-        cj = MozillaCookieJar(settings.resolved_cookies_file)
+        cj = MozillaCookieJar(cookies_file)
         cj.load(ignore_expires=True, ignore_discard=True)
         return urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(cj)
@@ -458,7 +467,7 @@ class DownloadManager:
             }
 
         if "instagram.com" in host:
-            if not settings.resolved_cookies_file:
+            if not active_cookies_file():
                 raise ValueError("Could not access the full-size Instagram image. This post may require login or cookies.")
 
         if "instagram.com" in host or "facebook.com" in host or "fb.watch" in host:
@@ -605,12 +614,13 @@ class DownloadManager:
             except Exception:
                 pass
 
-        if settings.resolved_cookies_file:
-            if settings.resolved_cookies_file.startswith("browser:"):
-                browser_name = settings.resolved_cookies_file.split("browser:", 1)[1].strip()
+        cookies_file = active_cookies_file()
+        if cookies_file:
+            if cookies_file.startswith("browser:"):
+                browser_name = cookies_file.split("browser:", 1)[1].strip()
                 opts["cookiesfrombrowser"] = (browser_name,)
             else:
-                opts["cookiefile"] = settings.resolved_cookies_file
+                opts["cookiefile"] = cookies_file
         return opts
 
     async def start(
@@ -620,10 +630,21 @@ class DownloadManager:
         quality: str | None,
         premium_no_watermark: bool = False,
         remove_music: bool = False,
+        cookies: str | None = None,
     ) -> str:
         validate_public_url(url)
         download_id = uuid.uuid4().hex
-        state = DownloadState(download_id, url, download_type, quality, premium_no_watermark, remove_music)
+        cleaned = cookies_module.sanitise(cookies)
+        cookies_path = str(cookies_module.write_cookie_file(cleaned)) if cleaned else None
+        state = DownloadState(
+            download_id,
+            url,
+            download_type,
+            quality,
+            premium_no_watermark,
+            remove_music,
+            cookies_path=cookies_path,
+        )
         self.states[download_id] = state
         self._schedule(download_id)
         return download_id
@@ -696,6 +717,13 @@ class DownloadManager:
             process.kill()
             await process.wait()
 
+    def _discard_cookies(self, state: DownloadState) -> None:
+        """Delete this download's cookie file. Safe to call more than once."""
+        if not state.cookies_path:
+            return
+        Path(state.cookies_path).unlink(missing_ok=True)
+        state.cookies_path = None
+
     def _cleanup_download_dir(self, download_id: str) -> None:
         target_dir = ensure_inside(settings.storage_dir, settings.storage_dir / download_id)
         if target_dir.exists():
@@ -711,6 +739,7 @@ class DownloadManager:
         remove_music: bool,
     ) -> None:
         state = self.states[download_id]
+        token = cookies_module.bind(state.cookies_path)
         try:
             async with self.semaphore:
                 if state.cancel_requested:
@@ -798,7 +827,13 @@ class DownloadManager:
                         traceback.print_exc()
                 await self._publish(state)
         finally:
+            cookies_module.unbind(token)
             state.process = None
+            # "paused" is the one status this download can come back from, and
+            # resuming re-enters here needing the same session. Every other
+            # ending is final, so the user's cookies go with it.
+            if state.status != "paused":
+                self._discard_cookies(state)
             if state.status == "cancelled":
                 self._cleanup_download_dir(download_id)
             if self.tasks.get(download_id) is asyncio.current_task():
@@ -1146,12 +1181,13 @@ class DownloadManager:
             "-o",
             str(target_dir / "%(title).60s.%(ext)s"),
         ])
-        if settings.resolved_cookies_file:
-            if settings.resolved_cookies_file.startswith("browser:"):
-                browser_name = settings.resolved_cookies_file.split("browser:", 1)[1].strip()
+        cookies_file = active_cookies_file()
+        if cookies_file:
+            if cookies_file.startswith("browser:"):
+                browser_name = cookies_file.split("browser:", 1)[1].strip()
                 args.extend(["--cookies-from-browser", browser_name])
             else:
-                args.extend(["--cookies", settings.resolved_cookies_file])
+                args.extend(["--cookies", cookies_file])
         if download_type == DownloadType.video:
             args.extend(["--merge-output-format", "mp4"])
         if "youtube.com" in state.url.lower() or "youtu.be" in state.url.lower():
@@ -1247,7 +1283,7 @@ class DownloadManager:
         host = parsed.netloc.lower()
         path = parsed.path.lower()
         if "instagram.com" in host:
-            if not settings.resolved_cookies_file:
+            if not active_cookies_file():
                 raise ValueError("Could not access the full-size Instagram image. This post may require login or cookies.")
 
         if "instagram.com" in host and any(part in path for part in ("/p/", "/reel/", "/reels/", "/tv/")):

@@ -9,6 +9,7 @@ import 'theme/duck_theme.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_client.dart';
+import 'services/platform_sessions.dart';
 import 'services/clipboard_service.dart';
 import 'services/download_store.dart';
 import 'services/file_service.dart';
@@ -42,7 +43,13 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
       purchases: PurchaseRepository(Hive.box('duck-downloads')),
     );
     controller = DuckDownloadsController(
-      api: DuckApiClient(),
+      // The client asks for the caller's own cookies per request. They are
+      // never uploaded to be kept: the server used to hold one cookies.txt
+      // that every download read, which on a shared backend made one user's
+      // session everybody's.
+      api: DuckApiClient(
+        cookiesForUrl: const PlatformSessionStore().cookiesForUrl,
+      ),
       clipboard: DuckClipboardService(),
       files: DuckFileService(),
       mediaSaver: MediaSaveService(),

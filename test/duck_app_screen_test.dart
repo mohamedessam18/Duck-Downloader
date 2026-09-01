@@ -17,6 +17,11 @@ import 'package:hive/hive.dart';
 class FakeBox extends Fake implements Box {
   final Map<dynamic, dynamic> _storage = {};
 
+  /// The store refuses to touch a closed box, so the fake has to say it is
+  /// open. It stands in for one that never closes.
+  @override
+  bool get isOpen => true;
+
   @override
   dynamic get(dynamic key, {dynamic defaultValue}) {
     return _storage.containsKey(key) ? _storage[key] : defaultValue;

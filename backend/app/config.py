@@ -54,12 +54,16 @@ class Settings(BaseModel):
 
     @property
     def resolved_cookies_file(self) -> str | None:
-        if self.cookies_file:
-            return self.cookies_file
-        local_path = self.storage_dir / "cookies.txt"
-        if local_path.exists():
-            return str(local_path.resolve())
-        return None
+        """The operator's own cookies, set by DUCK_YTDLP_COOKIES. Nothing else.
+
+        This used to fall back to `storage_dir/cookies.txt`, a file the app
+        wrote to over a public endpoint. On a shared server that made one
+        user's harvested session the default credentials for everybody else's
+        downloads, and overwrote whatever the previous user had uploaded. User
+        cookies now arrive per request and never come to rest here — see
+        `app/cookies.py`.
+        """
+        return self.cookies_file or None
 
 
 settings = Settings()

@@ -21,6 +21,38 @@ class AppLocalizations {
   static final Map<String, Map<String, String>> _localizedValues = {
     'en': {
       'appName': 'Duck Downloader',
+      'loginTitle': 'Sign in to {platform}',
+      'loginStepSignIn': 'Sign in',
+      'loginStepSave': 'We save it',
+      'loginStepContinue': 'We continue',
+      'loginPrivacyNote':
+          'You are typing on {platform} itself. Duck never sees your password, '
+          'and the session stays encrypted on this phone.',
+      'loginDoneButton': "I'm signed in",
+      'loginNoSessionYet':
+          'No sign-in found yet. Finish signing in, then tap again.',
+      'loginBlockedHost': 'Kept inside {platform} while you sign in.',
+      'accountsTitle': 'Linked accounts',
+      'accountsNote':
+          'Sessions are stored encrypted on this phone. Duck sends them only '
+          'with the download that needs them, and never keeps them on the '
+          'server.',
+      'accountsSignedIn': 'Signed in',
+      'accountsSignedOut': 'Not signed in',
+      'accountsSignIn': 'Sign in',
+      'accountsSignOut': 'Sign out',
+      'accountsSignOutAll': 'Sign out of everything',
+      'accountsSignOutAllBody':
+          'Every saved session is deleted from this phone. Links that need an '
+          'account will ask you to sign in again.',
+      'accountsSignOutAllConfirm': 'Sign out',
+      'accountsCleared': 'Session cleared',
+      'settingsLinkedAccounts': 'Linked accounts',
+      'settingsLinkedAccountsBody':
+          'See where Duck is signed in, and sign out.',
+      'statusSignInRequired': 'This link needs you to sign in.',
+      'statusSignedInRetrying': 'Signed in — trying again...',
+      'openLoginButton': 'Sign in to continue',
       'quickShareTitle': 'Duck Quick Download ⚡',
       'homeTab': 'HOME',
       'imagesTab': 'IMAGES',
@@ -111,8 +143,6 @@ class AppLocalizations {
       // ── Status line ───────────────────────────────────────────────────
       // Set by DuckDownloadsController as keys, resolved where they are shown.
       'statusTapDuck': 'Tap the duck',
-      'statusOpenBrowserForImages': 'Open Duck Downloader browser to finish image download',
-      'statusNoFullSizeImages': 'Could not find full-size images on this page.',
       'statusChooseImages': 'Choose images to download',
       'statusVaultIndexRebuilt': 'Secure Vault index rebuilt',
       'statusUnlockVaultFirst': 'Unlock the Secure Vault first.',
@@ -146,8 +176,6 @@ class AppLocalizations {
       'statusNoFileUrl': 'Server completed download but returned no file URL.',
       'statusServerClosed': 'The download server closed the connection.',
       'statusAutoDownloading': 'Auto-downloading shared link...',
-      'statusCookiesUpdated': 'Cookies updated successfully',
-      'statusCookiesCleared': 'Cookies cleared',
       'statusTrimmingFile': 'Trimming file...',
       'statusTrimComplete': 'Trimming complete',
       'statusTooManyAttempts': 'Too many attempts. Try again in {seconds}s.',
@@ -157,8 +185,6 @@ class AppLocalizations {
       'statusPlaylistCreated': 'Playlist "{name}" created',
       'statusYouTubeFailed': 'YouTube download failed: {error}',
       'statusPlayFailed': 'Failed to play audio: {error}',
-      'statusCookiesUpdateFailed': 'Failed to update cookies: {error}',
-      'statusCookiesClearFailed': 'Failed to clear cookies: {error}',
       'statusGenericError': 'Error: {error}',
       'statusQueuedImages': '{count} images queued',
       'statusQueuedDownloads': '{count} downloads queued',
@@ -193,6 +219,35 @@ class AppLocalizations {
     },
     'ar': {
       'appName': 'Duck Downloader',
+      'loginTitle': 'تسجيل الدخول لـ {platform}',
+      'loginStepSignIn': 'سجّل دخول',
+      'loginStepSave': 'بنحفظها',
+      'loginStepContinue': 'بنكمّل',
+      'loginPrivacyNote':
+          'انت بتكتب جوّه {platform} نفسها. Duck مش بيشوف كلمة السر، والجلسة '
+          'بتفضل مشفّرة على موبايلك.',
+      'loginDoneButton': 'خلصت، كمّل',
+      'loginNoSessionYet': 'لسه مفيش تسجيل دخول. كمّل الدخول وبعدين دوس تاني.',
+      'loginBlockedHost': 'خليناك جوّه {platform} لحد ما تخلّص الدخول.',
+      'accountsTitle': 'الحسابات المرتبطة',
+      'accountsNote':
+          'الجلسات محفوظة مشفّرة على موبايلك. Duck بيبعتها مع التحميل اللي '
+          'محتاجها بس، وعمره ما بيسيبها على السيرفر.',
+      'accountsSignedIn': 'مسجّل دخول',
+      'accountsSignedOut': 'مش مسجّل',
+      'accountsSignIn': 'دخول',
+      'accountsSignOut': 'خروج',
+      'accountsSignOutAll': 'امسح كل الجلسات',
+      'accountsSignOutAllBody':
+          'كل جلسة محفوظة هتتمسح من الموبايل ده. اللينكات اللي محتاجة حساب '
+          'هتطلب منك تسجيل دخول تاني.',
+      'accountsSignOutAllConfirm': 'امسح',
+      'accountsCleared': 'اتمسحت الجلسة',
+      'settingsLinkedAccounts': 'الحسابات المرتبطة',
+      'settingsLinkedAccountsBody': 'شوف Duck مسجّل دخول فين، واعمل خروج.',
+      'statusSignInRequired': 'اللينك ده محتاج تسجيل دخول.',
+      'statusSignedInRetrying': 'تم تسجيل الدخول — بنجرّب تاني...',
+      'openLoginButton': 'سجّل دخول عشان تكمّل',
       'quickShareTitle': 'Duck Quick Download ⚡',
       'homeTab': 'الرئيسية',
       'imagesTab': 'الصور',
@@ -283,8 +338,6 @@ class AppLocalizations {
       // ── Status line ───────────────────────────────────────────────────
       // Set by DuckDownloadsController as keys, resolved where they are shown.
       'statusTapDuck': 'دوس على البطة',
-      'statusOpenBrowserForImages': 'افتح متصفح Duck عشان تكمّل تحميل الصور',
-      'statusNoFullSizeImages': 'مفيش صور بحجمها الأصلي في الصفحة دي.',
       'statusChooseImages': 'اختار الصور اللي عايز تنزّلها',
       'statusVaultIndexRebuilt': 'فهرس الخزنة اتصلّح',
       'statusUnlockVaultFirst': 'افتح الخزنة الأول.',
@@ -318,8 +371,6 @@ class AppLocalizations {
       'statusNoFileUrl': 'السيرفر خلّص التحميل بس مبعتش الملف.',
       'statusServerClosed': 'سيرفر التحميل قفل الاتصال.',
       'statusAutoDownloading': 'بينزّل اللينك اللي اتشيّر...',
-      'statusCookiesUpdated': 'الكوكيز اتحدّثت',
-      'statusCookiesCleared': 'الكوكيز اتمسحت',
       'statusTrimmingFile': 'بيقص الملف...',
       'statusTrimComplete': 'القص خلص',
       'statusTooManyAttempts': 'محاولات كتير. جرّب تاني بعد {seconds} ثانية.',
@@ -329,8 +380,6 @@ class AppLocalizations {
       'statusPlaylistCreated': 'قايمة "{name}" اتعملت',
       'statusYouTubeFailed': 'تحميل يوتيوب فشل: {error}',
       'statusPlayFailed': 'مقدرش يشغّل الصوت: {error}',
-      'statusCookiesUpdateFailed': 'مقدرناش نحدّث الكوكيز: {error}',
-      'statusCookiesClearFailed': 'مقدرناش نمسح الكوكيز: {error}',
       'statusGenericError': 'خطأ: {error}',
       'statusQueuedImages': '{count} صورة في الصف',
       'statusQueuedDownloads': '{count} تحميل في الصف',

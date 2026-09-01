@@ -10,6 +10,7 @@ from slowapi.util import get_remote_address
 import asyncio
 from pathlib import Path
 
+from . import cookies
 from .config import settings
 from .security import ensure_inside
 from . import ad_reports
@@ -24,7 +25,6 @@ from .models import (
     PlaylistExtractResponse,
     TrimRequest,
     TrimResponse,
-    CookiesRequest,
     CookiesResponse,
     AdReportRequest,
     AdReportResponse,
@@ -185,51 +185,23 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/cookies", response_model=CookiesResponse, tags=["Cookies Configuration"])
 async def get_cookies() -> CookiesResponse:
-    """
-    Get active cookies file status.
-    Returns if cookies.txt exists, its size, and the filename.
+    """Report whether the operator configured server-side cookies.
+
+    The matching POST and DELETE are gone on purpose. They wrote whatever any
+    caller sent to one file that every later download read, so on a shared
+    server the last person to log in handed their Instagram or YouTube session
+    to the next person to download, and lost their own to the person after
+    that. Users' cookies now travel with the single request that needs them
+    and are deleted with it — see app/cookies.py.
     """
     from pathlib import Path
-    cookies_path = settings.storage_dir / "cookies.txt"
-    active = settings.resolved_cookies_file is not None
-    size = cookies_path.stat().st_size if cookies_path.exists() else 0
-    filename = settings.resolved_cookies_file
-    if filename:
-        filename = Path(filename).name
-    return CookiesResponse(active=active, size=size, filename=filename)
 
-
-@app.post("/api/cookies", response_model=CookiesResponse, tags=["Cookies Configuration"])
-async def set_cookies(body: CookiesRequest) -> CookiesResponse:
-    """
-    Upload cookies.txt configuration text.
-    Allows authenticating requests to restricted platforms (e.g. YouTube private/age-gated videos).
-    """
-    cookies_path = settings.storage_dir / "cookies.txt"
-    try:
-        cookies_path.write_text(body.cookies, encoding="utf-8")
-        active = settings.resolved_cookies_file is not None
-        size = cookies_path.stat().st_size
-        filename = settings.resolved_cookies_file
-        if filename:
-            from pathlib import Path
-            filename = Path(filename).name
-        return CookiesResponse(active=active, size=size, filename=filename)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to save cookies: {exc}") from exc
-
-
-@app.delete("/api/cookies", response_model=CookiesResponse, tags=["Cookies Configuration"])
-async def delete_cookies() -> CookiesResponse:
-    """
-    Delete the active cookies.txt configuration.
-    Clears authentication cache for yt-dlp.
-    """
-    cookies_path = settings.storage_dir / "cookies.txt"
-    if cookies_path.exists():
-        cookies_path.unlink()
-    active = settings.resolved_cookies_file is not None
-    return CookiesResponse(active=active, size=0, filename=None)
+    resolved = settings.resolved_cookies_file
+    if not resolved:
+        return CookiesResponse(active=False, size=0, filename=None)
+    path = Path(resolved)
+    size = path.stat().st_size if path.exists() else 0
+    return CookiesResponse(active=True, size=size, filename=path.name)
 
 
 def normalize_url(url: str) -> str:
@@ -250,7 +222,8 @@ async def extract(request: Request, body: ExtractRequest) -> dict:
     """
     try:
         url = normalize_url(body.url)
-        info = await download_manager.extract(url)
+        with cookies.scoped(body.cookies):
+            info = await download_manager.extract(url)
         return map_extract_response(info)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=public_error(exc)) from exc
@@ -267,7 +240,8 @@ async def extract_playlist(
     """
     try:
         url = normalize_url(body.url)
-        info = await download_manager.extract_playlist(url)
+        with cookies.scoped(body.cookies):
+            info = await download_manager.extract_playlist(url)
         return PlaylistExtractResponse(**info)
     except Exception as exc:
         try:
@@ -276,7 +250,8 @@ async def extract_playlist(
             parsed = urlparse(url)
             host = parsed.netloc.lower()
             if not any(domain in host for domain in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "fb.watch"]):
-                info = await download_manager.extract_images(url)
+                with cookies.scoped(body.cookies):
+                    info = await download_manager.extract_images(url)
                 if info["items"]:
                     return PlaylistExtractResponse(**info)
         except Exception:
@@ -299,6 +274,7 @@ async def download(request: Request, body: DownloadRequest) -> DownloadResponse:
             body.quality,
             body.premium_no_watermark,
             body.remove_music,
+            cookies=body.cookies,
         )
         return DownloadResponse(downloadId=download_id)
     except Exception as exc:

@@ -7,7 +7,18 @@ class DownloadStore {
 
   final Box _box;
 
+  /// True while this store can still be used.
+  ///
+  /// Every write here is queued behind [_pendingWrites] and therefore runs
+  /// after an `await` — sometimes after the box it writes to has been closed,
+  /// because a download's status stream can outlive the screen that started
+  /// it. Hive throws on a closed box, and it throws inside a detached async
+  /// chain where nothing is listening, so the failure surfaces somewhere else
+  /// entirely. A closed store does nothing instead.
+  bool get isUsable => _box.isOpen;
+
   List<DownloadItem> readDownloads() {
+    if (!isUsable) return const [];
     final raw = _box.get('downloads', defaultValue: const <dynamic>[]);
     if (raw is! List) return const [];
     final downloads = <DownloadItem>[];
@@ -61,6 +72,7 @@ class DownloadStore {
   }
 
   Future<void> _writeDownloadsNow(List<DownloadItem> downloads) {
+    if (!isUsable) return Future<void>.value();
     return _box.put('downloads', [
       for (final item in downloads) _storedItem(item).toJson(),
     ]);
@@ -159,6 +171,7 @@ class DownloadStore {
   }
 
   Future<DownloadItem> _upsertNow(DownloadItem item) async {
+    if (!isUsable) return item;
     final items = readDownloads();
     final index = items.indexWhere((existing) => existing.id == item.id);
     if (index >= 0) {
@@ -190,6 +203,7 @@ class DownloadStore {
 
   Future<void> delete(String id) {
     return _serialised(() async {
+      if (!isUsable) return;
       final items = readDownloads()..removeWhere((item) => item.id == id);
       await _writeDownloadsNow(items);
     });

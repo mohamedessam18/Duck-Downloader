@@ -8,7 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 /// Hardcoded rather than scraped so that adding a key without translating it
 /// is a failing test rather than a silent English string in an Arabic app.
 const _statusKeys = <String>[
-  'statusTapDuck', 'statusOpenBrowserForImages', 'statusNoFullSizeImages',
+  'statusSignInRequired', 'statusSignedInRetrying', 'accountsCleared',
+  'statusTapDuck',
   'statusChooseImages', 'statusVaultIndexRebuilt', 'statusUnlockVaultFirst',
   'statusUnlockVaultBeforeMove', 'statusFileNotLocal', 'statusMovedToVault',
   'statusRestoredFromVault', 'statusConvertingToAudio',
@@ -20,12 +21,10 @@ const _statusKeys = <String>[
   'statusDownloading', 'statusConvertingToM4a', 'statusPreparingRingtone',
   'statusTrimmingAudio', 'statusSettingRingtone', 'statusRingtoneSet',
   'statusPausing', 'statusDownloadPaused', 'statusNoFileUrl',
-  'statusServerClosed', 'statusAutoDownloading', 'statusCookiesUpdated',
-  'statusCookiesCleared', 'statusTrimmingFile', 'statusTrimComplete',
+  'statusServerClosed', 'statusAutoDownloading', 'statusTrimmingFile', 'statusTrimComplete',
   'statusTooManyAttempts', 'statusVaultIndexRebuildFailed',
   'statusMoveToVaultFailed', 'statusVaultOpenFailed', 'statusPlaylistCreated',
-  'statusYouTubeFailed', 'statusPlayFailed', 'statusCookiesUpdateFailed',
-  'statusCookiesClearFailed', 'statusGenericError', 'statusQueuedImages',
+  'statusYouTubeFailed', 'statusPlayFailed', 'statusGenericError', 'statusQueuedImages',
   'statusQueuedDownloads', 'statusQueuedImagesPartial',
   'statusQueuedDownloadsPartial', 'statusQueueFailedImages',
   'statusQueueFailedDownloads', 'statusAutoSaveOn', 'statusAutoSaveOff',
