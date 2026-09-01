@@ -2874,11 +2874,17 @@ class DuckDownloadsController extends ChangeNotifier
   void _watchDownload(String id, DownloadItem baseItem) {
     if (_disposed) return;
     _cancelDownloadSubscription(id);
+    var terminalReached = false;
     _downloadSubscriptions[id] = _api
         .watchDownload(id)
         .listen(
           (update) async {
             if (_disposed) return;
+            if (update.status == DownloadStatus.completed ||
+                update.status == DownloadStatus.failed ||
+                update.status == DownloadStatus.cancelled) {
+              terminalReached = true;
+            }
             var next = baseItem.copyWith(
               progress: update.progress,
               status: update.status == DownloadStatus.completed
@@ -3017,6 +3023,7 @@ class DuckDownloadsController extends ChangeNotifier
             notifyListeners();
           },
           onError: (Object error) {
+            terminalReached = true;
             _finishDownload(id);
             flow = DuckFlow.error;
             _status = _errorStatus(error);
@@ -3029,15 +3036,14 @@ class DuckDownloadsController extends ChangeNotifier
           // anything, with a row still reading "downloading" behind a
           // connection that was gone.
           onDone: () async {
-            if (_disposed) return;
+            if (_disposed || terminalReached) return;
             _finishDownload(id);
             final current = _downloads
                 .where((entry) => entry.id == id)
                 .firstOrNull;
             if (current == null) return;
             final unfinished = current.status == DownloadStatus.queued ||
-                current.status == DownloadStatus.downloading ||
-                current.status == DownloadStatus.processing;
+                current.status == DownloadStatus.downloading;
             if (!unfinished) return;
             try {
               await _saveItem(current.copyWith(status: DownloadStatus.failed));
