@@ -1513,3 +1513,58 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 30rem) {
   .report-context dl > div { grid-template-columns: 1fr; gap: 0; }
 }
+
+/* ── Update banner ──────────────────────────────────────────────────────────
+   A strip above the nav, and the only thing on the site allowed to sit above
+   it. Gold on gold-soft rather than a filled bar: it is news, not a warning,
+   and a solid gold band would outshout the hero it sits on top of. */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 24px;
+  background: var(--gold-soft);
+  border-bottom: 1px solid var(--gold-line);
+  color: var(--gold);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  transition: background 160ms ease;
+}
+
+.update-banner:hover { background: rgba(255, 197, 47, 0.18); }
+
+.update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--gold);
+  flex: none;
+}
+
+/* Still on the way: hollow, so "coming" and "here" are told apart without
+   reading the sentence. */
+.update-dot.is-coming {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--gold);
+}
+
+.update-text { color: var(--gold); }
+
+.update-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.update-banner:hover .update-go { color: var(--text); }
+
+@media (max-width: 560px) {
+  .update-banner { font-size: 12.5px; padding: 8px 16px; gap: 8px; }
+  .update-go { width: 100%; justify-content: center; }
+}

@@ -94,16 +94,39 @@ class MetaPostService {
       ? '${originFor(platform)}/t/$shortcode'
       : '${originFor(platform)}/p/$shortcode/';
 
+  /// Path segments that name a route rather than a post.
+  static const _routeSegments = {
+    'p', 'reel', 'reels', 'tv', 'post', 't', 'media', 'share', 'stories',
+  };
+
   /// The post id in a link from either platform.
   ///
   /// Instagram spells it `/p/`, `/reel/`, `/reels/` or `/tv/`; Threads spells
   /// it `/post/` under an `@handle`, or `/t/` in a short link. The code itself
   /// is the same base-64 in both.
+  ///
+  /// The known markers are tried first, and then the path is read for a
+  /// segment that simply looks like a code. Meta adds and renames these routes
+  /// without warning — a list of the ones that existed when this was written
+  /// turns every new one into "that link does not point at a post", which is
+  /// both wrong and impossible for the user to do anything about.
   static String? shortcodeOf(String url) {
-    final match = RegExp(
+    final path = Uri.tryParse(url.trim())?.path ?? '';
+
+    final marked = RegExp(
       r'/(?:p|reel|reels|tv|post|t)/([A-Za-z0-9_-]+)',
-    ).firstMatch(Uri.tryParse(url.trim())?.path ?? '');
-    return match?.group(1);
+    ).firstMatch(path);
+    if (marked != null) return marked.group(1);
+
+    // A code is a run of base-64 characters long enough not to be a word, and
+    // an @handle is never one.
+    final code = RegExp(r'^[A-Za-z0-9_-]{8,}$');
+    for (final segment in path.split('/').reversed) {
+      if (segment.isEmpty || segment.startsWith('@')) continue;
+      if (_routeSegments.contains(segment.toLowerCase())) continue;
+      if (code.hasMatch(segment)) return segment;
+    }
+    return null;
   }
 
   /// Instagram's numeric media id, which the shortcode is a base-64 spelling
@@ -150,8 +173,12 @@ class MetaPostService {
     final shortcode = shortcodeOf(url);
     final mediaId = shortcode == null ? null : mediaIdOf(shortcode);
     if (shortcode == null || mediaId == null) {
+      // Names the part that failed. "Does not point at a post" on its own is
+      // unactionable for the user and undiagnosable for anyone reading a bug
+      // report, and Meta changes these paths without notice.
       throw MetaPostUnavailable(
-        'That $name link does not point at a post.',
+        'Could not find a post id in that $name link '
+        '(${Uri.tryParse(url.trim())?.path ?? url}).',
       );
     }
 

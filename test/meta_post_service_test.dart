@@ -80,9 +80,45 @@ void main() {
         'https://www.threads.net/@zuck/post/C2QBoRaRmR1',
         'https://threads.com/@some.one/post/C2QBoRaRmR1?xmt=abc',
         'https://www.threads.com/t/C2QBoRaRmR1',
+        'https://www.threads.com/@zuck/post/C2QBoRaRmR1/',
+        'https://www.threads.com/@zuck/post/C2QBoRaRmR1/media',
+        // Routes Meta has not invented yet. The marker list was a guess about
+        // the future, and a wrong guess told the user their link was not a
+        // post — which they could do nothing about.
+        'https://www.threads.com/@zuck/thread/C2QBoRaRmR1',
+        'https://www.threads.com/@zuck/C2QBoRaRmR1',
+        'https://www.threads.com/share/C2QBoRaRmR1',
       ]) {
         expect(MetaPostService.shortcodeOf(url), 'C2QBoRaRmR1', reason: url);
       }
+    });
+
+    test('a link with no post in it still finds nothing', () {
+      // The fallback must not turn a handle or a route word into a post id.
+      for (final url in [
+        'https://www.threads.com/@zuck',
+        'https://www.threads.com/',
+        'https://www.threads.com/search',
+        'https://www.threads.com/@a.very.long.handle.here',
+      ]) {
+        expect(MetaPostService.shortcodeOf(url), isNull, reason: url);
+      }
+    });
+
+    test('a failed link says which part it could not read', () async {
+      // "Does not point at a post" was unactionable for the user and
+      // undiagnosable from a bug report.
+      final service = MetaPostService(pageReader: (_, _) async => null);
+      await expectLater(
+        service.fetchPost('https://www.threads.com/@zuck'),
+        throwsA(
+          isA<MetaPostUnavailable>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('Threads'), contains('/@zuck')),
+          ),
+        ),
+      );
     });
 
     test('a Threads link is recognised as one', () {
