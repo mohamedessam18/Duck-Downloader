@@ -1922,11 +1922,7 @@ class DuckDownloadsController extends ChangeNotifier
 
   Future<void> _extractUrlOrBatch(String url) async {
     lastAttemptedUrl = url;
-    metadata = null;
-    batchItems = null;
-    batchTitle = null;
-    batchPlatform = null;
-    _loginRequest = null;
+    _resetForNewExtraction();
     lastDownloadedItem = null;
 
     var cleanUrl = url.trim();
@@ -2300,6 +2296,23 @@ class DuckDownloadsController extends ChangeNotifier
     return true;
   }
 
+  /// Clears everything the previous link left behind.
+  ///
+  /// There are four ways into an extraction — the paste button, the clipboard
+  /// banner, a shared link and a typed URL — and each used to clear its own
+  /// idea of what needed clearing. They had already drifted: only the paste
+  /// button dropped the held Instagram post, so a link arriving any other way
+  /// left the previous post's files still matching `_isDirectInstagramMedia`
+  /// and taking a download branch meant for a post that was no longer open.
+  void _resetForNewExtraction() {
+    metadata = null;
+    batchItems = null;
+    batchTitle = null;
+    batchPlatform = null;
+    _instagramPost = null;
+    _loginRequest = null;
+  }
+
   Future<void> pasteAndExtract() async {
     if (_rejectIfBusy()) return;
     DuckHaptics.tap();
@@ -2307,14 +2320,7 @@ class DuckDownloadsController extends ChangeNotifier
     busy = true;
     flow = DuckFlow.extracting;
     setStatus('statusCheckingLink');
-    metadata = null;
-    batchItems = null;
-    batchTitle = null;
-    batchPlatform = null;
-    // Held only for as long as the options it produced are on screen; a stale
-    // one would let the next link download the previous post's files.
-    _instagramPost = null;
-    _loginRequest = null;
+    _resetForNewExtraction();
     notifyListeners();
 
     try {
@@ -2338,11 +2344,7 @@ class DuckDownloadsController extends ChangeNotifier
     _justSignedIn = afterSignIn;
     flow = DuckFlow.extracting;
     setStatus('statusCheckingLink');
-    metadata = null;
-    batchItems = null;
-    batchTitle = null;
-    batchPlatform = null;
-    _loginRequest = null;
+    _resetForNewExtraction();
     notifyListeners();
 
     try {
@@ -4963,11 +4965,7 @@ class DuckDownloadsController extends ChangeNotifier
     busy = true;
     flow = DuckFlow.extracting;
     setStatus('statusCheckingLink');
-    metadata = null;
-    batchItems = null;
-    batchTitle = null;
-    batchPlatform = null;
-    _loginRequest = null;
+    _resetForNewExtraction();
     notifyListeners();
 
     try {
@@ -4987,7 +4985,7 @@ class DuckDownloadsController extends ChangeNotifier
     busy = true;
     flow = DuckFlow.extracting;
     setStatus('statusCheckingLink');
-    metadata = null;
+    _resetForNewExtraction();
     notifyListeners();
 
     try {

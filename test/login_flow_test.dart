@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:duck_downloader/models/download_models.dart';
 import 'package:duck_downloader/services/api_client.dart';
+import 'package:duck_downloader/models/instagram_post.dart' as ig;
 import 'package:duck_downloader/services/clipboard_service.dart';
 import 'package:duck_downloader/services/download_store.dart';
 import 'package:duck_downloader/services/file_service.dart';
@@ -61,6 +62,14 @@ void main() {
           const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
           (call) async => call.method == 'readAll' ? <String, String>{} : null,
         );
+    // The paste button plays the quack. just_audio reaches for its platform
+    // side on a background future the controller cannot catch, so without a
+    // stand-in the sound — not the extraction — fails the test.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('com.ryanheise.just_audio.methods'),
+          (call) async => <String, dynamic>{},
+        );
   });
 
   tearDownAll(() async {
@@ -72,6 +81,7 @@ void main() {
     String name, {
     DuckApiClient? api,
     YouTubeExplodeService? ytExplode,
+    DuckClipboardService? clipboard,
   }) async {
     final box = await Hive.openBox(name);
     await box.clear();
@@ -80,7 +90,7 @@ void main() {
       api: api ?? DuckApiClient(apiBaseUrl: 'https://api.test'),
       instagram: _SignedOutInstagram(),
       ytExplode: ytExplode,
-      clipboard: DuckClipboardService(),
+      clipboard: clipboard ?? DuckClipboardService(),
       files: DuckFileService(),
       mediaSaver: MediaSaveService(),
       store: DownloadStore(box),
@@ -165,6 +175,63 @@ void main() {
     expect(controller.loginRequest!.platform, SocialPlatform.youtube);
   });
 
+
+  group('pasting a YouTube Short', () {
+    const shortId = 'dQw4w9WgXcQ';
+
+    test('the paste button reaches the video, tracking parameters and all',
+        () async {
+      // What YouTube's "Copy link" puts on the clipboard for a Short. The id
+      // parser used to return null for it, so the paste button ended in a
+      // sign-in prompt that could not possibly help.
+      const pasted = 'https://youtube.com/shorts/$shortId?si=AbCdEfGhIjKl';
+      final youtube = _WorkingYouTube();
+      final controller = await build(
+        'paste-shorts',
+        ytExplode: youtube,
+        clipboard: _Clipboard(pasted),
+      );
+
+      await controller.pasteAndExtract();
+
+      expect(controller.loginRequest, isNull);
+      expect(controller.metadata, isNotNull);
+      expect(controller.flow, DuckFlow.ready);
+      expect(youtube.seenUrl, pasted);
+    });
+
+    test('the clipboard banner takes the same path', () async {
+      const pasted = 'https://www.youtube.com/shorts/$shortId?feature=share';
+      final controller = await build(
+        'paste-shorts-banner',
+        ytExplode: _WorkingYouTube(),
+        clipboard: _Clipboard(pasted),
+      );
+
+      controller.detectedClipboardUrl = pasted;
+      await controller.acceptClipboardDetection();
+
+      expect(controller.loginRequest, isNull);
+      expect(controller.metadata, isNotNull);
+    });
+
+    test('a Short that genuinely cannot be read is not a sign-in problem',
+        () async {
+      final controller = await build(
+        'paste-shorts-unreadable',
+        ytExplode: _UnreadableYouTube(),
+        clipboard: _Clipboard(
+          'https://youtube.com/shorts/$shortId?si=AbCdEfGhIjKl',
+        ),
+      );
+
+      await controller.pasteAndExtract();
+
+      expect(controller.loginRequest, isNull);
+      expect(controller.flow, DuckFlow.error);
+    });
+  });
+
   test('reopening without a previous attempt does nothing', () async {
     final controller = await build('login-flow-empty');
     controller.openLoginForLastAttempt();
@@ -223,4 +290,32 @@ class _BotCheckedYouTube extends YouTubeExplodeService {
   @override
   Future<MediaMetadata?> extractMetadata(String url) async =>
       throw Exception('Sign in to confirm you are not a bot');
+}
+
+/// A clipboard holding one link.
+class _Clipboard extends DuckClipboardService {
+  _Clipboard(this.text);
+  final String text;
+
+  @override
+  Future<String?> readText() async => text;
+}
+
+/// YouTube that answers, so the paste path can be followed to the end.
+class _WorkingYouTube extends YouTubeExplodeService {
+  String? seenUrl;
+
+  @override
+  Future<MediaMetadata?> extractMetadata(String url) async {
+    seenUrl = url;
+    return MediaMetadata(
+      url: url,
+      title: 'A Short',
+      platform: 'YouTube',
+      qualities: const [
+        FormatInfo(id: '1080', label: '1080p', ext: 'mp4', height: 1080),
+      ],
+      audioFormats: const [FormatInfo(id: 'mp3', label: 'MP3', ext: 'mp3')],
+    );
+  }
 }
