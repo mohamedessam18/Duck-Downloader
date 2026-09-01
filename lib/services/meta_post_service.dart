@@ -27,8 +27,10 @@ class MetaPostService {
     Dio? dio,
     PlatformSessionStore? sessions,
     MetaPageReader? pageReader,
+    MetaLinkResolver? linkResolver,
   }) : _sessions = sessions ?? const PlatformSessionStore(),
        pageReader = pageReader ?? readThroughPage,
+       linkResolver = linkResolver ?? resolveThroughPage,
       _dio =
           dio ??
           Dio(
@@ -47,9 +49,24 @@ class MetaPostService {
   final Dio _dio;
   final PlatformSessionStore _sessions;
 
-  /// How the last-resort tier reaches Instagram. Injectable so the
+  /// How the last-resort tier reaches the platform. Injectable so the
   /// fallback can be tested without a WebView.
   final MetaPageReader pageReader;
+
+  /// Turns a share link into the post it points at. Also injectable.
+  final MetaLinkResolver linkResolver;
+
+  /// The real post URL behind [url], or [url] when it is already one.
+  Future<String> resolved(String url) async {
+    if (!isShareLink(url)) return url;
+    final target = await linkResolver(url.trim());
+    if (target == null || target.trim().isEmpty) {
+      throw const MetaAuthRequired(
+        'Could not open that share link. Try the post link itself.',
+      );
+    }
+    return target;
+  }
 
   /// The web client id each site's own front end sends.
   ///
@@ -103,6 +120,18 @@ class MetaPostService {
       ? '${originFor(platform)}/t/$shortcode'
       : '${originFor(platform)}/p/$shortcode/';
 
+  /// True for the link the Threads share button produces.
+  ///
+  /// `threads.com/share/<token>` is a redirect, and the token is not a post
+  /// code: it is nine or ten characters where a code is eleven, and the number
+  /// it decodes to is seventeen digits where a media id is nineteen. Feeding
+  /// it to the media API asks for a post that does not exist, which is what
+  /// "Threads would not open this post (status 400)" was.
+  static bool isShareLink(String url) {
+    final segments = Uri.tryParse(url.trim())?.pathSegments ?? const [];
+    return segments.length >= 2 && segments.first.toLowerCase() == 'share';
+  }
+
   /// Path segments that name a route rather than a post.
   static const _routeSegments = {
     'p', 'reel', 'reels', 'tv', 'post', 't', 'media', 'share', 'stories',
@@ -120,6 +149,11 @@ class MetaPostService {
   /// turns every new one into "that link does not point at a post", which is
   /// both wrong and impossible for the user to do anything about.
   static String? shortcodeOf(String url) {
+    // Refused outright rather than allowed to fall through to the loose scan
+    // below, which would happily return the share token and produce a media id
+    // for a post that was never asked for.
+    if (isShareLink(url)) return null;
+
     final path = Uri.tryParse(url.trim())?.path ?? '';
 
     final marked = RegExp(
@@ -172,7 +206,9 @@ class MetaPostService {
   /// Throws [MetaAuthRequired] when Instagram wants a session, and
   /// [MetaPostUnavailable] when there is no such post. The caller needs
   /// to tell those apart: only one of them is worth offering a sign-in for.
-  Future<MetaPost> fetchPost(String url) async {
+  Future<MetaPost> fetchPost(String rawUrl) async {
+    // A share link has to become a post link before anything else can happen.
+    final url = await resolved(rawUrl);
     final platform = platformOf(url);
     if (platform == null) {
       throw const MetaPostUnavailable(
@@ -233,8 +269,14 @@ class MetaPostService {
       );
     }
     if (status != 200) {
+      // Carries what the server actually said. A bare status number is what
+      // three rounds of guessing at this were built on: it says a request was
+      // refused without ever saying why, so the only way forward was to change
+      // something and ask the user to try again.
+      final said = _shortReason(response.data?.toString());
       throw MetaPostUnavailable(
-        '$name would not open this post (status $status).',
+        '$name would not open this post (status $status)'
+        '${said.isEmpty ? '' : ': $said'}',
       );
     }
 
@@ -256,6 +298,27 @@ class MetaPostService {
       );
     }
     return post;
+  }
+
+  /// The server's own explanation, short enough to read on a phone.
+  ///
+  /// Meta answers a refusal with a small JSON object carrying a `message`.
+  /// Anything else is truncated rather than dropped — an HTML login page in
+  /// the first eighty characters still says more than a bare status code.
+  static String _shortReason(String? body) {
+    final text = body?.trim() ?? '';
+    if (text.isEmpty) return '';
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map) {
+        for (final key in ['message', 'error_message', 'error', 'title']) {
+          final value = decoded[key];
+          if (value is String && value.trim().isNotEmpty) return value.trim();
+        }
+      }
+    } catch (_) {}
+    final flat = text.replaceAll(RegExp(r'\s+'), ' ');
+    return flat.length <= 80 ? flat : '${flat.substring(0, 80)}…';
   }
 
   Future<Response<dynamic>> _requestMediaInfo({
@@ -405,7 +468,8 @@ extension MetaPageFallback on MetaPostService {
   /// does — and the answer comes back in the same shape the direct call
   /// returns, so it goes through the same tested parser rather than a second
   /// one that can disagree with it.
-  Future<MetaPost> fetchPostFromPage(String url) async {
+  Future<MetaPost> fetchPostFromPage(String rawUrl) async {
+    final url = await resolved(rawUrl);
     final platform = MetaPostService.platformOf(url);
     if (platform == null) {
       throw const MetaPostUnavailable('That link is not a post Duck can read.');
@@ -494,6 +558,65 @@ Future<String?> readThroughPage(
     );
     if (result?.error != null) return null;
     return result?.value?.toString();
+  } on TimeoutException {
+    return null;
+  } finally {
+    await headless.dispose();
+  }
+}
+
+/// Turns a share link into the post URL it points at.
+typedef MetaLinkResolver = Future<String?> Function(String shareUrl);
+
+/// Opens the share link offscreen and reads where it settles.
+///
+/// It has to be a browser. `threads.com/share/<token>` answers a plain request
+/// with 200 and the app shell — no redirect, no canonical link, and none of the
+/// crawler user agents Meta usually serves Open Graph tags to get anything
+/// either. The post URL only exists after the page's own JavaScript has run,
+/// which is why it is read back out of the rendered document.
+Future<String?> resolveThroughPage(String shareUrl) async {
+  final loaded = Completer<void>();
+  final headless = HeadlessInAppWebView(
+    initialUrlRequest: URLRequest(url: WebUri(shareUrl)),
+    initialSettings: InAppWebViewSettings(
+      javaScriptEnabled: true,
+      domStorageEnabled: true,
+      thirdPartyCookiesEnabled: true,
+      userAgent:
+          'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    ),
+    onLoadStop: (_, _) {
+      if (!loaded.isCompleted) loaded.complete();
+    },
+    onReceivedError: (_, _, _) {
+      if (!loaded.isCompleted) loaded.complete();
+    },
+  );
+
+  try {
+    await headless.run();
+    await loaded.future.timeout(const Duration(seconds: 20));
+
+    // The canonical link is written by the page script, so it appears some
+    // time after the load event rather than with it.
+    final deadline = DateTime.now().add(const Duration(seconds: 12));
+    while (DateTime.now().isBefore(deadline)) {
+      final result = await headless.webViewController?.evaluateJavascript(
+        source:
+            '(function () {'
+            '  var l = document.querySelector("link[rel=canonical]");'
+            '  var o = document.querySelector("meta[property=\'og:url\']");'
+            '  return (l && l.href) || (o && o.content) || "";'
+            '})()',
+      );
+      final found = result?.toString().trim() ?? '';
+      // Ignore the share URL echoing itself back before the script has run.
+      if (found.isNotEmpty && !MetaPostService.isShareLink(found)) return found;
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    return null;
   } on TimeoutException {
     return null;
   } finally {

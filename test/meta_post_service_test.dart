@@ -175,7 +175,8 @@ void main() {
         // post — which they could do nothing about.
         'https://www.threads.com/@zuck/thread/C2QBoRaRmR1',
         'https://www.threads.com/@zuck/C2QBoRaRmR1',
-        'https://www.threads.com/share/C2QBoRaRmR1',
+        // Note there is no /share/ link here. That one is a redirect token,
+        // not a post code — see the share-link group below.
       ]) {
         expect(MetaPostService.shortcodeOf(url), 'C2QBoRaRmR1', reason: url);
       }
@@ -299,6 +300,118 @@ test('each site is sent its own app id', () {
       ]));
       expect(mixed.isMixed, isTrue);
       expect(mixed.items.map((i) => i.isVideo), [false, true, false]);
+    });
+  });
+
+  group('Threads share links', () {
+    // The two links that produced "status 400", and what a browser resolves
+    // them to. Nine and ten characters where a post code is eleven.
+    const shareA = 'https://www.threads.com/share/BAT3nujVYV/';
+    const shareB = 'https://www.threads.com/share/_mVneEOYZ/';
+    const postA = 'https://www.threads.com/@findsbyhadria/post/DcvLupWjoWV';
+
+    test('a share link is recognised as one', () {
+      expect(MetaPostService.isShareLink(shareA), isTrue);
+      expect(MetaPostService.isShareLink(shareB), isTrue);
+      expect(MetaPostService.isShareLink(postA), isFalse);
+      expect(
+        MetaPostService.isShareLink('https://www.instagram.com/p/ABC/'),
+        isFalse,
+      );
+      expect(MetaPostService.isShareLink('https://www.threads.com/share'), isFalse);
+    });
+
+    test('a share token is never mistaken for a post code', () {
+      // The whole bug. The loose path scan would have returned the token
+      // happily, and the media id built from it asks for a post nobody
+      // requested — which Threads answers with a 400.
+      expect(MetaPostService.shortcodeOf(shareA), isNull);
+      expect(MetaPostService.shortcodeOf(shareB), isNull);
+    });
+
+    test('a share token decodes to nothing like a media id', () {
+      // Kept as a check on the reasoning, not just the code: a real code is
+      // eleven characters and nineteen digits.
+      final token = MetaPostService.mediaIdOf('BAT3nujVYV')!;
+      final real = MetaPostService.mediaIdOf('DcvLupWjoWV')!;
+      expect(token.toString().length, 17);
+      expect(real.toString().length, 19);
+    });
+
+    test('a share link is resolved before anything is asked of the API', () async {
+      RequestOptions? sent;
+      final dio = Dio(
+        BaseOptions(
+          followRedirects: false,
+          validateStatus: (status) => status != null && status < 500,
+        ),
+      );
+      dio.httpClientAdapter = _ScriptedAdapter((options) {
+        sent = options;
+        return ResponseBody.fromString(_oneImageBody, 200, headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        });
+      });
+
+      var asked = '';
+      final service = MetaPostService(
+        dio: dio,
+        pageReader: (_, _, _) async => null,
+        linkResolver: (shareUrl) async {
+          asked = shareUrl;
+          return postA;
+        },
+      );
+
+      final post = await service.fetchPost(shareA);
+
+      expect(asked, shareA);
+      // The id in the request is the resolved post's, not the share token's.
+      expect(sent!.uri.path, contains('3976448580000843157'));
+      expect(post.items, hasLength(1));
+    });
+
+    test('an unresolvable share link says what to do instead', () async {
+      final service = MetaPostService(
+        pageReader: (_, _, _) async => null,
+        linkResolver: (_) async => null,
+      );
+      await expectLater(
+        service.fetchPost(shareA),
+        throwsA(
+          isA<MetaAuthRequired>().having(
+            (e) => e.message,
+            'message',
+            contains('post link'),
+          ),
+        ),
+      );
+    });
+
+    test('a post link is never sent to the resolver', () async {
+      var resolverRan = false;
+      final dio = Dio(
+        BaseOptions(
+          followRedirects: false,
+          validateStatus: (status) => status != null && status < 500,
+        ),
+      );
+      dio.httpClientAdapter = _ScriptedAdapter(
+        (_) => ResponseBody.fromString(_oneImageBody, 200, headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        }),
+      );
+      final service = MetaPostService(
+        dio: dio,
+        pageReader: (_, _, _) async => null,
+        linkResolver: (_) async {
+          resolverRan = true;
+          return null;
+        },
+      );
+
+      await service.fetchPost(postA);
+      expect(resolverRan, isFalse, reason: 'a browser trip for nothing');
     });
   });
 
