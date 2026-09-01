@@ -300,11 +300,89 @@ void main() {
 
     test('a deleted Threads post is an error, not a sign-in prompt', () async {
       final controller = await build(
-        meta: _FakeMeta(error: const MetaPostUnavailable('gone')),
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable('gone', isFinal: true),
+        ),
       );
       await controller.extractUrl(threadsUrl);
 
       expect(controller.loginRequest, isNull);
+      expect(controller.flow, DuckFlow.error);
+    });
+  });
+
+  group('a tier that fails is not the end of the road', () {
+    const threadsUrl = 'https://www.threads.com/@someone/post/C2QBoRaRmR1';
+
+    test('a rejected request falls through to the backend', () async {
+      // The bug: a 400 threw MetaPostUnavailable, and the controller stopped
+      // on any MetaPostUnavailable at all — so one wrong header meant the two
+      // working fallbacks were never asked, and the user was told the post
+      // could not be opened when it could.
+      final api = _FakeApi(
+        playlist: const PlaylistExtractResponse(
+          title: 'From the server',
+          platform: 'Threads',
+          items: [
+            PlaylistItem(url: 'https://cdn/a.jpg', title: 'a', isVideo: false),
+          ],
+        ),
+      );
+      final controller = await build(
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable('Threads would not open this (400)'),
+        ),
+        api: api,
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(api.calls, 1, reason: 'the backend must get its turn');
+      expect(controller.metadata?.url, 'https://cdn/a.jpg');
+      expect(controller.flow, DuckFlow.ready);
+    });
+
+    test('a rejected request reaches the page when the backend fails too',
+        () async {
+      const body = '{"items":[{"media_type":1,"image_versions2":{"candidates":'
+          '[{"url":"https://cdn/page.jpg","width":1080,"height":1350}]}}]}';
+      final controller = await build(
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable('Threads would not open this (400)'),
+          pageBody: body,
+        ),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.metadata?.url, 'https://cdn/page.jpg');
+    });
+
+    test('a deleted post still stops immediately', () async {
+      // Nothing can find a post that is gone, and trying costs two timeouts.
+      final api = _FakeApi();
+      final controller = await build(
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable('gone', isFinal: true),
+        ),
+        api: api,
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(api.calls, 0);
+      expect(controller.flow, DuckFlow.error);
+      expect(controller.loginRequest, isNull);
+    });
+
+    test('a link with no post id in it stops immediately', () async {
+      final api = _FakeApi();
+      final controller = await build(
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable('no post id', isFinal: true),
+        ),
+        api: api,
+      );
+      await controller.extractUrl('https://www.threads.com/@someone');
+
+      expect(api.calls, 0);
       expect(controller.flow, DuckFlow.error);
     });
   });
@@ -403,8 +481,10 @@ void main() {
       final api = _FakeApi();
       final controller = await build(
         meta: _FakeMeta(
+          // Gone for good, which is the only kind that stops the other tiers.
           error: const MetaPostUnavailable(
             'This Instagram post no longer exists.',
+            isFinal: true,
           ),
         ),
         api: api,

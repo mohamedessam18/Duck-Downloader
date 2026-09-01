@@ -2148,9 +2148,14 @@ class DuckDownloadsController extends ChangeNotifier
       }
     }
 
-    // A post that Instagram itself says is gone will not be found by anything
+    // A post the platform itself says is gone will not be found by anything
     // else either, and pretending otherwise costs the user two more timeouts.
-    if (deviceError is MetaPostUnavailable) {
+    //
+    // Only that, though. This used to stop on *any* MetaPostUnavailable, which
+    // included the API rejecting our own request — so one wrong header meant
+    // the backend and the page were never asked, and a fixable failure was
+    // reported as final.
+    if (deviceError is MetaPostUnavailable && deviceError.isFinal) {
       throw Exception(deviceError.toString());
     }
 
@@ -2182,7 +2187,12 @@ class DuckDownloadsController extends ChangeNotifier
         _requestLogin(cleanUrl)) {
       return;
     }
-    throw Exception(deviceError.toString());
+    // All three ways of reading it have now been tried. Say that, rather than
+    // quoting whichever one happened to fail first as though it were the whole
+    // story.
+    throw Exception(
+      'Could not read this post. $deviceError',
+    );
   }
 
   /// Puts a post on screen: one item becomes options, several become a batch.

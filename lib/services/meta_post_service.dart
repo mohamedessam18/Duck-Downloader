@@ -175,7 +175,10 @@ class MetaPostService {
   Future<MetaPost> fetchPost(String url) async {
     final platform = platformOf(url);
     if (platform == null) {
-      throw const MetaPostUnavailable('That link is not a post Duck can read.');
+      throw const MetaPostUnavailable(
+        'That link is not a post Duck can read.',
+        isFinal: true,
+      );
     }
     final name = profileFor(platform).label;
 
@@ -188,6 +191,7 @@ class MetaPostService {
       throw MetaPostUnavailable(
         'Could not find a post id in that $name link '
         '(${Uri.tryParse(url.trim())?.path ?? url}).',
+        isFinal: true,
       );
     }
 
@@ -223,7 +227,10 @@ class MetaPostService {
       );
     }
     if (status == 404 || status == 410) {
-      throw MetaPostUnavailable('This $name post no longer exists.');
+      throw MetaPostUnavailable(
+        'This $name post no longer exists.',
+        isFinal: true,
+      );
     }
     if (status != 200) {
       throw MetaPostUnavailable(

@@ -67,8 +67,19 @@ class MetaAuthRequired implements Exception {
 }
 
 class MetaPostUnavailable implements Exception {
-  const MetaPostUnavailable(this.message);
+  const MetaPostUnavailable(this.message, {this.isFinal = false});
+
   final String message;
+
+  /// True when no other way of reading this post could do better.
+  ///
+  /// The distinction matters because the app has three ways to read a post and
+  /// only tries the later ones when the earlier ones might have been at fault.
+  /// A deleted post is nobody's fault and stops there; a request the server
+  /// rejected as malformed is very much this app's fault, and giving up on it
+  /// means the two working fallbacks never run. Treating those the same is how
+  /// one bad guess about a header turned into a dead end.
+  final bool isFinal;
 
   @override
   String toString() => message;
