@@ -678,7 +678,7 @@ DownloadItem _item({required String filePath}) {
 /// Instagram, signed out. Every tier refuses for want of a session.
 class _SignedOutMeta extends MetaPostService {
   _SignedOutMeta()
-    : super(pageReader: (_, _) async => null);
+    : super(pageReader: (_, _, _) async => null);
 
   @override
   Future<MetaPost> fetchPost(String url) async =>

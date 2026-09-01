@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 
 import 'package:duck_downloader/models/meta_post.dart';
 import 'package:duck_downloader/services/meta_post_service.dart';
@@ -44,6 +47,91 @@ MetaPost _parse(dynamic body) =>
     MetaPostService.parseMediaInfo(body, 'ABC123')!;
 
 void main() {
+  group('the request Threads actually gets', () {
+    /// Records every request and answers each with a queued status.
+    late List<RequestOptions> sent;
+
+    MetaPostService serviceAnswering(List<int> statuses, {String? body}) {
+      sent = [];
+      final dio = Dio(
+        BaseOptions(
+          followRedirects: false,
+          validateStatus: (status) => status != null && status < 500,
+        ),
+      );
+      var call = 0;
+      dio.httpClientAdapter = _ScriptedAdapter((options) {
+        sent.add(options);
+        final status = statuses[call.clamp(0, statuses.length - 1)];
+        call++;
+        return ResponseBody.fromString(
+          status == 200 ? (body ?? '{"items":[]}') : '',
+          status,
+          headers: {
+            Headers.contentTypeHeader: [Headers.jsonContentType],
+          },
+        );
+      });
+      return MetaPostService(dio: dio, pageReader: (_, _, _) async => null);
+    }
+
+    test('a Threads post is asked for on threads.com, with its own id', () async {
+      final service = serviceAnswering([200], body: _oneImageBody);
+      await service.fetchPost('https://www.threads.com/@a/post/C2QBoRaRmR1');
+
+      expect(sent, hasLength(1));
+      expect(sent.single.uri.host, 'www.threads.com');
+      expect(sent.single.headers['X-IG-App-ID'], '238260118697367');
+    });
+
+    test('a 400 from Threads is retried on Instagram', () async {
+      // A Threads post is an Instagram media object underneath, so the same id
+      // is worth asking Instagram about before giving up on the user.
+      final service = serviceAnswering([400, 200], body: _oneImageBody);
+      final post =
+          await service.fetchPost('https://www.threads.com/@a/post/C2QBoRaRmR1');
+
+      expect(sent, hasLength(2));
+      expect(sent[0].uri.host, 'www.threads.com');
+      expect(sent[1].uri.host, 'www.instagram.com');
+      expect(sent[1].headers['X-IG-App-ID'], '936619743392459');
+      expect(post.items, hasLength(1));
+    });
+
+    test('an Instagram post is never retried anywhere else', () async {
+      final service = serviceAnswering([400]);
+      await expectLater(
+        service.fetchPost('https://www.instagram.com/p/C2QBoRaRmR1/'),
+        throwsA(isA<MetaPostUnavailable>()),
+      );
+      expect(sent, hasLength(1));
+    });
+
+    test('a redirect is a missing session, not a bad post', () async {
+      final service = serviceAnswering([302]);
+      await expectLater(
+        service.fetchPost('https://www.threads.com/@a/post/C2QBoRaRmR1'),
+        throwsA(isA<MetaAuthRequired>()),
+      );
+      // Not worth a second request: signed out is signed out on both.
+      expect(sent, hasLength(1));
+    });
+
+    test('both refusing is reported with the status', () async {
+      final service = serviceAnswering([400, 400]);
+      await expectLater(
+        service.fetchPost('https://www.threads.com/@a/post/C2QBoRaRmR1'),
+        throwsA(
+          isA<MetaPostUnavailable>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('Threads'), contains('400')),
+          ),
+        ),
+      );
+      expect(sent, hasLength(2));
+    });
+  });
   group('links', () {
     test('every post shape yields its shortcode', () {
       for (final url in [
@@ -108,7 +196,7 @@ void main() {
     test('a failed link says which part it could not read', () async {
       // "Does not point at a post" was unactionable for the user and
       // undiagnosable from a bug report.
-      final service = MetaPostService(pageReader: (_, _) async => null);
+      final service = MetaPostService(pageReader: (_, _, _) async => null);
       await expectLater(
         service.fetchPost('https://www.threads.com/@zuck'),
         throwsA(
@@ -157,6 +245,24 @@ void main() {
       expect(
         MetaPostService.canonicalPostUrl(SocialPlatform.instagram, 'ABC'),
         'https://www.instagram.com/p/ABC/',
+      );
+    });
+
+test('each site is sent its own app id', () {
+      // Instagram's id sent to threads.com is answered with a 400, which is
+      // exactly what "Threads answered with status 400" was. Both values are
+      // read out of the sites' own pages, not guessed.
+      expect(
+        MetaPostService.appIdFor(SocialPlatform.threads),
+        '238260118697367',
+      );
+      expect(
+        MetaPostService.appIdFor(SocialPlatform.instagram),
+        '936619743392459',
+      );
+      expect(
+        MetaPostService.appIdFor(SocialPlatform.threads),
+        isNot(MetaPostService.appIdFor(SocialPlatform.instagram)),
       );
     });
 
@@ -355,4 +461,25 @@ void main() {
       );
     });
   });
+}
+
+const _oneImageBody =
+    '{"items":[{"media_type":1,"image_versions2":{"candidates":'
+    '[{"url":"https://cdn/i.jpg","width":1440,"height":1800}]}}]}';
+
+/// Answers each request from a script instead of the network.
+class _ScriptedAdapter implements HttpClientAdapter {
+  _ScriptedAdapter(this.answer);
+
+  final ResponseBody Function(RequestOptions options) answer;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => answer(options);
+
+  @override
+  void close({bool force = false}) {}
 }

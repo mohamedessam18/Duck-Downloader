@@ -51,9 +51,18 @@ class MetaPostService {
   /// fallback can be tested without a WebView.
   final MetaPageReader pageReader;
 
-  /// Meta's own web client id. Public, and required — without it the API
-  /// answers every request as unauthenticated. Threads accepts the same one.
-  static const _appId = '936619743392459';
+  /// The web client id each site's own front end sends.
+  ///
+  /// Public, and required — without it the API answers every request as
+  /// unauthenticated. They are *not* interchangeable: sending Instagram's id
+  /// to threads.com is answered with a 400, which is what "Threads answered
+  /// with status 400" was. Read out of each site's own page rather than
+  /// guessed.
+  static const _instagramAppId = '936619743392459';
+  static const _threadsAppId = '238260118697367';
+
+  static String appIdFor(SocialPlatform platform) =>
+      platform == SocialPlatform.threads ? _threadsAppId : _instagramAppId;
 
   static const _userAgent =
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
@@ -182,22 +191,28 @@ class MetaPostService {
       );
     }
 
-    final origin = originFor(platform);
     final cookies = cookieHeader(await _sessions.read(platform));
 
-    final response = await _dio.get<dynamic>(
-      '$origin/api/v1/media/$mediaId/info/',
-      options: Options(
-        responseType: ResponseType.plain,
-        headers: {
-          'X-IG-App-ID': _appId,
-          'User-Agent': _userAgent,
-          'Referer': '$origin/',
-          'Accept': '*/*',
-          if (cookies.isNotEmpty) 'Cookie': cookies,
-        },
-      ),
+    var response = await _requestMediaInfo(
+      origin: originFor(platform),
+      appId: appIdFor(platform),
+      mediaId: mediaId,
+      cookies: cookies,
     );
+
+    // A Threads post is an Instagram media object underneath, so when Threads'
+    // own API will not answer for it, Instagram's is asked about the same id
+    // with the same session. The Threads jar carries instagram.com cookies for
+    // exactly this reason — signing into Threads goes through Instagram.
+    if (platform == SocialPlatform.threads &&
+        (response.statusCode == 400 || response.statusCode == 404)) {
+      response = await _requestMediaInfo(
+        origin: originFor(SocialPlatform.instagram),
+        appId: appIdFor(SocialPlatform.instagram),
+        mediaId: mediaId,
+        cookies: cookies,
+      );
+    }
 
     final status = response.statusCode ?? 0;
     if (status == 302 || status == 401 || status == 403) {
@@ -212,7 +227,7 @@ class MetaPostService {
     }
     if (status != 200) {
       throw MetaPostUnavailable(
-        '$name answered with status $status for this post.',
+        '$name would not open this post (status $status).',
       );
     }
 
@@ -234,6 +249,27 @@ class MetaPostService {
       );
     }
     return post;
+  }
+
+  Future<Response<dynamic>> _requestMediaInfo({
+    required String origin,
+    required String appId,
+    required BigInt mediaId,
+    required String cookies,
+  }) {
+    return _dio.get<dynamic>(
+      '$origin/api/v1/media/$mediaId/info/',
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: {
+          'X-IG-App-ID': appId,
+          'User-Agent': _userAgent,
+          'Referer': '$origin/',
+          'Accept': '*/*',
+          if (cookies.isNotEmpty) 'Cookie': cookies,
+        },
+      ),
+    );
   }
 
   /// Builds a post out of an `/media/{id}/info/` body.
@@ -342,8 +378,11 @@ class MetaPostService {
 }
 
 /// Fetches the media JSON for one post, from inside a real page.
+///
+/// The app id travels with it: the page runs the same request the site's own
+/// front end does, and the two sites do not share an id.
 typedef MetaPageReader =
-    Future<String?> Function(String postUrl, BigInt mediaId);
+    Future<String?> Function(String postUrl, BigInt mediaId, String appId);
 
 extension MetaPageFallback on MetaPostService {
   /// Last resort: ask Instagram's own page to fetch the post for us.
@@ -379,6 +418,7 @@ extension MetaPageFallback on MetaPostService {
     final body = await pageReader(
       MetaPostService.canonicalPostUrl(platform, shortcode),
       mediaId,
+      MetaPostService.appIdFor(platform),
     );
     if (body == null || body.trim().isEmpty) {
       throw MetaAuthRequired(
@@ -405,7 +445,11 @@ extension MetaPageFallback on MetaPostService {
 }
 
 /// Loads the post in an offscreen WebView and calls the media API from it.
-Future<String?> readThroughPage(String postUrl, BigInt mediaId) async {
+Future<String?> readThroughPage(
+  String postUrl,
+  BigInt mediaId,
+  String appId,
+) async {
   final loaded = Completer<void>();
   final headless = HeadlessInAppWebView(
     initialUrlRequest: URLRequest(url: WebUri(postUrl)),
@@ -434,12 +478,12 @@ Future<String?> readThroughPage(String postUrl, BigInt mediaId) async {
     final result = await headless.webViewController?.callAsyncJavaScript(
       functionBody:
           'const response = await fetch("/api/v1/media/" + mediaId + "/info/", {'
-          '  headers: { "X-IG-App-ID": "936619743392459" },'
+          '  headers: { "X-IG-App-ID": appId },'
           '  credentials: "include",'
           '});'
           'if (!response.ok) return null;'
           'return await response.text();',
-      arguments: {'mediaId': mediaId.toString()},
+      arguments: {'mediaId': mediaId.toString(), 'appId': appId},
     );
     if (result?.error != null) return null;
     return result?.value?.toString();
