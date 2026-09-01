@@ -244,7 +244,7 @@ class DownloadService : Service() {
                 goForeground()
                 when (update.status) {
                     "completed" -> {
-                        holder[0] = update.fileUrl
+                        holder[0] = update.fileUrl ?: ""
                         holder[1] = update.filename
                         latch.countDown()
                     }

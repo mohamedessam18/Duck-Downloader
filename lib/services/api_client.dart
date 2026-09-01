@@ -108,29 +108,25 @@ class DuckApiClient {
       query: '',
     );
     final channel = WebSocketChannel.connect(wsUrl);
-    return channel.stream.map((event) {
-      try {
-        final decoded = event is Map<String, dynamic>
-            ? event
-            : jsonDecode(event.toString());
-        if (decoded is! Map) {
-          return const DownloadStatusUpdate(
-            progress: 0,
-            status: DownloadStatus.failed,
-            error: 'Download server returned an unreadable update.',
-          );
-        }
-        return DownloadStatusUpdate.fromJson(
-          Map<String, dynamic>.from(decoded),
-        );
-      } catch (_) {
-        return const DownloadStatusUpdate(
-          progress: 0,
-          status: DownloadStatus.failed,
-          error: 'Download server returned an invalid update.',
-        );
-      }
-    });
+    return channel.stream
+        .where((event) => event != null && event.toString().trim().isNotEmpty)
+        .map((event) {
+          try {
+            final decoded = event is Map<String, dynamic>
+                ? event
+                : jsonDecode(event.toString());
+            if (decoded is! Map) {
+              return null;
+            }
+            return DownloadStatusUpdate.fromJson(
+              Map<String, dynamic>.from(decoded),
+            );
+          } catch (_) {
+            return null;
+          }
+        })
+        .where((update) => update != null)
+        .cast<DownloadStatusUpdate>();
   }
 
   String absoluteFileUrl(String value) {

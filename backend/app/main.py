@@ -469,9 +469,10 @@ async def download_ws(websocket: WebSocket, download_id: str) -> None:
             payload = await queue.get()
             await websocket.send_json(payload)
             if payload.get("status") in {"completed", "failed", "cancelled", "paused"}:
+                await asyncio.sleep(0.5)
                 await websocket.close()
                 return
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
         return
     finally:
         state.subscribers.discard(queue)

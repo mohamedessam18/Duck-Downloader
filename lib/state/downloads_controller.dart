@@ -2879,7 +2879,7 @@ class DuckDownloadsController extends ChangeNotifier
         .watchDownload(id)
         .listen(
           (update) async {
-            if (_disposed) return;
+            if (_disposed || terminalReached) return;
             if (update.status == DownloadStatus.completed ||
                 update.status == DownloadStatus.failed ||
                 update.status == DownloadStatus.cancelled) {
@@ -3023,6 +3023,7 @@ class DuckDownloadsController extends ChangeNotifier
             notifyListeners();
           },
           onError: (Object error) {
+            if (_disposed || terminalReached) return;
             terminalReached = true;
             _finishDownload(id);
             flow = DuckFlow.error;
