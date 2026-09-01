@@ -1144,7 +1144,7 @@ class DownloadManager:
             "-f",
             format_selector,
             "-o",
-            str(target_dir / "%(title).140s.%(ext)s"),
+            str(target_dir / "%(title).60s.%(ext)s"),
         ])
         if settings.resolved_cookies_file:
             if settings.resolved_cookies_file.startswith("browser:"):
@@ -1157,7 +1157,9 @@ class DownloadManager:
         if "youtube.com" in state.url.lower() or "youtu.be" in state.url.lower():
             args.extend([
                 "--extractor-args",
-                "youtubepot-bgutilhttp:base_url=http://localhost:4416;youtube:player_client=android,ios,web,mweb",
+                "youtubepot-bgutilhttp:base_url=http://localhost:4416",
+                "--extractor-args",
+                "youtube:player_client=android,ios,web,mweb",
             ])
         elif prefer_tiktok_no_watermark or "tiktok.com" in state.url.lower() or "douyin.com" in state.url.lower():
             args.extend([

@@ -32,15 +32,16 @@ class DuckFileService {
       ),
     );
     await folder.create(recursive: true);
-    final safeName = _sanitizeFilename(filename);
+    final ext = p.extension(filename);
+    final base = p.basenameWithoutExtension(filename);
+    final safeBase = _sanitizeFilename(base, maxLength: 60);
+    final safeName = '$safeBase$ext';
 
     var filePath = p.join(folder.path, safeName);
     if (await File(filePath).exists()) {
-      final ext = p.extension(safeName);
-      final base = p.basenameWithoutExtension(safeName);
       var counter = 1;
       while (await File(filePath).exists()) {
-        filePath = p.join(folder.path, '${base}_$counter$ext');
+        filePath = p.join(folder.path, '${safeBase}_$counter$ext');
         counter++;
       }
     }
@@ -60,10 +61,15 @@ class DuckFileService {
     await SharePlus.instance.share(ShareParams(files: [XFile(filePath)]));
   }
 
-  String _sanitizeFilename(String value) {
-    final sanitized = value
+  String _sanitizeFilename(String value, {int maxLength = 60}) {
+    var sanitized = value
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
+        .trim()
+        .replaceAll(RegExp(r'_{2,}'), '_')
         .trim();
+    if (sanitized.length > maxLength) {
+      sanitized = sanitized.substring(0, maxLength).trim();
+    }
     return sanitized.isEmpty ? 'duck-download' : sanitized;
   }
 

@@ -22,6 +22,6 @@ def test_youtube_download_uses_ytdlp_default_player_clients(tmp_path) -> None:
     )
 
     assert "--extractor-args" in args
-    idx = args.index("--extractor-args")
-    assert "youtubepot-bgutilhttp" in args[idx + 1]
-    assert "player_client" in args[idx + 1]
+    joined_args = " ".join(args)
+    assert "youtubepot-bgutilhttp:base_url=http://localhost:4416" in joined_args
+    assert "youtube:player_client=android,ios,web,mweb" in joined_args

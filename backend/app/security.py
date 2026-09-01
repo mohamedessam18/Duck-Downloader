@@ -74,9 +74,10 @@ def validate_public_url(raw_url: str) -> None:
     validate_not_adult_content(raw_url)
 
 
-def sanitize_filename(value: str) -> str:
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", value).strip(" .")
-    return cleaned[:140] or "duck_download"
+def sanitize_filename(value: str, max_length: int = 60) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", value).strip(" ._")
+    cleaned = re.sub(r"_{2,}", "_", cleaned)
+    return cleaned[:max_length] or "duck_download"
 
 
 def ensure_inside(base: Path, target: Path) -> Path:

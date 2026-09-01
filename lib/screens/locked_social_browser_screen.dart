@@ -44,6 +44,8 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
   bool get _isX => widget.platform.toLowerCase().contains('x') ||
       widget.platform.toLowerCase().contains('twitter');
 
+  bool get _isUdemy => widget.platform.toLowerCase().contains('udemy');
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -182,6 +184,11 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
           host.endsWith('.twitter.com') ||
           host == 't.co';
     }
+    if (_isUdemy) {
+      return host == 'udemy.com' ||
+          host.endsWith('.udemy.com') ||
+          host == 'auth.udemy.com';
+    }
     // Fallback: allow the domain of the initial url
     try {
       final initialHost = Uri.parse(widget.initialUrl).host.toLowerCase();
@@ -225,6 +232,12 @@ class _LockedSocialBrowserScreenState extends State<LockedSocialBrowserScreen> {
           'https://www.twitter.com',
           'https://x.com',
           'https://www.x.com',
+        ]);
+      } else if (platformLower.contains('udemy')) {
+        urlsToQuery.addAll([
+          'https://udemy.com',
+          'https://www.udemy.com',
+          'https://auth.udemy.com',
         ]);
       } else {
         final currentUri = await _controller?.getUrl();

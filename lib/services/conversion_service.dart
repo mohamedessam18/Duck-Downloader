@@ -20,7 +20,10 @@ class ConversionService {
     final audiosFolder = Directory(p.join(root.path, 'Duck Downloader', 'Audios'));
     await audiosFolder.create(recursive: true);
 
-    final inputBasename = p.basenameWithoutExtension(inputPath);
+    var inputBasename = p.basenameWithoutExtension(inputPath);
+    if (inputBasename.length > 60) {
+      inputBasename = inputBasename.substring(0, 60).trim();
+    }
     final outputFilename = '${inputBasename}_extracted.$format';
     final outputPath = p.join(audiosFolder.path, outputFilename);
 

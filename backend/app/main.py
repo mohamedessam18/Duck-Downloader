@@ -149,6 +149,18 @@ def public_error(exc: Exception) -> str:
         or "authentication" in message.lower()
     ):
         return "This Facebook photo is not public or requires login."
+    if "udemy" in message.lower() and (
+        "registered users" in message.lower()
+        or "cookies" in message.lower()
+        or "authentication" in message.lower()
+        or "login" in message.lower()
+        or "enrolled" in message.lower()
+        or "subscribed" in message.lower()
+    ):
+        return (
+            "This Udemy course requires you to be logged in. "
+            "Please log in via the in-app browser or paste your cookies.txt to download your enrolled courses."
+        )
     if "registered users" in message.lower() or "cookies" in message.lower() or "authentication" in message.lower():
         return (
             "This source requires a logged-in account. "

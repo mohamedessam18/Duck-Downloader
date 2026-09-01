@@ -2149,6 +2149,16 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
 
     try {
+      // 1. YouTube: Download directly on-device using YouTubeExplodeService!
+      // This runs on the user's residential connection (never blocked by datacenter IP checks),
+      // downloads at maximum speed directly to the phone, and avoids 403 Forbidden.
+      final isYouTube = YouTubeExplodeService.isYouTubeUrl(media.url) ||
+          media.platform.toLowerCase() == 'youtube';
+      if (isYouTube) {
+        await _startYouTubeExplodeDownload(media);
+        return;
+      }
+
       String? cobaltUrl;
       try {
         cobaltUrl = await CobaltService.getDownloadUrl(
@@ -2158,6 +2168,11 @@ class DuckDownloadsController extends ChangeNotifier
         );
       } catch (e) {
         debugPrint('Cobalt extraction failed: $e');
+      }
+
+      if (cobaltUrl != null && cobaltUrl.isNotEmpty) {
+        await _startCobaltDownload(media, cobaltUrl);
+        return;
       }
 
       final type = selectedType;
@@ -4001,7 +4016,8 @@ class DuckDownloadsController extends ChangeNotifier
         lowerUrl.contains('x.com') ||
         lowerUrl.contains('twitter.com') ||
         lowerUrl.contains('facebook.com') ||
-        lowerUrl.contains('fb.watch');
+        lowerUrl.contains('fb.watch') ||
+        lowerUrl.contains('udemy.com');
 
     if (isBrowserPlatform) return true;
 
@@ -4019,6 +4035,7 @@ class DuckDownloadsController extends ChangeNotifier
       return 'YouTube';
     if (lower.contains('facebook.com') || lower.contains('fb.watch'))
       return 'Facebook';
+    if (lower.contains('udemy.com')) return 'Udemy';
     return 'Social';
   }
 

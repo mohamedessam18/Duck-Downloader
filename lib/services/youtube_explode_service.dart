@@ -567,11 +567,16 @@ class YouTubeExplodeService {
     return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
-  String _sanitizeFilename(String value) {
-    return value
+  String _sanitizeFilename(String value, {int maxLength = 60}) {
+    var cleaned = value
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
         .trim()
-        .replaceAll(RegExp(r'_{2,}'), '_');
+        .replaceAll(RegExp(r'_{2,}'), '_')
+        .trim();
+    if (cleaned.length > maxLength) {
+      cleaned = cleaned.substring(0, maxLength).trim();
+    }
+    return cleaned.isEmpty ? 'duck-download' : cleaned;
   }
 
   /// Deletes a working file, ignoring the case where it was never created.
@@ -612,14 +617,15 @@ class YouTubeExplodeService {
   }
 
   Future<String> _getUniqueFilePath(String folderPath, String filename) async {
-    final safeName = _sanitizeFilename(filename);
+    final ext = p.extension(filename);
+    final base = p.basenameWithoutExtension(filename);
+    final safeBase = _sanitizeFilename(base, maxLength: 60);
+    final safeName = '$safeBase$ext';
     var filePath = p.join(folderPath, safeName);
     if (await File(filePath).exists()) {
-      final ext = p.extension(safeName);
-      final base = p.basenameWithoutExtension(safeName);
       var counter = 1;
       while (await File(filePath).exists()) {
-        filePath = p.join(folderPath, '${base}_$counter$ext');
+        filePath = p.join(folderPath, '${safeBase}_$counter$ext');
         counter++;
       }
     }

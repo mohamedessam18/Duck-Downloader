@@ -80,9 +80,16 @@ class MediaSaveService {
     required String filename,
     required String mimeType,
   }) async {
+    final ext = p.extension(filename);
+    var base = p.basenameWithoutExtension(filename);
+    if (base.length > 60) {
+      base = base.substring(0, 60).trim();
+    }
+    final safeFilename = '$base$ext';
+
     final result = await _channel.invokeMapMethod<String, Object?>(method, {
       'path': path,
-      'filename': filename,
+      'filename': safeFilename,
       'mimeType': mimeType,
     });
     return ExternalSaveResult(

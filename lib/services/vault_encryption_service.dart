@@ -605,19 +605,25 @@ class VaultEncryptionService {
   static String _uniqueName(Directory folder, String filename) {
     final extension = p.extension(filename);
     final base = p.basenameWithoutExtension(filename);
-    var candidate = filename;
+    final safeBase = _sanitizeFilename(base, maxLength: 60);
+    var candidate = '$safeBase$extension';
     var index = 1;
     while (File(p.join(folder.path, candidate)).existsSync()) {
-      candidate = '${base}_$index$extension';
+      candidate = '${safeBase}_$index$extension';
       index++;
     }
     return candidate;
   }
 
-  static String _sanitizeFilename(String value) {
-    final sanitized = value
+  static String _sanitizeFilename(String value, {int maxLength = 60}) {
+    var sanitized = value
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
+        .trim()
+        .replaceAll(RegExp(r'_{2,}'), '_')
         .trim();
+    if (sanitized.length > maxLength) {
+      sanitized = sanitized.substring(0, maxLength).trim();
+    }
     return sanitized.isEmpty ? 'duck-download' : sanitized;
   }
 
