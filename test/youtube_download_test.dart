@@ -14,6 +14,44 @@ class _Stream {
 int _heightOf(_Stream s) => s.height;
 
 void main() {
+  group('reading the video id out of a link', () {
+    const id = 'dQw4w9WgXcQ';
+
+    test('every shape the share button produces', () {
+      // The library strips the query string for youtu.be and /watch but not
+      // for /shorts/, so `/shorts/<id>?feature=share` parsed as
+      // `<id>?feature=share` and came back null — and that is exactly what
+      // YouTube's own share button hands over for a Short.
+      for (final url in [
+        'https://www.youtube.com/shorts/$id?feature=share',
+        'https://youtube.com/shorts/$id?feature=share',
+        'https://www.youtube.com/shorts/$id?si=AbCdEf',
+        'https://m.youtube.com/shorts/$id?feature=shared',
+        'https://www.youtube.com/shorts/$id',
+        'https://www.youtube.com/live/$id?si=x',
+        'https://www.youtube.com/embed/$id?start=10',
+        'https://youtu.be/$id?si=x',
+        'https://www.youtube.com/watch?v=$id&feature=share',
+        'https://www.youtube.com/watch?v=$id',
+      ]) {
+        expect(YouTubeExplodeService.videoIdOf(url), id, reason: url);
+      }
+    });
+
+    test('a link with no video in it is still null', () {
+      expect(
+        YouTubeExplodeService.videoIdOf('https://www.youtube.com/@someone'),
+        isNull,
+      );
+      expect(
+        YouTubeExplodeService.videoIdOf('https://www.youtube.com/shorts/'),
+        isNull,
+      );
+      expect(YouTubeExplodeService.videoIdOf('not a url at all'), isNull);
+      expect(YouTubeExplodeService.videoIdOf(''), isNull);
+    });
+  });
+
   group('quality selection', () {
     // The real ladder from a 4K upload, in the order the library returns it:
     // best first. That ordering is what the old code got wrong.

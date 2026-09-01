@@ -69,6 +69,43 @@ class YouTubeExplodeService {
 
   // ── URL helpers ────────────────────────────────────────────────────────────
 
+  /// The video id in [url], including shapes the library will not parse.
+  ///
+  /// `VideoId.parseVideoId` strips the query string for `youtu.be` and
+  /// `/watch`, but not for `/shorts/` — so `/shorts/<id>?feature=share`
+  /// yields `<id>?feature=share`, fails validation, and comes back null.
+  /// That is the exact URL YouTube's own share button produces for a Short,
+  /// which made sharing one into Duck fail every single time.
+  ///
+  /// Worse than failing: the caller turned a null id into "may be private,
+  /// age-restricted, or unavailable", and the sign-in heuristic matched
+  /// "age-restricted" in the app's own sentence. Signing in changed nothing,
+  /// so the prompt came back, and back again.
+  static String? videoIdOf(String url) {
+    final direct = VideoId.parseVideoId(url);
+    if (direct != null) return direct;
+
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null) return null;
+
+    // Same link with the tracking parameters removed.
+    final bare = uri.replace(query: '', fragment: '').toString();
+    final stripped = VideoId.parseVideoId(bare);
+    if (stripped != null) return stripped;
+
+    // And finally the id straight out of the path, for the routes that carry
+    // it there: /shorts/, /live/, /embed/ and the old /v/.
+    final segments = uri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList();
+    for (var i = 0; i < segments.length - 1; i++) {
+      if (const {'shorts', 'live', 'embed', 'v'}.contains(segments[i])) {
+        return VideoId.parseVideoId(segments[i + 1]);
+      }
+    }
+    return null;
+  }
+
   /// Returns true for any YouTube video or domain URL (watch, shorts, live, clip, embed, youtu.be, youtube-nocookie.com, etc).
   static bool isYouTubeUrl(String url) {
     final lower = url.toLowerCase();
@@ -125,7 +162,7 @@ class YouTubeExplodeService {
   /// Returns null if the URL is not a recognisable YouTube video URL.
   Future<MediaMetadata?> extractMetadata(String url) async {
     if (!isYouTubeUrl(url)) return null;
-    final videoId = VideoId.parseVideoId(url);
+    final videoId = videoIdOf(url);
     if (videoId == null) return null;
 
     final yt = _freshYt;
@@ -213,7 +250,7 @@ class YouTubeExplodeService {
     void Function(int received, int total)? onProgress,
     void Function()? onTranscoding,
   }) async {
-    final videoId = VideoId.parseVideoId(videoUrl);
+    final videoId = videoIdOf(videoUrl);
     if (videoId == null) throw Exception('Invalid YouTube URL: $videoUrl');
 
     final yt = _freshYt;
@@ -324,7 +361,7 @@ class YouTubeExplodeService {
     String? preferredExt,
     void Function(int received, int total)? onProgress,
   }) async {
-    final videoId = VideoId.parseVideoId(videoUrl);
+    final videoId = videoIdOf(videoUrl);
     if (videoId == null) throw Exception('Invalid YouTube URL: $videoUrl');
 
     final yt = _freshYt;

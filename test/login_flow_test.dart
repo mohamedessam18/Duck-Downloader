@@ -9,6 +9,7 @@ import 'package:duck_downloader/services/media_save_service.dart';
 import 'package:duck_downloader/models/instagram_post.dart';
 import 'package:duck_downloader/services/instagram_service.dart';
 import 'package:duck_downloader/services/platform_sessions.dart';
+import 'package:duck_downloader/services/youtube_explode_service.dart';
 import 'package:duck_downloader/services/premium_manager.dart';
 import 'package:duck_downloader/services/purchase_repository.dart';
 import 'package:duck_downloader/services/subscription_service.dart';
@@ -67,13 +68,18 @@ void main() {
     await hiveDir.delete(recursive: true);
   });
 
-  Future<DuckDownloadsController> build(String name, {DuckApiClient? api}) async {
+  Future<DuckDownloadsController> build(
+    String name, {
+    DuckApiClient? api,
+    YouTubeExplodeService? ytExplode,
+  }) async {
     final box = await Hive.openBox(name);
     await box.clear();
     addTearDown(box.close);
     final controller = DuckDownloadsController(
       api: api ?? DuckApiClient(apiBaseUrl: 'https://api.test'),
       instagram: _SignedOutInstagram(),
+      ytExplode: ytExplode,
       clipboard: DuckClipboardService(),
       files: DuckFileService(),
       mediaSaver: MediaSaveService(),
@@ -130,6 +136,35 @@ void main() {
     expect(controller.needsBrowserLogin, isTrue);
   });
 
+  test('a YouTube failure the app itself worded does not ask for a sign-in',
+      () async {
+    // The Shorts loop. `/shorts/<id>?feature=share` did not parse, so the app
+    // threw its own "may be private, age-restricted, or unavailable" — and the
+    // sign-in heuristic matched "age-restricted" in that very sentence.
+    // Signing in changed nothing, so the prompt came straight back.
+    final controller = await build(
+      'login-flow-youtube-unreadable',
+      ytExplode: _UnreadableYouTube(),
+    );
+    await controller.extractUrl(
+      'https://www.youtube.com/shorts/dQw4w9WgXcQ?feature=share',
+    );
+
+    expect(controller.loginRequest, isNull);
+    expect(controller.flow, DuckFlow.error);
+  });
+
+  test('a real YouTube bot check still asks for a sign-in', () async {
+    final controller = await build(
+      'login-flow-youtube-botcheck',
+      ytExplode: _BotCheckedYouTube(),
+    );
+    await controller.extractUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+
+    expect(controller.loginRequest, isNotNull);
+    expect(controller.loginRequest!.platform, SocialPlatform.youtube);
+  });
+
   test('reopening without a previous attempt does nothing', () async {
     final controller = await build('login-flow-empty');
     controller.openLoginForLastAttempt();
@@ -175,4 +210,17 @@ class _SignedOutInstagram extends InstagramService {
       throw const InstagramAuthRequired(
         'Instagram needs you to be signed in to open this post.',
       );
+}
+
+/// YouTube, failing the way a video Duck could not identify fails.
+class _UnreadableYouTube extends YouTubeExplodeService {
+  @override
+  Future<MediaMetadata?> extractMetadata(String url) async => null;
+}
+
+/// YouTube, failing the way a bot check fails.
+class _BotCheckedYouTube extends YouTubeExplodeService {
+  @override
+  Future<MediaMetadata?> extractMetadata(String url) async =>
+      throw Exception('Sign in to confirm you are not a bot');
 }

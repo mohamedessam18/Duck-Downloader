@@ -173,10 +173,18 @@ void main() {
       type: DownloadType.image,
       quality: 'Best',
     );
+    // Waits for the state the assertions below read, not just for the slots.
+    // Freeing a slot is immediate — that is the behaviour under test — while
+    // writing the item's new status follows a moment later, so waiting only on
+    // the counters raced the store and failed here about one run in three.
     await _pumpUntil(
       () =>
           controller.queuedDownloadCount == 0 &&
-          controller.runningDownloadCount == 0,
+          controller.runningDownloadCount == 0 &&
+          controller.downloads.length == 5 &&
+          controller.downloads.every(
+            (item) => item.status == DownloadStatus.failed,
+          ),
     );
 
     // A server that hangs up without saying completed or failed used to hold

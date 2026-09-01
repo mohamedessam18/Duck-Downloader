@@ -2031,9 +2031,13 @@ class DuckDownloadsController extends ChangeNotifier
             );
             return;
           }
+          // Deliberately says nothing about age or restrictions. The old
+          // wording listed "age-restricted" as a possibility, and the sign-in
+          // heuristic below matched that phrase — in a sentence the app wrote
+          // itself, for a video it had failed to even identify. Signing in
+          // could not change the outcome, so the prompt returned every time.
           throw Exception(
-            'Could not load YouTube video. It may be private, age-restricted, '
-            'or unavailable in your region.',
+            'Could not read this YouTube video.',
           );
         } catch (error) {
           if (_shouldAskToSignIn(cleanUrl, error) && _requestLogin(cleanUrl)) {
@@ -4430,12 +4434,14 @@ class DuckDownloadsController extends ChangeNotifier
 
     if (profile.platform == SocialPlatform.youtube) {
       // YouTube fails for reasons a sign-in cannot fix far more often than the
-      // others, so it has to actually look like an access problem.
+      // others, so it has to actually look like an access problem — and the
+      // phrases have to come from YouTube, not from a sentence this app wrote
+      // to describe a failure it did not understand.
       final message = error.toString().toLowerCase();
       return _isLoginRequiredError(message) ||
           message.contains('unplayable') ||
           message.contains('age-restricted') ||
-          message.contains('restricted') ||
+          message.contains('age restricted') ||
           message.contains('forbidden');
     }
     return true;
