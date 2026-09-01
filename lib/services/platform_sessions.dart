@@ -94,7 +94,10 @@ const _profiles = <SocialPlatform, PlatformProfile>{
     platform: SocialPlatform.threads,
     id: 'threads',
     label: 'Threads',
-    loginUrl: 'https://www.threads.net/login',
+    // threads.com, not threads.net: the old domain now answers every post URL
+    // with a 301, and starting a sign-in on a redirect wastes a round trip on
+    // the one screen where a stall reads as the app being broken.
+    loginUrl: 'https://www.threads.com/login',
     hosts: ['threads.net', 'threads.com'],
     // Threads signs in through Instagram, so the login walks through
     // Instagram's domains without owning them.
@@ -102,8 +105,8 @@ const _profiles = <SocialPlatform, PlatformProfile>{
     // Threads signs in through Instagram, so the session lands on both
     // domains and reading only threads.net would capture half of it.
     cookieUrls: [
+      'https://www.threads.com',
       'https://www.threads.net',
-      'https://threads.net',
       'https://www.instagram.com',
     ],
     sessionCookies: {'sessionid'},

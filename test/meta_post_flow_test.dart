@@ -1,12 +1,13 @@
 import 'dart:io';
 
 import 'package:duck_downloader/models/download_models.dart';
-import 'package:duck_downloader/models/instagram_post.dart';
+import 'package:duck_downloader/models/meta_post.dart';
 import 'package:duck_downloader/services/api_client.dart';
 import 'package:duck_downloader/services/clipboard_service.dart';
 import 'package:duck_downloader/services/download_store.dart';
 import 'package:duck_downloader/services/file_service.dart';
-import 'package:duck_downloader/services/instagram_service.dart';
+import 'package:duck_downloader/services/meta_post_service.dart';
+import 'package:duck_downloader/services/platform_sessions.dart';
 import 'package:duck_downloader/services/media_save_service.dart';
 import 'package:duck_downloader/services/premium_manager.dart';
 import 'package:duck_downloader/services/purchase_repository.dart';
@@ -18,10 +19,10 @@ import 'package:hive/hive.dart';
 
 const _postUrl = 'https://www.instagram.com/p/DHqXk_ZSAWk/';
 
-InstagramMedia _img(String url) =>
-    InstagramMedia(url: url, isVideo: false, width: 1440, height: 1800);
+MetaMedia _img(String url) =>
+    MetaMedia(url: url, isVideo: false, width: 1440, height: 1800);
 
-InstagramMedia _vid(String url) => InstagramMedia(
+MetaMedia _vid(String url) => MetaMedia(
   url: url,
   isVideo: true,
   width: 1080,
@@ -29,23 +30,23 @@ InstagramMedia _vid(String url) => InstagramMedia(
   thumbnail: 'https://cdn/cover.jpg',
 );
 
-InstagramPost _post(List<InstagramMedia> items) =>
-    InstagramPost(shortcode: 'DHqXk_ZSAWk', title: 'A post', items: items);
+MetaPost _post(List<MetaMedia> items) =>
+    MetaPost(shortcode: 'DHqXk_ZSAWk', title: 'A post', items: items);
 
 /// The device tier, with whatever answer a test needs.
-class _FakeInstagram extends InstagramService {
-  _FakeInstagram({this.post, this.error, String? pageBody})
+class _FakeMeta extends MetaPostService {
+  _FakeMeta({this.post, this.error, String? pageBody})
     : super(pageReader: ((_, _) async => pageBody));
 
-  final InstagramPost? post;
+  final MetaPost? post;
   final Object? error;
   int calls = 0;
 
   @override
-  Future<InstagramPost> fetchPost(String url) async {
+  Future<MetaPost> fetchPost(String url) async {
     calls++;
     if (post != null) return post!;
-    throw error ?? const InstagramPostUnavailable('nothing here');
+    throw error ?? const MetaPostUnavailable('nothing here');
   }
 }
 
@@ -90,7 +91,7 @@ void main() {
   });
 
   Future<DuckDownloadsController> build({
-    required InstagramService instagram,
+    required MetaPostService meta,
     DuckApiClient? api,
   }) async {
     final box = await Hive.openBox('instagram-flow-${counter++}');
@@ -98,7 +99,7 @@ void main() {
     addTearDown(box.close);
     final controller = DuckDownloadsController(
       api: api ?? _FakeApi(),
-      instagram: instagram,
+      meta: meta,
       clipboard: DuckClipboardService(),
       files: DuckFileService(),
       mediaSaver: MediaSaveService(),
@@ -117,7 +118,7 @@ void main() {
   group('post shapes reach the right screen', () {
     test('a single image is ready to download as an image', () async {
       final controller = await build(
-        instagram: _FakeInstagram(post: _post([_img('https://cdn/1.jpg')])),
+        meta: _FakeMeta(post: _post([_img('https://cdn/1.jpg')])),
       );
       await controller.extractUrl(_postUrl);
 
@@ -132,7 +133,7 @@ void main() {
 
     test('a reel offers video, sound and its cover', () async {
       final controller = await build(
-        instagram: _FakeInstagram(post: _post([_vid('https://cdn/reel.mp4')])),
+        meta: _FakeMeta(post: _post([_vid('https://cdn/reel.mp4')])),
       );
       await controller.extractUrl(_postUrl);
 
@@ -147,7 +148,7 @@ void main() {
 
     test('a carousel of images becomes a batch of images', () async {
       final controller = await build(
-        instagram: _FakeInstagram(
+        meta: _FakeMeta(
           post: _post([
             _img('https://cdn/1.jpg'),
             _img('https://cdn/2.jpg'),
@@ -164,7 +165,7 @@ void main() {
 
     test('a carousel of videos becomes a batch of videos', () async {
       final controller = await build(
-        instagram: _FakeInstagram(
+        meta: _FakeMeta(
           post: _post([_vid('https://cdn/1.mp4'), _vid('https://cdn/2.mp4')]),
         ),
       );
@@ -179,7 +180,7 @@ void main() {
       // The batch card opens on "everything as it is" when both kinds are
       // present, and that decision reads these flags.
       final controller = await build(
-        instagram: _FakeInstagram(
+        meta: _FakeMeta(
           post: _post([
             _img('https://cdn/1.jpg'),
             _vid('https://cdn/2.mp4'),
@@ -207,14 +208,115 @@ void main() {
     });
   });
 
+  group('Threads takes the same road as Instagram', () {
+    const threadsUrl = 'https://www.threads.com/@someone/post/C2QBoRaRmR1';
+
+    test('a single image post', () async {
+      final controller = await build(
+        meta: _FakeMeta(post: _post([_img('https://cdn/t1.jpg')])),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.loginRequest, isNull);
+      expect(controller.selectedType, DownloadType.image);
+      expect(controller.metadata!.url, 'https://cdn/t1.jpg');
+      // Filed under the platform it actually came from. The label used to be
+      // hardcoded, so a Threads download appeared as an Instagram one.
+      expect(controller.metadata!.platform, 'Threads');
+    });
+
+    test('a single video post', () async {
+      // Threads has no Reels, but a post can still be one video — and that is
+      // already the same shape, which is why there is no second code path.
+      final controller = await build(
+        meta: _FakeMeta(post: _post([_vid('https://cdn/t.mp4')])),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.selectedType, DownloadType.video);
+      expect(controller.metadata!.url, 'https://cdn/t.mp4');
+      expect(controller.metadata!.audioFormats, isNotEmpty);
+      expect(controller.metadata!.platform, 'Threads');
+    });
+
+    test('several images', () async {
+      final controller = await build(
+        meta: _FakeMeta(
+          post: _post([
+            _img('https://cdn/t1.jpg'),
+            _img('https://cdn/t2.jpg'),
+            _img('https://cdn/t3.jpg'),
+          ]),
+        ),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.batchItems, hasLength(3));
+      expect(controller.batchPlatform, 'Threads');
+      expect(controller.selectedType, DownloadType.image);
+    });
+
+    test('several videos', () async {
+      final controller = await build(
+        meta: _FakeMeta(
+          post: _post([_vid('https://cdn/t1.mp4'), _vid('https://cdn/t2.mp4')]),
+        ),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.batchItems, hasLength(2));
+      expect(controller.batchItems!.every((i) => i.isVideo), isTrue);
+    });
+
+    test('images and videos together keep their own kinds', () async {
+      final controller = await build(
+        meta: _FakeMeta(
+          post: _post([
+            _img('https://cdn/t1.jpg'),
+            _vid('https://cdn/t2.mp4'),
+            _img('https://cdn/t3.jpg'),
+          ]),
+        ),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.batchItems, hasLength(3));
+      expect(
+        controller.batchItems!.map((i) => i.isVideo),
+        [false, true, false],
+      );
+    });
+
+    test('a signed-out Threads post asks to sign in once', () async {
+      final controller = await build(
+        meta: _FakeMeta(error: const MetaAuthRequired('signed out')),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.loginRequest, isNotNull);
+      expect(controller.loginRequest!.platform, SocialPlatform.threads);
+      expect(controller.loginRequest!.retryUrl, threadsUrl);
+    });
+
+    test('a deleted Threads post is an error, not a sign-in prompt', () async {
+      final controller = await build(
+        meta: _FakeMeta(error: const MetaPostUnavailable('gone')),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.loginRequest, isNull);
+      expect(controller.flow, DuckFlow.error);
+    });
+  });
+
   group('the three tiers, in order', () {
     test('the device answers and nothing else is asked', () async {
       final api = _FakeApi();
-      final instagram = _FakeInstagram(post: _post([_img('https://cdn/1.jpg')]));
-      final controller = await build(instagram: instagram, api: api);
+      final meta = _FakeMeta(post: _post([_img('https://cdn/1.jpg')]));
+      final controller = await build(meta: meta, api: api);
       await controller.extractUrl(_postUrl);
 
-      expect(instagram.calls, 1);
+      expect(meta.calls, 1);
       expect(api.calls, 0, reason: 'the backend is a fallback, not a step');
     });
 
@@ -230,8 +332,8 @@ void main() {
         ),
       );
       final controller = await build(
-        instagram: _FakeInstagram(
-          error: const InstagramAuthRequired('signed out'),
+        meta: _FakeMeta(
+          error: const MetaAuthRequired('signed out'),
         ),
         api: api,
       );
@@ -249,8 +351,8 @@ void main() {
           {"url":"https://cdn/page.jpg","width":1080,"height":1350}]}}]}
       ''';
       final controller = await build(
-        instagram: _FakeInstagram(
-          error: const InstagramAuthRequired('signed out'),
+        meta: _FakeMeta(
+          error: const MetaAuthRequired('signed out'),
           pageBody: body,
         ),
       );
@@ -266,7 +368,7 @@ void main() {
       // The report this exists for: signed in, and asked to sign in on every
       // attempt, forever.
       final controller = await build(
-        instagram: _FakeInstagram(post: _post([_vid('https://cdn/1.mp4')])),
+        meta: _FakeMeta(post: _post([_vid('https://cdn/1.mp4')])),
       );
       await controller.extractUrl(_postUrl);
       expect(controller.loginRequest, isNull);
@@ -275,8 +377,8 @@ void main() {
 
     test('a missing session asks once, when nothing else worked', () async {
       final controller = await build(
-        instagram: _FakeInstagram(
-          error: const InstagramAuthRequired('signed out'),
+        meta: _FakeMeta(
+          error: const MetaAuthRequired('signed out'),
         ),
       );
       await controller.extractUrl(_postUrl);
@@ -286,8 +388,8 @@ void main() {
 
     test('failing again straight after signing in does not ask again', () async {
       final controller = await build(
-        instagram: _FakeInstagram(
-          error: const InstagramAuthRequired('signed out'),
+        meta: _FakeMeta(
+          error: const MetaAuthRequired('signed out'),
         ),
       );
       await controller.extractUrl(_postUrl, afterSignIn: true);
@@ -300,8 +402,8 @@ void main() {
       // dead end turns into a loop.
       final api = _FakeApi();
       final controller = await build(
-        instagram: _FakeInstagram(
-          error: const InstagramPostUnavailable(
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable(
             'This Instagram post no longer exists.',
           ),
         ),

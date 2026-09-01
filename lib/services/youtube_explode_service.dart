@@ -683,7 +683,7 @@ class YouTubeExplodeService {
           onProgress?.call(received, total);
         },
       );
-    } on DioException catch (error) {
+    } on DioException {
       // Say which one it was. "Cancelled" tells the caller nothing, and this
       // message is what ends up in front of the user.
       if (stalled) {

@@ -22,8 +22,8 @@ import '../services/clipboard_service.dart';
 import '../services/crash_reporting_service.dart';
 import '../services/download_store.dart';
 import '../services/file_service.dart';
-import '../models/instagram_post.dart';
-import '../services/instagram_service.dart';
+import '../models/meta_post.dart';
+import '../services/meta_post_service.dart';
 import '../services/platform_sessions.dart';
 import '../services/premium_entitlement.dart';
 import '../services/premium_manager.dart';
@@ -76,7 +76,7 @@ class DuckDownloadsController extends ChangeNotifier
     NotificationService? notificationService,
     PermissionService? permissionService,
     YouTubeExplodeService? ytExplode,
-    InstagramService? instagram,
+    MetaPostService? meta,
     bool initializePremium = true,
     bool initializePlatformServices = true,
   }) : _api = api,
@@ -88,7 +88,7 @@ class DuckDownloadsController extends ChangeNotifier
        _notifications = notificationService ?? NotificationService(),
        _permissions = permissionService ?? PermissionService(),
        _ytExplode = ytExplode ?? YouTubeExplodeService(),
-       _instagram = instagram ?? InstagramService() {
+       _meta = meta ?? MetaPostService() {
     unawaited(_loadYouTubeSession());
     _downloads = _store.readDownloads();
     for (final item in _downloads.where((item) => item.isPrivate)) {
@@ -345,13 +345,19 @@ class DuckDownloadsController extends ChangeNotifier
   /// Signed-in sessions, per platform, encrypted on this device.
   final PlatformSessionStore _sessions = const PlatformSessionStore();
 
-  final InstagramService _instagram;
+  final MetaPostService _meta;
 
-  /// The Instagram post the current options or batch came from.
+  /// Which of the two Meta platforms [_metaPost] came from.
+  SocialPlatform? _metaPlatform;
+
+  String get _metaPlatformLabel =>
+      _metaPlatform == null ? 'Instagram' : profileFor(_metaPlatform!).label;
+
+  /// The Instagram or Threads post the current options or batch came from.
   ///
   /// Held because its items carry direct CDN URLs, which download on this
   /// device instead of being posted to the backend for it to fetch.
-  InstagramPost? _instagramPost;
+  MetaPost? _metaPost;
 
   String? lastAttemptedUrl;
   String quality = 'Best';
@@ -2074,8 +2080,8 @@ class DuckDownloadsController extends ChangeNotifier
         // Fall through to the backend for galleries and text posts.
       }
 
-      if (InstagramService.isInstagramUrl(cleanUrl)) {
-        await _extractInstagram(cleanUrl);
+      if (MetaPostService.handles(cleanUrl)) {
+        await _extractMetaPost(cleanUrl);
         return;
       }
       try {
@@ -2130,28 +2136,28 @@ class DuckDownloadsController extends ChangeNotifier
   /// is the only one of the two that reliably gets an answer. The backend is
   /// still worth asking when the device call fails, and the page itself is the
   /// last resort when both do.
-  Future<void> _extractInstagram(String cleanUrl) async {
+  Future<void> _extractMetaPost(String cleanUrl) async {
     Object? deviceError;
     try {
-      _presentInstagramPost(await _instagram.fetchPost(cleanUrl), cleanUrl);
+      _presentMetaPost(await _meta.fetchPost(cleanUrl), cleanUrl);
       return;
     } catch (error, stackTrace) {
       deviceError = error;
-      if (error is! InstagramAuthRequired && error is! InstagramPostUnavailable) {
+      if (error is! MetaAuthRequired && error is! MetaPostUnavailable) {
         reportError(error, stackTrace, reason: 'instagram-on-device');
       }
     }
 
     // A post that Instagram itself says is gone will not be found by anything
     // else either, and pretending otherwise costs the user two more timeouts.
-    if (deviceError is InstagramPostUnavailable) {
+    if (deviceError is MetaPostUnavailable) {
       throw Exception(deviceError.toString());
     }
 
     try {
       final playlist = await _api.extractPlaylist(cleanUrl);
       if (playlist.items.isNotEmpty) {
-        _presentInstagramPlaylist(playlist, cleanUrl);
+        _presentMetaPlaylist(playlist, cleanUrl);
         return;
       }
     } catch (_) {
@@ -2159,11 +2165,11 @@ class DuckDownloadsController extends ChangeNotifier
     }
 
     try {
-      final scraped = await _instagram.fetchPostFromPage(cleanUrl);
-      _presentInstagramPost(scraped, cleanUrl);
+      final scraped = await _meta.fetchPostFromPage(cleanUrl);
+      _presentMetaPost(scraped, cleanUrl);
       return;
     } catch (error, stackTrace) {
-      if (error is! InstagramAuthRequired && error is! InstagramPostUnavailable) {
+      if (error is! MetaAuthRequired && error is! MetaPostUnavailable) {
         reportError(error, stackTrace, reason: 'instagram-page-read');
       }
     }
@@ -2171,21 +2177,21 @@ class DuckDownloadsController extends ChangeNotifier
     // Only now is a sign-in worth offering, and only if a session is actually
     // what was missing. Offering it for every failure is what put a signed-in
     // user in a loop: sign in, fail, be asked to sign in again.
-    if (deviceError is InstagramAuthRequired &&
+    if (deviceError is MetaAuthRequired &&
         !_justSignedIn &&
         _requestLogin(cleanUrl)) {
       return;
     }
-    throw Exception(
-      deviceError?.toString() ??
-          'Could not read this Instagram post. Try again in a moment.',
-    );
+    throw Exception(deviceError.toString());
   }
 
   /// Puts a post on screen: one item becomes options, several become a batch.
-  void _presentInstagramPost(InstagramPost post, String sourceUrl) {
-    _instagramPost = post;
-    batchPlatform = 'Instagram';
+  void _presentMetaPost(MetaPost post, String sourceUrl) {
+    _metaPost = post;
+    // The real platform, not a hardcoded one: the same code reads Threads,
+    // and a Threads download filed under "Instagram" is a lie in the library.
+    _metaPlatform = MetaPostService.platformOf(sourceUrl);
+    batchPlatform = _metaPlatformLabel;
     lastAttemptedUrl = sourceUrl;
 
     if (post.isSingle) {
@@ -2195,7 +2201,7 @@ class DuckDownloadsController extends ChangeNotifier
         // being fetched a second time by the backend on the user's behalf.
         url: media.url,
         title: post.title,
-        platform: 'Instagram',
+        platform: _metaPlatformLabel,
         thumbnail: media.thumbnail ?? media.url,
         qualities: [
           FormatInfo(
@@ -2245,17 +2251,17 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   /// The same presentation, for a post the backend read instead.
-  void _presentInstagramPlaylist(
+  void _presentMetaPlaylist(
     PlaylistExtractResponse playlist,
     String sourceUrl,
   ) {
-    _presentInstagramPost(
-      InstagramPost(
-        shortcode: InstagramService.shortcodeOf(sourceUrl) ?? '',
+    _presentMetaPost(
+      MetaPost(
+        shortcode: MetaPostService.shortcodeOf(sourceUrl) ?? '',
         title: playlist.title.isEmpty ? 'Instagram Post' : playlist.title,
         items: [
           for (final item in playlist.items)
-            InstagramMedia(
+            MetaMedia(
               url: item.url,
               isVideo: item.isVideo,
               width: item.width,
@@ -2269,8 +2275,8 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   /// True when [url] is a file this device already knows how to fetch itself.
-  bool _isDirectInstagramMedia(String url) {
-    final post = _instagramPost;
+  bool _isDirectMetaMedia(String url) {
+    final post = _metaPost;
     if (post == null) return false;
     return post.items.any((item) => item.url == url);
   }
@@ -2302,14 +2308,15 @@ class DuckDownloadsController extends ChangeNotifier
   /// banner, a shared link and a typed URL — and each used to clear its own
   /// idea of what needed clearing. They had already drifted: only the paste
   /// button dropped the held Instagram post, so a link arriving any other way
-  /// left the previous post's files still matching `_isDirectInstagramMedia`
+  /// left the previous post's files still matching `_isDirectMetaMedia`
   /// and taking a download branch meant for a post that was no longer open.
   void _resetForNewExtraction() {
     metadata = null;
     batchItems = null;
     batchTitle = null;
     batchPlatform = null;
-    _instagramPost = null;
+    _metaPost = null;
+    _metaPlatform = null;
     _loginRequest = null;
   }
 
@@ -2373,8 +2380,8 @@ class DuckDownloadsController extends ChangeNotifier
       // file comes straight to this device. Posting it to the backend would
       // ask the server to fetch a public file the phone can reach itself, on
       // a connection Meta is more likely to refuse.
-      if (_isDirectInstagramMedia(media.url)) {
-        await _startInstagramDownload(media);
+      if (_isDirectMetaMedia(media.url)) {
+        await _startMetaDownload(media);
         return;
       }
 
@@ -2452,7 +2459,7 @@ class DuckDownloadsController extends ChangeNotifier
   /// [type] is already per-item when the user chose "everything as it is", so
   /// a photo in a mixed post saves as a photo and the video beside it saves as
   /// a video.
-  Future<void> _startInstagramBatchItem({
+  Future<void> _startMetaBatchItem({
     required String url,
     required String title,
     required PlaylistItem? item,
@@ -2462,9 +2469,9 @@ class DuckDownloadsController extends ChangeNotifier
     var entry = DownloadItem(
       id: itemId,
       url: url,
-      title: title.isEmpty ? 'Instagram' : title,
+      title: title.isEmpty ? _metaPlatformLabel : title,
       thumbnail: item?.thumbnail ?? url,
-      platform: 'Instagram',
+      platform: _metaPlatformLabel,
       quality: 'Best',
       type: type,
       createdAt: DateTime.now(),
@@ -2519,11 +2526,11 @@ class DuckDownloadsController extends ChangeNotifier
   /// On a Reel the Image chip means the cover frame and the Audio chip means
   /// the sound, so the same post answers all three without a second trip to
   /// Instagram.
-  Future<void> _startInstagramDownload(MediaMetadata media) async {
-    final post = _instagramPost;
+  Future<void> _startMetaDownload(MediaMetadata media) async {
+    final post = _metaPost;
     final item = post?.items.firstWhere(
       (candidate) => candidate.url == media.url,
-      orElse: () => InstagramMedia(url: media.url, isVideo: true),
+      orElse: () => MetaMedia(url: media.url, isVideo: true),
     );
     if (item == null) return;
 
@@ -2535,7 +2542,7 @@ class DuckDownloadsController extends ChangeNotifier
       return;
     }
     if (selectedType == DownloadType.audio && item.isVideo) {
-      await _startInstagramAudioDownload(media, item);
+      await _startMetaAudioDownload(media, item);
       return;
     }
     await _startCobaltDownload(media, item.url);
@@ -2546,9 +2553,9 @@ class DuckDownloadsController extends ChangeNotifier
   /// Instagram serves no audio-only rendition, so the choice is this or no
   /// Audio chip at all on a platform where saving the sound is most of why
   /// people download Reels.
-  Future<void> _startInstagramAudioDownload(
+  Future<void> _startMetaAudioDownload(
     MediaMetadata media,
-    InstagramMedia item,
+    MetaMedia item,
   ) async {
     final itemId = _newLocalDownloadId();
     var entry = DownloadItem(
@@ -2556,7 +2563,7 @@ class DuckDownloadsController extends ChangeNotifier
       url: media.url,
       title: media.title,
       thumbnail: item.thumbnail ?? media.thumbnail,
-      platform: 'Instagram',
+      platform: _metaPlatformLabel,
       quality: quality,
       type: DownloadType.audio,
       createdAt: DateTime.now(),
@@ -5143,8 +5150,8 @@ class DuckDownloadsController extends ChangeNotifier
         }
         // Instagram carousel items are direct CDN files. Same reasoning as
         // the single case: the phone can fetch them, and Meta answers it.
-        if (_isDirectInstagramMedia(url)) {
-          await _startInstagramBatchItem(
+        if (_isDirectMetaMedia(url)) {
+          await _startMetaBatchItem(
             url: url,
             title: title,
             item: batchItem,
@@ -5315,7 +5322,7 @@ class DuckDownloadsController extends ChangeNotifier
     batchItems = null;
     batchTitle = null;
     batchPlatform = null;
-    _instagramPost = null;
+    _metaPost = null;
     flow = DuckFlow.idle;
     setStatus('statusTapDuck');
     notifyListeners();

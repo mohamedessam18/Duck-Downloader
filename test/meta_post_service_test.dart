@@ -1,7 +1,8 @@
 import 'dart:convert';
 
-import 'package:duck_downloader/models/instagram_post.dart';
-import 'package:duck_downloader/services/instagram_service.dart';
+import 'package:duck_downloader/models/meta_post.dart';
+import 'package:duck_downloader/services/meta_post_service.dart';
+import 'package:duck_downloader/services/platform_sessions.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, dynamic> _image({int width = 1440, int height = 1800, String url = 'https://cdn/i.jpg'}) => {
@@ -39,8 +40,8 @@ dynamic _body(List<Map<String, dynamic>> children, {String? caption}) => {
   ],
 };
 
-InstagramPost _parse(dynamic body) =>
-    InstagramService.parseMediaInfo(body, 'ABC123')!;
+MetaPost _parse(dynamic body) =>
+    MetaPostService.parseMediaInfo(body, 'ABC123')!;
 
 void main() {
   group('links', () {
@@ -51,24 +52,111 @@ void main() {
         'https://www.instagram.com/reels/DHqXk_ZSAWk/',
         'https://www.instagram.com/tv/DHqXk_ZSAWk/?utm_source=ig',
       ]) {
-        expect(InstagramService.shortcodeOf(url), 'DHqXk_ZSAWk', reason: url);
+        expect(MetaPostService.shortcodeOf(url), 'DHqXk_ZSAWk', reason: url);
       }
     });
 
     test('a profile or a non-post is not a post', () {
-      expect(InstagramService.shortcodeOf('https://instagram.com/someone'), isNull);
-      expect(InstagramService.shortcodeOf('https://example.com/p/ABC'), 'ABC');
-      expect(InstagramService.shortcodeOf('not a url'), isNull);
+      expect(MetaPostService.shortcodeOf('https://instagram.com/someone'), isNull);
+      expect(MetaPostService.shortcodeOf('https://example.com/p/ABC'), 'ABC');
+      expect(MetaPostService.shortcodeOf('not a url'), isNull);
     });
 
     test('the shortcode is the media id in base 64', () {
       // Checked against Instagram's own numbering.
       expect(
-        InstagramService.mediaIdOf('DHqXk_ZSAWk').toString(),
+        MetaPostService.mediaIdOf('DHqXk_ZSAWk').toString(),
         '3596790949449565604',
       );
-      expect(InstagramService.mediaIdOf('!!!'), isNull);
-      expect(InstagramService.mediaIdOf(''), isNull);
+      expect(MetaPostService.mediaIdOf('!!!'), isNull);
+      expect(MetaPostService.mediaIdOf(''), isNull);
+    });
+  });
+
+  group('Threads links', () {
+    test('every post shape yields its shortcode', () {
+      for (final url in [
+        'https://www.threads.com/@zuck/post/C2QBoRaRmR1',
+        'https://www.threads.net/@zuck/post/C2QBoRaRmR1',
+        'https://threads.com/@some.one/post/C2QBoRaRmR1?xmt=abc',
+        'https://www.threads.com/t/C2QBoRaRmR1',
+      ]) {
+        expect(MetaPostService.shortcodeOf(url), 'C2QBoRaRmR1', reason: url);
+      }
+    });
+
+    test('a Threads link is recognised as one', () {
+      expect(
+        MetaPostService.platformOf('https://www.threads.com/@a/post/C2QBoRaRmR1'),
+        SocialPlatform.threads,
+      );
+      expect(
+        MetaPostService.platformOf('https://www.threads.net/@a/post/C2QBoRaRmR1'),
+        SocialPlatform.threads,
+      );
+      expect(
+        MetaPostService.platformOf('https://www.instagram.com/p/ABC/'),
+        SocialPlatform.instagram,
+      );
+      // And nothing else is handled by this service at all.
+      expect(MetaPostService.platformOf('https://x.com/a/status/1'), isNull);
+      expect(MetaPostService.handles('https://youtu.be/abc'), isFalse);
+    });
+
+    test('the two platforms are addressed on their own domains', () {
+      // Not a detail: the request has to carry the right origin's cookies,
+      // and threads.net now answers a post URL with a 301 to threads.com.
+      expect(
+        MetaPostService.originFor(SocialPlatform.threads),
+        'https://www.threads.com',
+      );
+      expect(
+        MetaPostService.originFor(SocialPlatform.instagram),
+        'https://www.instagram.com',
+      );
+      expect(
+        MetaPostService.canonicalPostUrl(SocialPlatform.threads, 'ABC'),
+        'https://www.threads.com/t/ABC',
+      );
+      expect(
+        MetaPostService.canonicalPostUrl(SocialPlatform.instagram, 'ABC'),
+        'https://www.instagram.com/p/ABC/',
+      );
+    });
+
+    test('a Threads shortcode is the same base-64 as an Instagram one', () {
+      // Threads runs on Instagram's media ids, which is why one parser reads
+      // both and one fix fixes both.
+      expect(
+        MetaPostService.mediaIdOf('DHqXk_ZSAWk'),
+        MetaPostService.mediaIdOf('DHqXk_ZSAWk'),
+      );
+      expect(MetaPostService.mediaIdOf('C2QBoRaRmR1'), isNotNull);
+    });
+
+    test('Threads posts parse into the same shapes', () {
+      // Threads has no Reels, but every other shape is the same shape — which
+      // is the point of not writing a second parser for it.
+      final single = _parse(_body([_image(url: 'https://cdn/t1.jpg')]));
+      expect(single.items.single.isVideo, isFalse);
+
+      final video = _parse(_body([_video(url: 'https://cdn/t.mp4')]));
+      expect(video.items.single.isVideo, isTrue);
+      expect(video.items.single.url, 'https://cdn/t.mp4');
+
+      final carousel = _parse(_body([
+        _image(url: 'https://cdn/t1.jpg'),
+        _image(url: 'https://cdn/t2.jpg'),
+      ]));
+      expect(carousel.items, hasLength(2));
+
+      final mixed = _parse(_body([
+        _image(url: 'https://cdn/t1.jpg'),
+        _video(url: 'https://cdn/t2.mp4'),
+        _image(url: 'https://cdn/t3.jpg'),
+      ]));
+      expect(mixed.isMixed, isTrue);
+      expect(mixed.items.map((i) => i.isVideo), [false, true, false]);
     });
   });
 
@@ -77,16 +165,16 @@ void main() {
       const jar = '# Netscape HTTP Cookie File\n'
           '.instagram.com\tTRUE\t/\tTRUE\t1799999999\tsessionid\tabc123\n'
           '.instagram.com\tTRUE\t/\tTRUE\t1799999999\tds_user_id\t42\n';
-      final header = InstagramService.cookieHeader(jar);
+      final header = MetaPostService.cookieHeader(jar);
       expect(header, contains('sessionid=abc123'));
       expect(header, contains('ds_user_id=42'));
       expect(header, isNot(contains('Netscape')));
     });
 
     test('no session is an empty header, not a broken one', () {
-      expect(InstagramService.cookieHeader(null), '');
-      expect(InstagramService.cookieHeader(''), '');
-      expect(InstagramService.cookieHeader('# only a comment\n'), '');
+      expect(MetaPostService.cookieHeader(null), '');
+      expect(MetaPostService.cookieHeader(''), '');
+      expect(MetaPostService.cookieHeader('# only a comment\n'), '');
     });
   });
 
@@ -211,19 +299,19 @@ void main() {
 
   group('bodies that are not posts', () {
     test('nothing usable is null, not a crash', () {
-      expect(InstagramService.parseMediaInfo(null, 'x'), isNull);
-      expect(InstagramService.parseMediaInfo('a string', 'x'), isNull);
-      expect(InstagramService.parseMediaInfo({'items': []}, 'x'), isNull);
-      expect(InstagramService.parseMediaInfo({'items': 'nope'}, 'x'), isNull);
+      expect(MetaPostService.parseMediaInfo(null, 'x'), isNull);
+      expect(MetaPostService.parseMediaInfo('a string', 'x'), isNull);
+      expect(MetaPostService.parseMediaInfo({'items': []}, 'x'), isNull);
+      expect(MetaPostService.parseMediaInfo({'items': 'nope'}, 'x'), isNull);
       expect(
-        InstagramService.parseMediaInfo(jsonDecode('{"items":[{}]}'), 'x'),
+        MetaPostService.parseMediaInfo(jsonDecode('{"items":[{}]}'), 'x'),
         isNull,
       );
     });
 
     test('a carousel of unusable children is null', () {
       expect(
-        InstagramService.parseMediaInfo(
+        MetaPostService.parseMediaInfo(
           {'items': [{'media_type': 8, 'carousel_media': [{}, 'junk']}]},
           'x',
         ),

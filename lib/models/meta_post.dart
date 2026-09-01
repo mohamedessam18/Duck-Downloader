@@ -1,6 +1,6 @@
 /// One downloadable thing inside an Instagram post.
-class InstagramMedia {
-  const InstagramMedia({
+class MetaMedia {
+  const MetaMedia({
     required this.url,
     required this.isVideo,
     this.width,
@@ -28,8 +28,8 @@ class InstagramMedia {
 /// per-child `media_type` again. Collapsing that into one list with a flag per
 /// item is what lets a post with three photos and a video download as three
 /// photos and a video instead of four of whatever the user picked.
-class InstagramPost {
-  const InstagramPost({
+class MetaPost {
+  const MetaPost({
     required this.shortcode,
     required this.title,
     required this.items,
@@ -38,7 +38,7 @@ class InstagramPost {
 
   final String shortcode;
   final String title;
-  final List<InstagramMedia> items;
+  final List<MetaMedia> items;
   final String? thumbnail;
 
   bool get isEmpty => items.isEmpty;
@@ -58,16 +58,16 @@ class InstagramPost {
 /// responses: a session problem is worth offering a sign-in for, and a deleted
 /// post is not. Asking someone who is already signed in to sign in again — and
 /// again, after that — is the loop this type exists to end.
-class InstagramAuthRequired implements Exception {
-  const InstagramAuthRequired(this.message);
+class MetaAuthRequired implements Exception {
+  const MetaAuthRequired(this.message);
   final String message;
 
   @override
   String toString() => message;
 }
 
-class InstagramPostUnavailable implements Exception {
-  const InstagramPostUnavailable(this.message);
+class MetaPostUnavailable implements Exception {
+  const MetaPostUnavailable(this.message);
   final String message;
 
   @override

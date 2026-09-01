@@ -2,13 +2,12 @@ import 'dart:io';
 
 import 'package:duck_downloader/models/download_models.dart';
 import 'package:duck_downloader/services/api_client.dart';
-import 'package:duck_downloader/models/instagram_post.dart' as ig;
 import 'package:duck_downloader/services/clipboard_service.dart';
 import 'package:duck_downloader/services/download_store.dart';
 import 'package:duck_downloader/services/file_service.dart';
 import 'package:duck_downloader/services/media_save_service.dart';
-import 'package:duck_downloader/models/instagram_post.dart';
-import 'package:duck_downloader/services/instagram_service.dart';
+import 'package:duck_downloader/models/meta_post.dart';
+import 'package:duck_downloader/services/meta_post_service.dart';
 import 'package:duck_downloader/services/platform_sessions.dart';
 import 'package:duck_downloader/services/youtube_explode_service.dart';
 import 'package:duck_downloader/services/premium_manager.dart';
@@ -88,7 +87,7 @@ void main() {
     addTearDown(box.close);
     final controller = DuckDownloadsController(
       api: api ?? DuckApiClient(apiBaseUrl: 'https://api.test'),
-      instagram: _SignedOutInstagram(),
+      meta: _SignedOutMeta(),
       ytExplode: ytExplode,
       clipboard: clipboard ?? DuckClipboardService(),
       files: DuckFileService(),
@@ -268,13 +267,13 @@ void main() {
 }
 
 /// Instagram, signed out. Every tier refuses for want of a session.
-class _SignedOutInstagram extends InstagramService {
-  _SignedOutInstagram()
+class _SignedOutMeta extends MetaPostService {
+  _SignedOutMeta()
     : super(pageReader: (_, _) async => null);
 
   @override
-  Future<InstagramPost> fetchPost(String url) async =>
-      throw const InstagramAuthRequired(
+  Future<MetaPost> fetchPost(String url) async =>
+      throw const MetaAuthRequired(
         'Instagram needs you to be signed in to open this post.',
       );
 }

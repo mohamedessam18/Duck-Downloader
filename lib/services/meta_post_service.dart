@@ -4,21 +4,29 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-import '../models/instagram_post.dart';
+import '../models/meta_post.dart';
 import 'platform_sessions.dart';
 
-/// Reads an Instagram post on the user's own device, with their own session.
+/// Reads an Instagram or Threads post on the user's own device, with their
+/// own session.
 ///
-/// The same reasoning as YouTube. Meta blocks datacentre addresses hard, so a
-/// request from the backend is answered as a stranger's no matter whose
-/// cookies it carries, while the identical request from the phone is answered
-/// as the person who is signed in. It also means the session never leaves the
-/// device for the common case.
-class InstagramService {
-  InstagramService({
+/// One class for both because they are one product underneath. Threads runs on
+/// Instagram's infrastructure: the same base-64 shortcodes, the same numeric
+/// media ids, the same `/api/v1/media/{id}/info/` reply — so the same parser
+/// reads both, and a bug fixed for one is fixed for the other. Threads has no
+/// Reels, but a Threads post can still hold a single video, and that shape is
+/// already the same shape.
+///
+/// The same reasoning as YouTube for doing it here at all. Meta blocks
+/// datacentre addresses hard, so a request from the backend is answered as a
+/// stranger's no matter whose cookies it carries, while the identical request
+/// from the phone is answered as the person who is signed in. It also means
+/// the session never leaves the device for the common case.
+class MetaPostService {
+  MetaPostService({
     Dio? dio,
     PlatformSessionStore? sessions,
-    InstagramPageReader? pageReader,
+    MetaPageReader? pageReader,
   }) : _sessions = sessions ?? const PlatformSessionStore(),
        pageReader = pageReader ?? readThroughPage,
       _dio =
@@ -41,10 +49,10 @@ class InstagramService {
 
   /// How the last-resort tier reaches Instagram. Injectable so the
   /// fallback can be tested without a WebView.
-  final InstagramPageReader pageReader;
+  final MetaPageReader pageReader;
 
-  /// Instagram's own web client id. Public, and required — without it the API
-  /// answers every request as unauthenticated.
+  /// Meta's own web client id. Public, and required — without it the API
+  /// answers every request as unauthenticated. Threads accepts the same one.
   static const _appId = '936619743392459';
 
   static const _userAgent =
@@ -54,13 +62,46 @@ class InstagramService {
   static const _shortcodeAlphabet =
       'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
-  static bool isInstagramUrl(String url) =>
-      profileForUrl(url)?.platform == SocialPlatform.instagram;
+  /// The two platforms this reads, or null for anything else.
+  static SocialPlatform? platformOf(String url) {
+    final platform = profileForUrl(url)?.platform;
+    return platform == SocialPlatform.instagram ||
+            platform == SocialPlatform.threads
+        ? platform
+        : null;
+  }
 
-  /// The post id in a `/p/`, `/reel/`, `/reels/` or `/tv/` link.
+  static bool handles(String url) => platformOf(url) != null;
+
+  /// Where the API call is made and the page is opened.
+  ///
+  /// threads.net now answers a post URL with a 301 to threads.com, so calling
+  /// the old domain costs a redirect on every request — and the API client
+  /// deliberately does not follow redirects, because a redirect is how a
+  /// signed-out reply arrives.
+  static String originFor(SocialPlatform platform) =>
+      platform == SocialPlatform.threads
+      ? 'https://www.threads.com'
+      : 'https://www.instagram.com';
+
+  /// The page that shows this post, on its own platform.
+  ///
+  /// Threads answers `/@handle/post/<code>` too, but the handle is not always
+  /// in the link the user pasted — `/t/<code>` carries no handle at all — and
+  /// this form works without one.
+  static String canonicalPostUrl(SocialPlatform platform, String shortcode) =>
+      platform == SocialPlatform.threads
+      ? '${originFor(platform)}/t/$shortcode'
+      : '${originFor(platform)}/p/$shortcode/';
+
+  /// The post id in a link from either platform.
+  ///
+  /// Instagram spells it `/p/`, `/reel/`, `/reels/` or `/tv/`; Threads spells
+  /// it `/post/` under an `@handle`, or `/t/` in a short link. The code itself
+  /// is the same base-64 in both.
   static String? shortcodeOf(String url) {
     final match = RegExp(
-      r'/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)',
+      r'/(?:p|reel|reels|tv|post|t)/([A-Za-z0-9_-]+)',
     ).firstMatch(Uri.tryParse(url.trim())?.path ?? '');
     return match?.group(1);
   }
@@ -96,35 +137,35 @@ class InstagramService {
 
   /// Reads the post at [url].
   ///
-  /// Throws [InstagramAuthRequired] when Instagram wants a session, and
-  /// [InstagramPostUnavailable] when there is no such post. The caller needs
+  /// Throws [MetaAuthRequired] when Instagram wants a session, and
+  /// [MetaPostUnavailable] when there is no such post. The caller needs
   /// to tell those apart: only one of them is worth offering a sign-in for.
-  Future<InstagramPost> fetchPost(String url) async {
-    final shortcode = shortcodeOf(url);
-    if (shortcode == null) {
-      throw const InstagramPostUnavailable(
-        'That Instagram link does not point at a post.',
-      );
+  Future<MetaPost> fetchPost(String url) async {
+    final platform = platformOf(url);
+    if (platform == null) {
+      throw const MetaPostUnavailable('That link is not a post Duck can read.');
     }
-    final mediaId = mediaIdOf(shortcode);
-    if (mediaId == null) {
-      throw const InstagramPostUnavailable(
-        'That Instagram link does not point at a post.',
+    final name = profileFor(platform).label;
+
+    final shortcode = shortcodeOf(url);
+    final mediaId = shortcode == null ? null : mediaIdOf(shortcode);
+    if (shortcode == null || mediaId == null) {
+      throw MetaPostUnavailable(
+        'That $name link does not point at a post.',
       );
     }
 
-    final cookies = cookieHeader(
-      await _sessions.read(SocialPlatform.instagram),
-    );
+    final origin = originFor(platform);
+    final cookies = cookieHeader(await _sessions.read(platform));
 
     final response = await _dio.get<dynamic>(
-      'https://www.instagram.com/api/v1/media/$mediaId/info/',
+      '$origin/api/v1/media/$mediaId/info/',
       options: Options(
         responseType: ResponseType.plain,
         headers: {
           'X-IG-App-ID': _appId,
           'User-Agent': _userAgent,
-          'Referer': 'https://www.instagram.com/',
+          'Referer': '$origin/',
           'Accept': '*/*',
           if (cookies.isNotEmpty) 'Cookie': cookies,
         },
@@ -133,20 +174,18 @@ class InstagramService {
 
     final status = response.statusCode ?? 0;
     if (status == 302 || status == 401 || status == 403) {
-      throw InstagramAuthRequired(
+      throw MetaAuthRequired(
         cookies.isEmpty
-            ? 'Instagram needs you to be signed in to open this post.'
-            : 'Instagram did not accept the saved session for this post.',
+            ? '$name needs you to be signed in to open this post.'
+            : '$name did not accept the saved session for this post.',
       );
     }
     if (status == 404 || status == 410) {
-      throw const InstagramPostUnavailable(
-        'This Instagram post no longer exists.',
-      );
+      throw MetaPostUnavailable('This $name post no longer exists.');
     }
     if (status != 200) {
-      throw InstagramPostUnavailable(
-        'Instagram answered with status $status for this post.',
+      throw MetaPostUnavailable(
+        '$name answered with status $status for this post.',
       );
     }
 
@@ -156,15 +195,15 @@ class InstagramService {
       decoded = jsonDecode(body);
     } catch (_) {
       // A login wall served as HTML rather than as a redirect.
-      throw const InstagramAuthRequired(
-        'Instagram returned its login page instead of the post.',
+      throw MetaAuthRequired(
+        '$name returned its login page instead of the post.',
       );
     }
 
     final post = parseMediaInfo(decoded, shortcode);
     if (post == null || post.isEmpty) {
-      throw const InstagramPostUnavailable(
-        'Instagram returned no downloadable media for this post.',
+      throw MetaPostUnavailable(
+        '$name returned no downloadable media for this post.',
       );
     }
     return post;
@@ -175,7 +214,7 @@ class InstagramService {
   /// Separated from the request so the shapes can be tested without a session:
   /// single image, single video, a carousel of each, and the mixed carousel
   /// that is the whole reason items carry their own type.
-  static InstagramPost? parseMediaInfo(dynamic decoded, String shortcode) {
+  static MetaPost? parseMediaInfo(dynamic decoded, String shortcode) {
     if (decoded is! Map) return null;
     final items = decoded['items'];
     if (items is! List || items.isEmpty) return null;
@@ -187,7 +226,7 @@ class InstagramService {
         ? (caption['text']?.toString().trim() ?? '')
         : '';
 
-    final media = <InstagramMedia>[];
+    final media = <MetaMedia>[];
     final children = root['carousel_media'];
     if (children is List && children.isNotEmpty) {
       for (final child in children) {
@@ -200,7 +239,7 @@ class InstagramService {
     }
 
     if (media.isEmpty) return null;
-    return InstagramPost(
+    return MetaPost(
       shortcode: shortcode,
       title: title.isEmpty
           ? 'Instagram Post'
@@ -216,7 +255,7 @@ class InstagramService {
   /// versions are checked anyway. Instagram sends an image cover on every
   /// video, so a node that has both is a video; taking the picture because it
   /// was there is how a Reel ends up saved as a JPEG.
-  static InstagramMedia? _mediaFrom(dynamic node) {
+  static MetaMedia? _mediaFrom(dynamic node) {
     if (node is! Map) return null;
 
     final videos = node['video_versions'];
@@ -229,7 +268,7 @@ class InstagramService {
       final best = videos is List ? _largest(videos) : null;
       final videoUrl = best?['url']?.toString();
       if (videoUrl == null || videoUrl.isEmpty) return null;
-      return InstagramMedia(
+      return MetaMedia(
         url: videoUrl,
         isVideo: true,
         width: _asInt(best?['width']),
@@ -240,7 +279,7 @@ class InstagramService {
 
     final imageUrl = cover?['url']?.toString();
     if (imageUrl == null || imageUrl.isEmpty) return null;
-    return InstagramMedia(
+    return MetaMedia(
       url: imageUrl,
       isVideo: false,
       width: _asInt(cover?['width']),
@@ -276,10 +315,10 @@ class InstagramService {
 }
 
 /// Fetches the media JSON for one post, from inside a real page.
-typedef InstagramPageReader =
+typedef MetaPageReader =
     Future<String?> Function(String postUrl, BigInt mediaId);
 
-extension InstagramPageFallback on InstagramService {
+extension MetaPageFallback on MetaPostService {
   /// Last resort: ask Instagram's own page to fetch the post for us.
   ///
   /// This replaces a 240-line scraper that read whatever the open page
@@ -293,23 +332,30 @@ extension InstagramPageFallback on InstagramService {
   /// does — and the answer comes back in the same shape the direct call
   /// returns, so it goes through the same tested parser rather than a second
   /// one that can disagree with it.
-  Future<InstagramPost> fetchPostFromPage(String url) async {
-    final shortcode = InstagramService.shortcodeOf(url);
+  Future<MetaPost> fetchPostFromPage(String url) async {
+    final platform = MetaPostService.platformOf(url);
+    if (platform == null) {
+      throw const MetaPostUnavailable('That link is not a post Duck can read.');
+    }
+    final name = profileFor(platform).label;
+
+    final shortcode = MetaPostService.shortcodeOf(url);
     final mediaId =
-        shortcode == null ? null : InstagramService.mediaIdOf(shortcode);
+        shortcode == null ? null : MetaPostService.mediaIdOf(shortcode);
     if (shortcode == null || mediaId == null) {
-      throw const InstagramPostUnavailable(
-        'That Instagram link does not point at a post.',
-      );
+      throw MetaPostUnavailable('That $name link does not point at a post.');
     }
 
+    // The page has to be the platform's own, because the whole trick is that
+    // the fetch inherits *that* origin's cookies. Opening an Instagram page to
+    // read a Threads post would send the request as the wrong site.
     final body = await pageReader(
-      'https://www.instagram.com/p/$shortcode/',
+      MetaPostService.canonicalPostUrl(platform, shortcode),
       mediaId,
     );
     if (body == null || body.trim().isEmpty) {
-      throw const InstagramAuthRequired(
-        'Instagram would not open this post in the app browser either.',
+      throw MetaAuthRequired(
+        '$name would not open this post in the app browser either.',
       );
     }
 
@@ -317,14 +363,14 @@ extension InstagramPageFallback on InstagramService {
     try {
       decoded = jsonDecode(body);
     } catch (_) {
-      throw const InstagramPostUnavailable(
-        'Instagram returned something that was not a post.',
+      throw MetaPostUnavailable(
+        '$name returned something that was not a post.',
       );
     }
-    final post = InstagramService.parseMediaInfo(decoded, shortcode);
+    final post = MetaPostService.parseMediaInfo(decoded, shortcode);
     if (post == null || post.isEmpty) {
-      throw const InstagramPostUnavailable(
-        'Instagram returned no downloadable media for this post.',
+      throw MetaPostUnavailable(
+        '$name returned no downloadable media for this post.',
       );
     }
     return post;
