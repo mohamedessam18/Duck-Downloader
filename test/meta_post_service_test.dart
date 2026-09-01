@@ -379,10 +379,14 @@ test('each site is sent its own app id', () {
       await expectLater(
         service.fetchPost(shareA),
         throwsA(
-          isA<MetaAuthRequired>().having(
-            (e) => e.message,
-            'message',
-            contains('post link'),
+          allOf(
+            // Emphatically not an auth error. Resolving happens in a browser
+            // holding whatever session the user has, so signing in again
+            // changes nothing — and offering to is the loop.
+            isNot(isA<MetaAuthRequired>()),
+            isA<MetaPostUnavailable>()
+                .having((e) => e.message, 'message', contains('post link'))
+                .having((e) => e.isFinal, 'isFinal', isTrue),
           ),
         ),
       );
@@ -486,14 +490,22 @@ test('each site is sent its own app id', () {
       expect(seen!.appId, '936619743392459');
     });
 
-    test('a page with nothing in it is not a post', () async {
+    test('a page with nothing in it is not a sign-in problem', () async {
+      // The page carries a public post's media with no session at all, so
+      // finding nothing there is a failure — not a reason to send the user to
+      // a sign-in screen and back for the same result.
       final service = MetaPostService(
         pageReader: (_) async => null,
         linkResolver: (_) async => null,
       );
       await expectLater(
         service.fetchPostFromPage('https://www.threads.com/@a/post/DcvLupWjoWV'),
-        throwsA(isA<MetaAuthRequired>()),
+        throwsA(
+          allOf(
+            isNot(isA<MetaAuthRequired>()),
+            isA<MetaPostUnavailable>(),
+          ),
+        ),
       );
     });
 

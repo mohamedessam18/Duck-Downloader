@@ -347,6 +347,15 @@ class DuckDownloadsController extends ChangeNotifier
 
   final MetaPostService _meta;
 
+  /// The link the app last opened the sign-in screen for.
+  ///
+  /// Asking a second time for the same link, when the user already has a
+  /// session, cannot help: they went to the sign-in screen, came back, and it
+  /// failed again — so the session was never what was wrong. Without this the
+  /// user simply repeats the round trip by hand, which is the loop they kept
+  /// reporting.
+  String? _askedToSignInFor;
+
   /// Which of the two Meta platforms [_metaPost] came from.
   SocialPlatform? _metaPlatform;
 
@@ -2182,10 +2191,15 @@ class DuckDownloadsController extends ChangeNotifier
     // Only now is a sign-in worth offering, and only if a session is actually
     // what was missing. Offering it for every failure is what put a signed-in
     // user in a loop: sign in, fail, be asked to sign in again.
-    if (deviceError is MetaAuthRequired &&
-        !_justSignedIn &&
-        _requestLogin(cleanUrl)) {
-      return;
+    if (deviceError is MetaAuthRequired && !_justSignedIn) {
+      final platform = MetaPostService.platformOf(cleanUrl);
+      final alreadySignedIn =
+          platform != null && await hasSessionFor(platform);
+      final askedBefore = _askedToSignInFor == cleanUrl;
+      if (!(alreadySignedIn && askedBefore) && _requestLogin(cleanUrl)) {
+        _askedToSignInFor = cleanUrl;
+        return;
+      }
     }
     // All three ways of reading it have now been tried. Say that, rather than
     // quoting whichever one happened to fail first as though it were the whole
@@ -2197,6 +2211,9 @@ class DuckDownloadsController extends ChangeNotifier
 
   /// Puts a post on screen: one item becomes options, several become a batch.
   void _presentMetaPost(MetaPost post, String sourceUrl) {
+    // It worked, so a future failure on this link deserves a fresh chance to
+    // blame the session.
+    if (_askedToSignInFor == sourceUrl) _askedToSignInFor = null;
     _metaPost = post;
     // The real platform, not a hardcoded one: the same code reads Threads,
     // and a Threads download filed under "Instagram" is a lie in the library.

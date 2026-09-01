@@ -61,8 +61,14 @@ class MetaPostService {
     if (!isShareLink(url)) return url;
     final target = await linkResolver(url.trim());
     if (target == null || target.trim().isEmpty) {
-      throw const MetaAuthRequired(
-        'Could not open that share link. Try the post link itself.',
+      // Not a sign-in problem, and it must not be reported as one. A share
+      // link that will not resolve does not resolve any better for someone
+      // signed in, so offering the sign-in screen only sends the user around
+      // the same circle.
+      throw const MetaPostUnavailable(
+        'Could not open that share link. Open the post in the app and copy '
+        'the post link instead.',
+        isFinal: true,
       );
     }
     return target;
@@ -515,7 +521,10 @@ extension MetaPageFallback on MetaPostService {
       ),
     );
     if (body == null || body.trim().isEmpty) {
-      throw MetaAuthRequired(
+      // The last resort found nothing. That is a failure, not a missing
+      // session — the page it opened carries a public post's media without one
+      // — so it must not ask the user to sign in and try the same thing again.
+      throw MetaPostUnavailable(
         '$name would not open this post in the app browser either.',
       );
     }

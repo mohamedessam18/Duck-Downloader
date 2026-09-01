@@ -16,7 +16,7 @@ import 'services/youtube_explode_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Draw behind the status bar and the gesture bar, on every Android version.
+  // Draw behind thestatus bar and the gesture bar, on every Android version.
   //
   // Android 15 forces this on any app targeting SDK 35 whether it asks or not,
   // so without the explicit opt-in the app would be edge-to-edge on 15+ and

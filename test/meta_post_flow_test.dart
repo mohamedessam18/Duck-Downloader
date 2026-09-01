@@ -387,6 +387,82 @@ void main() {
     });
   });
 
+  group('the sign-in is offered once, and only for a session problem', () {
+    const threadsUrl = 'https://www.threads.com/@someone/post/C2QBoRaRmR1';
+    const shareUrl = 'https://www.threads.com/share/BAT3nujVYV/';
+
+    test('a share link that will not resolve never asks for a sign-in', () async {
+      // Resolving happens in a browser holding whatever session the user has;
+      // signing in again changes nothing about it, so offering to is the loop.
+      final controller = await build(
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable(
+            'Could not open that share link. Open the post in the app and '
+            'copy the post link instead.',
+            isFinal: true,
+          ),
+        ),
+      );
+      await controller.extractUrl(shareUrl);
+
+      expect(controller.loginRequest, isNull);
+      expect(controller.flow, DuckFlow.error);
+    });
+
+    test('the page tier finding nothing never asks for a sign-in', () async {
+      final controller = await build(
+        meta: _FakeMeta(
+          error: const MetaPostUnavailable('would not open it either'),
+        ),
+      );
+      await controller.extractUrl(threadsUrl);
+
+      expect(controller.loginRequest, isNull);
+    });
+
+    test('a signed-out user is asked once', () async {
+      final controller = await build(
+        meta: _FakeMeta(error: const MetaAuthRequired('signed out')),
+      );
+      await controller.extractUrl(threadsUrl);
+      expect(controller.loginRequest, isNotNull);
+    });
+
+    test('the same link is not asked about twice in a row', () async {
+      // What the user was doing by hand: paste, get asked, sign in, fail,
+      // paste again, get asked again.
+      final controller = await build(
+        meta: _FakeMeta(error: const MetaAuthRequired('session refused')),
+      );
+
+      await controller.extractUrl(threadsUrl);
+      expect(controller.loginRequest, isNotNull);
+      controller.clearLoginRequest();
+
+      // Coming back signed in and failing anyway means the session was never
+      // the problem.
+      await controller.completeLogin(
+        LoginRequest(platform: SocialPlatform.threads, retryUrl: threadsUrl),
+      );
+      expect(controller.loginRequest, isNull);
+      expect(controller.flow, DuckFlow.error);
+    });
+
+    test('a different link still gets its own chance', () async {
+      final controller = await build(
+        meta: _FakeMeta(error: const MetaAuthRequired('signed out')),
+      );
+      await controller.extractUrl(threadsUrl);
+      expect(controller.loginRequest, isNotNull);
+      controller.clearLoginRequest();
+
+      await controller.extractUrl(
+        'https://www.threads.com/@someone/post/DcvLupWjoWV',
+      );
+      expect(controller.loginRequest, isNotNull);
+    });
+  });
+
   group('the three tiers, in order', () {
     test('the device answers and nothing else is asked', () async {
       final api = _FakeApi();
