@@ -44,6 +44,68 @@ void main() {
     );
   }
 
+  group('the two players share one volume', () {
+    test('closing a video hands the player back audible', () async {
+      // The reported bug, in three steps. Watching a video mutes this player
+      // on purpose — the video's own track is the sound — and closing the
+      // video used to stop it without undoing that. The next song then played
+      // perfectly and silently, which reads as audio being broken after you
+      // watch a video.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.audioPlayer.setVolume(0.0);
+      expect(controller.audioPlayer.volume, 0.0);
+
+      await controller.stopBackgroundVideoAudio();
+
+      expect(controller.audioPlayer.volume, 1.0);
+    });
+
+    test('it is safe to close a video twice', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.stopBackgroundVideoAudio();
+      await controller.stopBackgroundVideoAudio();
+
+      expect(controller.audioPlayer.volume, 1.0);
+    });
+  });
+
+  group('an interruption reaches the video too', () {
+    test('a registered handler is called, and only while registered', () async {
+      // Unplugging headphones does not change the app lifecycle, so nothing
+      // was telling the video to stop — it carried on out loud through the
+      // phone's speaker, which is the one thing this event exists to prevent.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      var pauses = 0;
+      void handler() => pauses++;
+
+      controller.addPausePlaybackHandler(handler);
+      controller.debugRequestPauseEverything();
+      expect(pauses, 1);
+
+      controller.removePausePlaybackHandler(handler);
+      controller.debugRequestPauseEverything();
+      expect(pauses, 1);
+    });
+
+    test('one handler throwing does not silence the others', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      var reached = false;
+      controller.addPausePlaybackHandler(() => throw StateError('disposed'));
+      controller.addPausePlaybackHandler(() => reached = true);
+
+      controller.debugRequestPauseEverything();
+      expect(reached, isTrue);
+    });
+  });
+
   test('repeat-all is not handed to the player as repeat-all', () async {
     final controller = createController();
     addTearDown(controller.dispose);

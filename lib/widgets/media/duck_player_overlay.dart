@@ -163,6 +163,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     );
     widget.controller.addListener(_syncDiscRotation);
     widget.controller.addBackInterceptor(_handleBack);
+    widget.controller.addPausePlaybackHandler(_pauseForExternalInterruption);
     DuckMediaChannel.instance.addHandler(_handleNativeCall);
 
     final filePath = widget.item.filePath;
@@ -460,11 +461,18 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     } catch (_) {}
   }
 
+  /// Headphones pulled out, or a call arriving. Stop the picture too.
+  void _pauseForExternalInterruption() {
+    _video?.pause();
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_syncDiscRotation);
     widget.controller.removeBackInterceptor(_handleBack);
+    widget.controller.removePausePlaybackHandler(_pauseForExternalInterruption);
     _discRotationController.dispose();
     if (widget.item.isVideo) {
       WakelockPlus.disable();

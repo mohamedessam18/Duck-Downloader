@@ -1030,6 +1030,35 @@ class DuckDownloadsController extends ChangeNotifier
   /// True while some layer wants a say in the back gesture.
   bool get hasBackInterceptors => _backInterceptors.isNotEmpty;
 
+  /// Called when something outside the app says playback must stop now.
+  ///
+  /// Headphones being unplugged, or a call arriving. The overlay owns the
+  /// video player, and the controller cannot reach it — so it asks. Registered
+  /// the same way back handlers are, and removed on dispose for the same
+  /// reason.
+  final List<void Function()> _pausePlaybackHandlers = [];
+
+  void addPausePlaybackHandler(void Function() handler) {
+    _pausePlaybackHandlers.add(handler);
+  }
+
+  void removePausePlaybackHandler(void Function() handler) {
+    _pausePlaybackHandlers.remove(handler);
+  }
+
+  void _requestPauseEverything() {
+    // Over a copy: a handler is free to unregister itself while running.
+    for (final handler in _pausePlaybackHandlers.toList()) {
+      try {
+        handler();
+      } catch (_) {}
+    }
+  }
+
+  /// Fires the same request the audio session does. Tests only.
+  @visibleForTesting
+  void debugRequestPauseEverything() => _requestPauseEverything();
+
   void addBackInterceptor(bool Function() handler) {
     _backInterceptors.add(handler);
   }
@@ -3908,6 +3937,10 @@ class DuckDownloadsController extends ChangeNotifier
           await audioPlayer.setFilePath(playablePath);
         }
         await _applyPlayerLoopMode();
+        // Said out loud rather than inherited. This player is shared with the
+        // video overlay, which mutes it on purpose, and a track that starts at
+        // whatever the last feature left behind is a track nobody can hear.
+        await audioPlayer.setVolume(1.0);
         await audioPlayer.play();
       } catch (error) {
         playingItem = null;
@@ -4105,6 +4138,9 @@ class DuckDownloadsController extends ChangeNotifier
 
   double? _preDuckVolume;
 
+  /// Whether the interruption that is running now had anything to interrupt.
+  bool _wasPlayingBeforeInterruption = false;
+
   Future<void> _configureAudioSession() async {
     try {
       final session = await AudioSession.instance;
@@ -4114,8 +4150,12 @@ class DuckDownloadsController extends ChangeNotifier
       // 1. Auto-pause on headphone disconnect
       session.becomingNoisyEventStream.listen((_) {
         audioPlayer.pause();
-        // Also pause video if playing
-        // The video player in duck_player_overlay will handle this via lifecycle
+        // And the video, which is the whole reason this event exists. The
+        // note here used to say the overlay handled it "via lifecycle", but
+        // unplugging headphones does not change the lifecycle — so the video
+        // carried on playing out loud through the phone's speaker, which is
+        // the exact thing this event is for preventing.
+        _requestPauseEverything();
       });
 
       // 2. Handle phone calls and system interruptions
@@ -4124,18 +4164,29 @@ class DuckDownloadsController extends ChangeNotifier
           switch (event.type) {
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
+              _wasPlayingBeforeInterruption = audioPlayer.playing;
               audioPlayer.pause();
+              _requestPauseEverything();
               break;
             case AudioInterruptionType.duck:
-              _preDuckVolume = audioPlayer.volume;
-              audioPlayer.setVolume(audioPlayer.volume * 0.2);
+              // Only the first duck records the volume to come back to. A
+              // second one arriving before the first ends used to overwrite it
+              // with the already-ducked level, so 1.0 became 0.2 became 0.04,
+              // and "restoring" left the player permanently quiet.
+              _preDuckVolume ??= audioPlayer.volume;
+              audioPlayer.setVolume(_preDuckVolume! * 0.2);
               break;
           }
         } else {
           // Interruption ended
           switch (event.type) {
             case AudioInterruptionType.pause:
-              audioPlayer.play();
+              // Only resume what was actually playing. This used to call
+              // play() unconditionally, so a phone call ending started music
+              // the user had paused themselves — or had never started, while
+              // they were watching a video.
+              if (_wasPlayingBeforeInterruption) audioPlayer.play();
+              _wasPlayingBeforeInterruption = false;
               break;
             case AudioInterruptionType.duck:
               audioPlayer.setVolume(_preDuckVolume ?? 1.0);
@@ -4314,6 +4365,13 @@ class DuckDownloadsController extends ChangeNotifier
     _backgroundVideoPreloaded = false;
     playingItem = null;
     await audioPlayer.stop();
+    // Hand the player back at a volume something else can be heard at.
+    //
+    // The video path mutes this player and lets the video's own track be the
+    // sound. Stopping it left the volume at zero, so the next song loaded into
+    // the same player played perfectly and silently — which reads as audio
+    // being broken after you watch a video, and is exactly what it was.
+    await audioPlayer.setVolume(1.0);
     notifyListeners();
   }
 
