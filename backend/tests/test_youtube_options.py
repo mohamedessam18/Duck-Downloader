@@ -21,4 +21,7 @@ def test_youtube_download_uses_ytdlp_default_player_clients(tmp_path) -> None:
         prefer_tiktok_no_watermark=False,
     )
 
-    assert "--extractor-args" not in args
+    assert "--extractor-args" in args
+    idx = args.index("--extractor-args")
+    assert "youtubepot-bgutilhttp" in args[idx + 1]
+    assert "player_client" in args[idx + 1]

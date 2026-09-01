@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import re
 import shutil
@@ -7,12 +8,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from yt_dlp import YoutubeDL
+try:
+    from yt_dlp import YoutubeDL
+except ImportError:
+    YoutubeDL = None
 
 from .config import settings
 from .media_type import direct_image_extension, failure_means_no_video
 from .models import StatusResponse, DownloadType
-from .security import sanitize_filename, ensure_inside, validate_public_url
+from .security import sanitize_filename, ensure_inside, validate_public_url, validate_not_adult_content
 
 
 class DownloadInterrupted(RuntimeError):
@@ -155,6 +159,250 @@ class DirectMediaScraper(BaseScraper):
         await asyncio.to_thread(perform)
 
 
+class TikTokScraper(BaseScraper):
+    COBALT_INSTANCES = [
+        "https://nuko-c.meowing.de",
+        "https://api-cobalt.eversiege.network",
+        "https://api.qwkuns.me",
+        "https://api.cobalt.liubquanti.click",
+        "https://cobalt.api.ggtyler.dev",
+        "https://co.wuk.sh",
+    ]
+
+    def can_handle(self, url: str) -> bool:
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lower()
+        return any(d in host for d in ["tiktok.com", "douyin.com", "tiktokv.com"])
+
+    async def extract(self, url: str) -> dict[str, Any]:
+        import urllib.request
+        import urllib.parse
+        import json
+
+        # 1. Attempt with TikWM API (High-speed no-watermark API)
+        tikwm_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url, safe='')}"
+        req = urllib.request.Request(
+            tikwm_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "application/json",
+            }
+        )
+
+        def call_tikwm():
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        try:
+            res = await asyncio.to_thread(call_tikwm)
+            if res.get("code") == 0 and res.get("data"):
+                data = res["data"]
+                title = data.get("title") or f"TikTok Video by {data.get('author', {}).get('nickname', 'User')}"
+                thumbnail = data.get("cover") or data.get("origin_cover")
+                duration = data.get("duration")
+                duration_text = f"{duration // 60}:{duration % 60:02d}" if isinstance(duration, int) else None
+
+                qualities = []
+                # HD No Watermark
+                if data.get("hdplay"):
+                    qualities.append({
+                        "id": "hd_nowm",
+                        "label": "1080p HD (No Watermark)",
+                        "ext": "mp4",
+                        "url": data["hdplay"],
+                    })
+                # Standard No Watermark
+                if data.get("play"):
+                    qualities.append({
+                        "id": "nowm",
+                        "label": "Original (No Watermark)",
+                        "ext": "mp4",
+                        "url": data["play"],
+                    })
+                if not qualities and data.get("wmplay"):
+                    qualities.append({
+                        "id": "best",
+                        "label": "Video",
+                        "ext": "mp4",
+                        "url": data["wmplay"],
+                    })
+
+                audio_formats = []
+                if data.get("music"):
+                    audio_formats.append({
+                        "id": "audio",
+                        "label": data.get("music_info", {}).get("title") or "Original Audio",
+                        "ext": "mp3",
+                        "url": data["music"],
+                    })
+
+                return {
+                    "title": title,
+                    "thumbnail": thumbnail,
+                    "duration": duration_text,
+                    "platform": "TikTok",
+                    "qualities": qualities,
+                    "audio_formats": audio_formats,
+                    "_tikwm_data": data,
+                }
+        except Exception as exc:
+            print(f"DEBUG: TikWM extraction failed: {exc}", flush=True)
+
+        # 2. Fallback to Cobalt API instances
+        for instance in self.COBALT_INSTANCES:
+            try:
+                def call_cobalt():
+                    payload = json.dumps({
+                        "url": url,
+                        "downloadMode": "auto",
+                        "videoQuality": "1080",
+                        "tiktokFullAudio": False,
+                        "disableMetadata": False,
+                    }).encode("utf-8")
+                    cob_req = urllib.request.Request(
+                        instance,
+                        data=payload,
+                        headers={
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                            "User-Agent": "Mozilla/5.0",
+                        }
+                    )
+                    with urllib.request.urlopen(cob_req, timeout=8) as resp:
+                        return json.loads(resp.read().decode("utf-8"))
+
+                c_res = await asyncio.to_thread(call_cobalt)
+                if c_res.get("status") in ("redirect", "tunnel") and c_res.get("url"):
+                    return {
+                        "title": "TikTok Video",
+                        "thumbnail": None,
+                        "duration": None,
+                        "platform": "TikTok",
+                        "qualities": [{"id": "cobalt_nowm", "label": "1080p HD (No Watermark)", "ext": "mp4", "url": c_res["url"]}],
+                        "audio_formats": [{"id": "audio", "label": "Audio", "ext": "mp3"}],
+                        "_cobalt_url": c_res["url"],
+                    }
+            except Exception:
+                continue
+
+        # 3. Fallback to yt-dlp
+        raise RuntimeError("TikTok scraper fallback to yt-dlp.")
+
+    async def download(self, state: DownloadState, target_dir: Path, manager: Any) -> None:
+        import urllib.request
+        from pathlib import Path
+        import shutil
+
+        stream_url = None
+        is_audio = state.download_type == DownloadType.audio
+        info = None
+        try:
+            info = await self.extract(state.url)
+        except Exception:
+            pass
+
+        if info:
+            if is_audio and info.get("audio_formats") and info["audio_formats"][0].get("url"):
+                stream_url = info["audio_formats"][0]["url"]
+            elif info.get("qualities"):
+                for q in info["qualities"]:
+                    if q.get("url"):
+                        stream_url = q["url"]
+                        break
+
+        # Check if it's photo slide images
+        if info and info.get("_tikwm_data") and info["_tikwm_data"].get("images") and not is_audio:
+            images = info["_tikwm_data"]["images"]
+            total = len(images)
+            title = sanitize_filename(info.get("title") or "tiktok_photos")
+            last_fname = ""
+            for idx, img_url in enumerate(images):
+                if state.cancel_requested or state.pause_requested:
+                    break
+                fname = f"{title}_{idx+1:02d}.jpg"
+                fpath = ensure_inside(target_dir, target_dir / fname)
+                req = urllib.request.Request(img_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    with open(fpath, "wb") as f:
+                        shutil.copyfileobj(resp, f)
+                state.progress = int(((idx + 1) / total) * 100)
+                await manager._publish(state)
+                last_fname = fname
+            if last_fname:
+                state.filename = last_fname
+                state.file_url = f"/files/{state.download_id}/{last_fname}"
+                state.progress = 100
+                return
+
+        if not stream_url:
+            # Fallback to standard yt-dlp run with preferred no-watermark API
+            await manager._run_ytdlp_once(
+                state=state,
+                target_dir=target_dir,
+                download_type=state.download_type,
+                quality=state.quality,
+                prefer_tiktok_no_watermark=True,
+            )
+            produced = manager._find_produced_file(target_dir, state.download_type)
+            title = sanitize_filename(produced.stem)
+            ext = "mp3" if is_audio else "mp4"
+            final_path = ensure_inside(target_dir, target_dir / f"{title}.{ext}")
+            if produced.resolve() != final_path.resolve():
+                produced.replace(final_path)
+            state.filename = final_path.name
+            state.file_url = f"/files/{state.download_id}/{final_path.name}"
+            return
+
+        # Direct streaming download with progress updates
+        title = sanitize_filename((info and info.get("title")) or "tiktok_video")
+        ext = "mp3" if is_audio else "mp4"
+        filename = f"{title}.{ext}"
+        final_path = ensure_inside(target_dir, target_dir / filename)
+
+        req = urllib.request.Request(
+            stream_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer": "https://www.tiktok.com/",
+            }
+        )
+
+        loop = asyncio.get_running_loop()
+
+        def stream_file():
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                content_length = resp.headers.get("Content-Length")
+                total_size = int(content_length) if content_length else 0
+                bytes_downloaded = 0
+                chunk_size = 1024 * 64
+
+                def update_prog(p):
+                    state.progress = p
+                    asyncio.run_coroutine_threadsafe(manager._publish(state), loop)
+
+                with open(final_path, "wb") as f:
+                    while True:
+                        if state.cancel_requested or state.pause_requested:
+                            break
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        bytes_downloaded += len(chunk)
+                        if total_size > 0:
+                            p = int((bytes_downloaded / total_size) * 100)
+                            if p != state.progress:
+                                update_prog(p)
+
+                if not (state.cancel_requested or state.pause_requested):
+                    state.filename = filename
+                    state.file_url = f"/files/{state.download_id}/{filename}"
+                    state.progress = 100
+                    update_prog(100)
+
+        await asyncio.to_thread(stream_file)
+
+
 def _build_cookie_opener() -> urllib.request.OpenerDirector | None:
     if not settings.resolved_cookies_file:
         return None
@@ -177,7 +425,7 @@ class DownloadManager:
         self.states: dict[str, DownloadState] = {}
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_downloads)
-        self.scrapers: list[BaseScraper] = [DirectMediaScraper()]
+        self.scrapers: list[BaseScraper] = [DirectMediaScraper(), TikTokScraper()]
 
     async def extract(self, url: str) -> dict[str, Any]:
         validate_public_url(url)
@@ -185,8 +433,13 @@ class DownloadManager:
         for scraper in self.scrapers:
             if scraper.can_handle(url):
                 try:
-                    return await scraper.extract(url)
-                except Exception:
+                    res = await scraper.extract(url)
+                    if res and res.get("title"):
+                        validate_not_adult_content(res["title"])
+                    return res
+                except Exception as e:
+                    if "المحتوى الإباحي" in str(e) or "Adult" in str(e):
+                        raise
                     pass
 
         import urllib.parse
@@ -211,13 +464,18 @@ class DownloadManager:
         if "instagram.com" in host or "facebook.com" in host or "fb.watch" in host:
             image_info = await self._extract_image_metadata(url, parsed.netloc)
             if image_info is not None:
+                if image_info.get("title"):
+                    validate_not_adult_content(image_info["title"])
                 return image_info
             if self._is_facebook_photo_url(url):
                 raise ValueError("This Facebook photo is not public or requires login.")
 
         def run() -> dict[str, Any]:
             with YoutubeDL(self._base_ydl_options(skip_download=True)) as ydl:
-                return ydl.extract_info(url, download=False)
+                info_res = ydl.extract_info(url, download=False)
+                if info_res and info_res.get("title"):
+                    validate_not_adult_content(info_res["title"])
+                return info_res
 
         try:
             return await asyncio.to_thread(run)
@@ -308,6 +566,8 @@ class DownloadManager:
         except ImportError:
             pass
 
+        node_path = "/usr/local/bin/node" if Path("/usr/local/bin/node").exists() else (shutil.which("node") or "/usr/local/bin/node")
+
         opts: dict[str, Any] = {
             "quiet": True,
             "skip_download": skip_download,
@@ -324,26 +584,17 @@ class DownloadManager:
                 ),
                 "Accept-Language": "en-US,en;q=0.9",
             },
-            # YouTube hands out its stream URLs behind a JavaScript challenge,
-            # and yt-dlp needs a JS runtime to solve it. It enables only `deno`
-            # by default and this image does not ship one, so every YouTube
-            # download failed at the last step with `HTTP Error 403: Forbidden`
-            # after appearing to start — extraction succeeded and only the media
-            # fetch was refused, which is why it read as a network problem
-            # rather than a missing dependency.
-            #
-            # Node is already in the image for the PO token provider. Pointed at
-            # by path rather than trusting PATH, because it is copied in from
-            # another build stage rather than installed by the package manager.
-            "js_runtimes": {"node": {"path": "/usr/local/bin/node"}},
-            # Do not force a particular YouTube player client here. yt-dlp's
-            # current defaults choose the most compatible clients for each
-            # video, while the local bgutil provider supplies PO tokens when a
-            # selected client needs one. Forcing mweb worked for many Shorts
-            # but made regular watch pages more likely to hit bot checks.
+            "js_runtimes": {"node": {"path": node_path}},
             "extractor_args": {
                 "youtubepot-bgutilhttp": {
                     "base_url": "http://localhost:4416"
+                },
+                "youtube": {
+                    "player_client": ["android", "ios", "web", "mweb"]
+                },
+                "tiktok": {
+                    "api_hostname": "api16-va.tiktokv.com",
+                    "app_version": "35.1.3"
                 }
             }
         }
@@ -903,10 +1154,15 @@ class DownloadManager:
                 args.extend(["--cookies", settings.resolved_cookies_file])
         if download_type == DownloadType.video:
             args.extend(["--merge-output-format", "mp4"])
-        if prefer_tiktok_no_watermark:
+        if "youtube.com" in state.url.lower() or "youtu.be" in state.url.lower():
             args.extend([
                 "--extractor-args",
-                "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com",
+                "youtubepot-bgutilhttp:base_url=http://localhost:4416;youtube:player_client=android,ios,web,mweb",
+            ])
+        elif prefer_tiktok_no_watermark or "tiktok.com" in state.url.lower() or "douyin.com" in state.url.lower():
+            args.extend([
+                "--extractor-args",
+                "tiktok:api_hostname=api16-va.tiktokv.com;tiktok:app_version=35.1.3",
             ])
         if download_type == DownloadType.audio:
             args.extend(["-x", "--audio-format", "mp3", "--audio-quality", "192K"])

@@ -19,12 +19,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.ad_reports import (  # noqa: E402
     MAX_DETAILS,
     MAX_FIELD,
+    MAX_SCREENSHOT_BYTES,
     REASONS,
     append,
     build_record,
+    image_extension,
     normalise_reason,
+    save_screenshot,
     summarise,
 )
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+GIF = b"GIF89a" + b"\x00" * 64
+WEBP = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 64
 
 
 class TestReason:
@@ -184,3 +192,67 @@ class TestStorage:
         assert len(lines) == 40
         for line in lines:
             json.loads(line)
+
+
+class TestScreenshots:
+    @pytest.mark.parametrize(
+        "data,expected",
+        [(PNG, "png"), (JPG, "jpg"), (GIF, "gif"), (WEBP, "webp")],
+    )
+    def test_real_images_are_recognised_by_their_bytes(self, data, expected):
+        assert image_extension(data) == expected
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            b"PK\x03\x04" + b"\x00" * 40,          # a zip
+            b"%PDF-1.7" + b"\x00" * 40,              # a pdf
+            b"#!/bin/sh\nrm -rf /",                  # a script
+            b"<?php system($_GET[0]); ?>",           # a web shell
+            b"",
+            b"\x89PN",                               # a truncated header
+        ],
+    )
+    def test_anything_that_is_not_an_image_is_refused(self, data):
+        # The browser reports whatever the file is named, so a .jpg that is
+        # really a zip arrives claiming to be an image. The first bytes cannot
+        # lie about it.
+        assert image_extension(data) is None
+
+    def test_a_disguised_file_cannot_be_saved(self, tmp_path):
+        with pytest.raises(ValueError):
+            save_screenshot(b"PK\x03\x04 not an image", "abc123", tmp_path)
+        assert not (tmp_path / "screenshots").exists() or not list(
+            (tmp_path / "screenshots").iterdir()
+        )
+
+    def test_oversized_images_are_refused(self, tmp_path):
+        too_big = PNG + b"\x00" * MAX_SCREENSHOT_BYTES
+        with pytest.raises(ValueError):
+            save_screenshot(too_big, "abc123", tmp_path)
+
+    def test_the_stored_name_comes_from_us_not_from_the_upload(self, tmp_path):
+        # An uploaded filename is attacker-controlled and has no business
+        # becoming a path.
+        name = save_screenshot(PNG, "deadbeef", tmp_path)
+        assert name == "deadbeef.png"
+        assert (tmp_path / "screenshots" / name).exists()
+
+    def test_a_report_records_only_the_filename(self, tmp_path):
+        name = save_screenshot(JPG, "feedface", tmp_path)
+        record = build_record(
+            reason="scam", details=None, ad_format=None, app_version=None,
+            platform=None, locale=None, seen_at=None, screenshot=name,
+        )
+        # So reading the log does not mean loading megabytes of image with it.
+        assert record["screenshot"] == "feedface.jpg"
+        assert len(record["screenshot"]) < 100
+
+    def test_a_report_without_a_screenshot_is_still_valid(self, tmp_path):
+        record = build_record(
+            reason="sexual", details=None, ad_format=None, app_version=None,
+            platform=None, locale=None, seen_at=None,
+        )
+        append(record, tmp_path)
+        assert summarise(tmp_path)["total"] == 1
+        assert summarise(tmp_path)["recent"][0]["screenshot"] is None

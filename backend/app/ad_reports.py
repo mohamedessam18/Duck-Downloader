@@ -25,6 +25,20 @@ from typing import Any, Optional
 MAX_DETAILS = 2000
 MAX_FIELD = 200
 
+# One screenshot, and a ceiling a phone screenshot never reaches. Bigger than
+# this is not evidence, it is someone using the endpoint as a disk.
+MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024
+
+# Magic bytes, not the Content-Type header. The browser reports whatever the
+# file is named, so a .jpg that is really a zip arrives claiming to be an
+# image; the first bytes cannot lie about it.
+_IMAGE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", "jpg"),
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+)
+
 # What a report may be about. Anything else is rejected rather than stored as
 # free text, so the reports can be counted by reason without cleaning them up
 # first.
@@ -39,6 +53,20 @@ REASONS = (
 )
 
 _write_lock = threading.Lock()
+
+
+def image_extension(data: bytes) -> Optional[str]:
+    """The image type these bytes actually are, or None.
+
+    WebP needs its own check because the signature is split: "RIFF", four
+    bytes of length, then "WEBP".
+    """
+    for signature, extension in _IMAGE_SIGNATURES:
+        if data.startswith(signature):
+            return extension
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
 
 
 def _clean(value: Optional[str], limit: int = MAX_FIELD) -> Optional[str]:
@@ -70,6 +98,7 @@ def build_record(
     platform: Optional[str],
     locale: Optional[str],
     seen_at: Optional[str],
+    screenshot: Optional[str] = None,
 ) -> dict[str, Any]:
     """Shapes one report.
 
@@ -88,7 +117,29 @@ def build_record(
         "platform": _clean(platform, 80),
         "locale": _clean(locale, 20),
         "seen_at": _clean(seen_at, 40),
+        # Filename only. The bytes live next to the log, so a report can be
+        # read without loading five megabytes of image with it.
+        "screenshot": _clean(screenshot, 80),
     }
+
+
+def save_screenshot(data: bytes, report_id: str, reports_dir: Path) -> str:
+    """Writes one screenshot beside the log and returns its filename.
+
+    Named after the report rather than after whatever the phone called it: an
+    uploaded name is attacker-controlled and has no business becoming a path.
+    """
+    extension = image_extension(data)
+    if extension is None:
+        raise ValueError("That file is not an image.")
+    if len(data) > MAX_SCREENSHOT_BYTES:
+        raise ValueError("That image is too large.")
+
+    folder = reports_dir / "screenshots"
+    folder.mkdir(parents=True, exist_ok=True)
+    filename = f"{report_id}.{extension}"
+    (folder / filename).write_bytes(data)
+    return filename
 
 
 def append(record: dict[str, Any], storage_dir: Path) -> None:

@@ -1,6 +1,14 @@
+from __future__ import annotations
 from pathlib import Path
-from pydantic import BaseModel
 import os
+
+try:
+    from pydantic import BaseModel
+except ImportError:
+    class BaseModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
 
 
 def default_public_base_url() -> str:
@@ -25,6 +33,24 @@ class Settings(BaseModel):
     # everyone, including you — complaints written by users are not something
     # to publish by leaving a default in the code.
     ad_reports_token: str = os.getenv("DUCK_AD_REPORTS_TOKEN", "")
+
+    # Where ad reports and their screenshots live.
+    #
+    # Deliberately not storage_dir. That points at /tmp on the deployed image,
+    # which is right for downloads — they are temporary by nature and a wipe
+    # costs nothing. Reports are the opposite: their whole value is that they
+    # accumulate until the same complaint appears often enough to name an
+    # advertiser, and a redeploy resetting the count destroys exactly that.
+    #
+    # Point this at a mounted volume in production. It falls back to a folder
+    # under storage_dir so local runs and tests need no setup.
+    reports_dir_override: str = os.getenv("DUCK_REPORTS_DIR", "")
+
+    @property
+    def reports_dir(self) -> Path:
+        if self.reports_dir_override:
+            return Path(self.reports_dir_override)
+        return self.storage_dir / "reports"
 
     @property
     def resolved_cookies_file(self) -> str | None:

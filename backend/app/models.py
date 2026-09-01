@@ -1,5 +1,18 @@
+from __future__ import annotations
 from enum import Enum
-from pydantic import BaseModel, Field, HttpUrl
+
+try:
+    from pydantic import BaseModel, Field, HttpUrl
+except ImportError:
+    class BaseModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+        def model_dump(self, *args, **kwargs):
+            return self.__dict__
+    def Field(default=None, **kwargs):
+        return default
+    HttpUrl = str
 
 
 class DownloadType(str, Enum):

@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
@@ -10,6 +11,7 @@ import asyncio
 from pathlib import Path
 
 from .config import settings
+from .security import ensure_inside
 from . import ad_reports
 from .downloads import download_manager, map_extract_response
 from .models import (
@@ -120,6 +122,8 @@ def public_error(exc: Exception) -> str:
     message = str(exc).strip()
     if not message:
         message = f"{type(exc).__name__}: backend failed while processing this request."
+    if "المحتوى الإباحي" in message or "Adult" in message or "sexually explicit" in message:
+        return "المحتوى الإباحي غير مدعوم نهائياً في هذا التطبيق / Adult and sexually explicit content is strictly not supported."
     if "full-size Instagram image" in message:
         return message
     if "Sign in to confirm" in message or "not a bot" in message:
@@ -353,28 +357,53 @@ async def trim_file(body: TrimRequest) -> TrimResponse:
 
 @app.post("/api/ad-report", response_model=AdReportResponse, tags=["Ad Reports"])
 @limiter.limit("6/minute")
-async def submit_ad_report(request: Request, body: AdReportRequest) -> AdReportResponse:
-    """Records a user's report about an ad.
+async def submit_ad_report(
+    request: Request,
+    reason: str = Form(...),
+    details: str | None = Form(None),
+    adFormat: str | None = Form(None),
+    appVersion: str | None = Form(None),
+    platform: str | None = Form(None),
+    locale: str | None = Form(None),
+    seenAt: str | None = Form(None),
+    screenshot: UploadFile | None = File(None),
+) -> AdReportResponse:
+    """Records a user's report about an ad, with an optional screenshot.
 
-    This is the developer's own record, not a channel to Google — AdMob has
-    its own reporting on the ad itself. The value here is seeing the same
-    complaint arrive repeatedly and having something concrete to act on in the
-    AdMob console.
+    Multipart rather than JSON because of the file. This is the developer's
+    own record and not a channel to Google — AdMob has its own reporting on
+    the ad itself, which the page says plainly before anyone submits.
 
-    Rate limited hard: there is nothing to gain from submitting a hundred of
-    these, and an open write endpoint is an invitation.
+    Rate limited hard: there is nothing to gain from sending a hundred of
+    these, and an open write endpoint that accepts files is an invitation.
     """
     record = ad_reports.build_record(
-        reason=body.reason,
-        details=body.details,
-        ad_format=body.adFormat,
-        app_version=body.appVersion,
-        platform=body.platform,
-        locale=body.locale,
-        seen_at=body.seenAt,
+        reason=reason,
+        details=details,
+        ad_format=adFormat,
+        app_version=appVersion,
+        platform=platform,
+        locale=locale,
+        seen_at=seenAt,
     )
+
+    if screenshot is not None:
+        data = await screenshot.read(ad_reports.MAX_SCREENSHOT_BYTES + 1)
+        if data:
+            try:
+                record["screenshot"] = ad_reports.save_screenshot(
+                    data, record["id"], settings.reports_dir
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=413, detail=str(exc)) from exc
+            except Exception as exc:
+                # A screenshot that will not save must not lose the report it
+                # came with — the words are the part worth keeping.
+                record["screenshot"] = None
+                print(f"ad-report screenshot failed: {exc}", flush=True)
+
     try:
-        ad_reports.append(record, settings.storage_dir)
+        ad_reports.append(record, settings.reports_dir)
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Could not save the report.") from exc
     return AdReportResponse(accepted=True, id=record["id"])
@@ -391,7 +420,24 @@ async def read_ad_reports(request: Request, token: str = "") -> dict:
     expected = settings.ad_reports_token
     if not expected or token != expected:
         raise HTTPException(status_code=404, detail="Not found.")
-    return ad_reports.summarise(settings.storage_dir)
+    return ad_reports.summarise(settings.reports_dir)
+
+
+@app.get("/api/ad-report/screenshot/{name}", tags=["Ad Reports"])
+async def read_ad_screenshot(request: Request, name: str, token: str = ""):
+    """Serves one screenshot. Owner only, same token."""
+    expected = settings.ad_reports_token
+    if not expected or token != expected:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    folder = (settings.reports_dir / "screenshots").resolve()
+    try:
+        path = ensure_inside(folder, folder / name)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="Not found.") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found.")
+    return FileResponse(path)
 
 
 @app.websocket("/ws/download/{download_id}")

@@ -26,7 +26,7 @@ export default function ReportAdPage() {
   return (
     <>
       <Nav />
-      <main className="page">
+      <main>
         <PageHead
           eyebrow="Ads"
           title="Report an ad"
@@ -34,13 +34,38 @@ export default function ReportAdPage() {
         />
 
         <Reveal>
-          <section className="panel report-panel">
+          <section className="wrap section-tight report-hero">
+            <div>
+              <p>
+                Every ad here is sold by Google, not chosen by us — which is why
+                a bad one can appear without anyone noticing until someone says
+                so. That someone is you.
+              </p>
+              <p>
+                Tell us which ad and why, and it becomes possible to block that
+                advertiser for everyone.
+              </p>
+            </div>
+            {/* The only picture on the page, and it does a paragraph's work:
+                this is about that rectangle, not the app around it. */}
+            <div className="report-phone" aria-hidden="true">
+              <div className="row w70" />
+              <div className="row w45" />
+              <div className="thumb" />
+              <div className="row w70" />
+              <div className="report-slot">the ad</div>
+            </div>
+          </section>
+        </Reveal>
+
+        <Reveal>
+          <section className="wrap section-tight">
             <ReportForm />
           </section>
         </Reveal>
 
         <Reveal>
-          <section className="panel report-explain">
+          <section className="wrap section-tight report-explain">
             <h2>
               <MegaphoneSimpleIcon size={19} weight="fill" />
               What happens to this
