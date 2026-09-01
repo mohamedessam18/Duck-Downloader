@@ -447,12 +447,32 @@ class MetaPostService {
   }
 }
 
+/// Everything the last-resort tier needs to identify one post.
+class MetaPageRequest {
+  const MetaPageRequest({
+    required this.postUrl,
+    required this.mediaId,
+    required this.appId,
+    required this.shortcode,
+  });
+
+  final String postUrl;
+  final BigInt mediaId;
+
+  /// The app id belonging to [postUrl]'s host. The two sites do not share one.
+  final String appId;
+
+  /// Which post to take out of the page.
+  ///
+  /// Load-bearing: a Threads post page embeds eighteen media objects, only one
+  /// of which is the post that was asked for. The rest are "related posts",
+  /// and taking the first thing that looks like media downloads somebody
+  /// else's.
+  final String shortcode;
+}
+
 /// Fetches the media JSON for one post, from inside a real page.
-///
-/// The app id travels with it: the page runs the same request the site's own
-/// front end does, and the two sites do not share an id.
-typedef MetaPageReader =
-    Future<String?> Function(String postUrl, BigInt mediaId, String appId);
+typedef MetaPageReader = Future<String?> Function(MetaPageRequest request);
 
 extension MetaPageFallback on MetaPostService {
   /// Last resort: ask Instagram's own page to fetch the post for us.
@@ -487,9 +507,12 @@ extension MetaPageFallback on MetaPostService {
     // the fetch inherits *that* origin's cookies. Opening an Instagram page to
     // read a Threads post would send the request as the wrong site.
     final body = await pageReader(
-      MetaPostService.canonicalPostUrl(platform, shortcode),
-      mediaId,
-      MetaPostService.appIdFor(platform),
+      MetaPageRequest(
+        postUrl: MetaPostService.canonicalPostUrl(platform, shortcode),
+        mediaId: mediaId,
+        appId: MetaPostService.appIdFor(platform),
+        shortcode: shortcode,
+      ),
     );
     if (body == null || body.trim().isEmpty) {
       throw MetaAuthRequired(
@@ -512,56 +535,6 @@ extension MetaPageFallback on MetaPostService {
       );
     }
     return post;
-  }
-}
-
-/// Loads the post in an offscreen WebView and calls the media API from it.
-Future<String?> readThroughPage(
-  String postUrl,
-  BigInt mediaId,
-  String appId,
-) async {
-  final loaded = Completer<void>();
-  final headless = HeadlessInAppWebView(
-    initialUrlRequest: URLRequest(url: WebUri(postUrl)),
-    initialSettings: InAppWebViewSettings(
-      javaScriptEnabled: true,
-      domStorageEnabled: true,
-      thirdPartyCookiesEnabled: true,
-      // The same plain Chrome string the sign-in screen uses. A WebView that
-      // announces itself as one is served a degraded page.
-      userAgent:
-          'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
-          '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
-    ),
-    onLoadStop: (_, _) {
-      if (!loaded.isCompleted) loaded.complete();
-    },
-    onReceivedError: (_, _, _) {
-      if (!loaded.isCompleted) loaded.complete();
-    },
-  );
-
-  try {
-    await headless.run();
-    await loaded.future.timeout(const Duration(seconds: 20));
-
-    final result = await headless.webViewController?.callAsyncJavaScript(
-      functionBody:
-          'const response = await fetch("/api/v1/media/" + mediaId + "/info/", {'
-          '  headers: { "X-IG-App-ID": appId },'
-          '  credentials: "include",'
-          '});'
-          'if (!response.ok) return null;'
-          'return await response.text();',
-      arguments: {'mediaId': mediaId.toString(), 'appId': appId},
-    );
-    if (result?.error != null) return null;
-    return result?.value?.toString();
-  } on TimeoutException {
-    return null;
-  } finally {
-    await headless.dispose();
   }
 }
 
@@ -623,3 +596,102 @@ Future<String?> resolveThroughPage(String shareUrl) async {
     await headless.dispose();
   }
 }
+
+/// The last resort: open the post offscreen and take the media out of it.
+///
+/// Two ways, in one trip, because the two sites do not answer the same way.
+///
+/// The first is the media API called from inside the page, which inherits the
+/// page's origin, cookies and headers — the request Instagram's own front end
+/// makes.
+///
+/// The second is the page's own data. A Threads post page ships the media as
+/// JSON in its script tags, in the same shape the API returns, and a public
+/// post carries it with no session at all. That matters more than it sounds:
+/// no library reads Threads — yt-dlp has had an open request since 2023 and
+/// gallery-dl does not list it — so there is nothing to fall back on, and the
+/// page is the only thing Meta cannot quietly change the shape of without
+/// breaking its own site.
+///
+/// The node is matched on its `code`. A post page embeds around eighteen media
+/// objects and only one of them is the post that was asked for; the rest are
+/// related posts, so taking the first match downloads a stranger's.
+Future<String?> readThroughPage(MetaPageRequest request) async {
+  final loaded = Completer<void>();
+  final headless = HeadlessInAppWebView(
+    initialUrlRequest: URLRequest(url: WebUri(request.postUrl)),
+    initialSettings: InAppWebViewSettings(
+      javaScriptEnabled: true,
+      domStorageEnabled: true,
+      thirdPartyCookiesEnabled: true,
+      userAgent:
+          'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    ),
+    onLoadStop: (_, _) {
+      if (!loaded.isCompleted) loaded.complete();
+    },
+    onReceivedError: (_, _, _) {
+      if (!loaded.isCompleted) loaded.complete();
+    },
+  );
+
+  try {
+    await headless.run();
+    await loaded.future.timeout(const Duration(seconds: 20));
+
+    final result = await headless.webViewController?.callAsyncJavaScript(
+      functionBody: _pageExtractor,
+      arguments: {
+        'mediaId': request.mediaId.toString(),
+        'appId': request.appId,
+        'code': request.shortcode,
+      },
+    );
+    if (result?.error != null) return null;
+    final value = result?.value?.toString().trim() ?? '';
+    return value.isEmpty || value == 'null' ? null : value;
+  } on TimeoutException {
+    return null;
+  } finally {
+    await headless.dispose();
+  }
+}
+
+/// Runs inside the post's own page. Returns `{"items":[node]}` or null.
+const _pageExtractor = r'''
+  const wanted = (obj) =>
+    obj && typeof obj === "object" &&
+    (obj.image_versions2 || obj.video_versions || obj.carousel_media);
+
+  // 1. The request the site's own front end makes.
+  try {
+    const response = await fetch("/api/v1/media/" + mediaId + "/info/", {
+      headers: { "X-IG-App-ID": appId },
+      credentials: "include",
+    });
+    if (response.ok) {
+      const text = await response.text();
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.items && parsed.items.length) return text;
+    }
+  } catch (e) {}
+
+  // 2. The data the page was rendered from. Bounded so a deep graph cannot
+  //    spin here; the post's own node sits near the top of it.
+  let budget = 200000;
+  for (const script of document.querySelectorAll('script[type="application/json"]')) {
+    let data;
+    try { data = JSON.parse(script.textContent); } catch (e) { continue; }
+    const stack = [data];
+    while (stack.length && budget-- > 0) {
+      const node = stack.pop();
+      if (!node || typeof node !== "object") continue;
+      if (node.code === code && wanted(node)) {
+        return JSON.stringify({ items: [node] });
+      }
+      for (const key in node) stack.push(node[key]);
+    }
+  }
+  return null;
+''';

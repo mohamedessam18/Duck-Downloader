@@ -72,7 +72,7 @@ void main() {
           },
         );
       });
-      return MetaPostService(dio: dio, pageReader: (_, _, _) async => null);
+      return MetaPostService(dio: dio, pageReader: (_) async => null);
     }
 
     test('a Threads post is asked for on threads.com, with its own id', () async {
@@ -197,7 +197,7 @@ void main() {
     test('a failed link says which part it could not read', () async {
       // "Does not point at a post" was unactionable for the user and
       // undiagnosable from a bug report.
-      final service = MetaPostService(pageReader: (_, _, _) async => null);
+      final service = MetaPostService(pageReader: (_) async => null);
       await expectLater(
         service.fetchPost('https://www.threads.com/@zuck'),
         throwsA(
@@ -356,7 +356,7 @@ test('each site is sent its own app id', () {
       var asked = '';
       final service = MetaPostService(
         dio: dio,
-        pageReader: (_, _, _) async => null,
+        pageReader: (_) async => null,
         linkResolver: (shareUrl) async {
           asked = shareUrl;
           return postA;
@@ -373,7 +373,7 @@ test('each site is sent its own app id', () {
 
     test('an unresolvable share link says what to do instead', () async {
       final service = MetaPostService(
-        pageReader: (_, _, _) async => null,
+        pageReader: (_) async => null,
         linkResolver: (_) async => null,
       );
       await expectLater(
@@ -403,7 +403,7 @@ test('each site is sent its own app id', () {
       );
       final service = MetaPostService(
         dio: dio,
-        pageReader: (_, _, _) async => null,
+        pageReader: (_) async => null,
         linkResolver: (_) async {
           resolverRan = true;
           return null;
@@ -412,6 +412,106 @@ test('each site is sent its own app id', () {
 
       await service.fetchPost(postA);
       expect(resolverRan, isFalse, reason: 'a browser trip for nothing');
+    });
+  });
+
+  group('reading a post out of its own page', () {
+    // Shaped like a real Threads page: the post that was asked for, sitting
+    // among the related posts that surround it.
+    String pageWith(String wantedCode) => jsonEncode({
+      'items': [
+        {
+          'code': wantedCode,
+          'media_type': 2,
+          'image_versions2': {
+            'candidates': [
+              {'url': 'https://cdn/cover.jpg', 'width': 1080, 'height': 1920},
+            ],
+          },
+          'video_versions': [
+            {'url': 'https://cdn/wanted.mp4', 'width': 1080, 'height': 1920},
+          ],
+        },
+      ],
+    });
+
+    test('the page reply goes through the same parser as the API', () async {
+      final service = MetaPostService(
+        pageReader: (request) async => pageWith(request.shortcode),
+        linkResolver: (_) async => null,
+      );
+      final post = await service.fetchPostFromPage(
+        'https://www.threads.com/@a/post/DcvLupWjoWV',
+      );
+
+      expect(post.items.single.isVideo, isTrue);
+      expect(post.items.single.url, 'https://cdn/wanted.mp4');
+      expect(post.items.single.thumbnail, 'https://cdn/cover.jpg');
+    });
+
+    test('the reader is told which post to take', () async {
+      // A Threads post page embeds around eighteen media objects and only one
+      // is the post that was asked for. Without the code, the reader would
+      // take whichever came first and download a stranger's post.
+      MetaPageRequest? seen;
+      final service = MetaPostService(
+        pageReader: (request) async {
+          seen = request;
+          return pageWith(request.shortcode);
+        },
+        linkResolver: (_) async => null,
+      );
+      await service.fetchPostFromPage(
+        'https://www.threads.com/@a/post/DcvLupWjoWV',
+      );
+
+      expect(seen!.shortcode, 'DcvLupWjoWV');
+      expect(seen!.postUrl, 'https://www.threads.com/t/DcvLupWjoWV');
+      expect(seen!.appId, '238260118697367');
+      expect(seen!.mediaId.toString(), '3976448580000843157');
+    });
+
+    test('an Instagram post asks Instagram, on its own page', () async {
+      MetaPageRequest? seen;
+      final service = MetaPostService(
+        pageReader: (request) async {
+          seen = request;
+          return pageWith(request.shortcode);
+        },
+        linkResolver: (_) async => null,
+      );
+      await service.fetchPostFromPage('https://www.instagram.com/p/DHqXk_ZSAWk/');
+
+      expect(seen!.postUrl, 'https://www.instagram.com/p/DHqXk_ZSAWk/');
+      expect(seen!.appId, '936619743392459');
+    });
+
+    test('a page with nothing in it is not a post', () async {
+      final service = MetaPostService(
+        pageReader: (_) async => null,
+        linkResolver: (_) async => null,
+      );
+      await expectLater(
+        service.fetchPostFromPage('https://www.threads.com/@a/post/DcvLupWjoWV'),
+        throwsA(isA<MetaAuthRequired>()),
+      );
+    });
+
+    test('a share link is resolved before the page is opened', () async {
+      String? opened;
+      final service = MetaPostService(
+        pageReader: (request) async {
+          opened = request.postUrl;
+          return pageWith(request.shortcode);
+        },
+        linkResolver: (_) async =>
+            'https://www.threads.com/@findsbyhadria/post/DcvLupWjoWV',
+      );
+      await service.fetchPostFromPage(
+        'https://www.threads.com/share/BAT3nujVYV/',
+      );
+
+      expect(opened, 'https://www.threads.com/t/DcvLupWjoWV');
     });
   });
 

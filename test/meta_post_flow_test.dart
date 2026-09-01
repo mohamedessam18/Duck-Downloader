@@ -36,7 +36,7 @@ MetaPost _post(List<MetaMedia> items) =>
 /// The device tier, with whatever answer a test needs.
 class _FakeMeta extends MetaPostService {
   _FakeMeta({this.post, this.error, String? pageBody})
-    : super(pageReader: ((_, _, _) async => pageBody));
+    : super(pageReader: ((_) async => pageBody));
 
   final MetaPost? post;
   final Object? error;
