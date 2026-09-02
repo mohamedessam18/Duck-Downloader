@@ -13,7 +13,11 @@ import 'package:duck_downloader/services/trim_service.dart';
 import 'package:duck_downloader/state/downloads_controller.dart';
 import 'package:duck_downloader/state/playback_session.dart';
 import 'package:duck_downloader/widgets/media/media_thumb.dart';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'duck_app_screen_test.dart';
 
@@ -21,13 +25,24 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late FakeBox box;
+  late Directory sandbox;
 
-  setUp(() {
+  // A fresh directory per test, not per file: folders are real directories,
+  // and one test's leftovers are the next one's name collision.
+  setUp(() async {
+    sandbox = await Directory.systemTemp.createTemp('duck-audio-queue-test');
+    PathProviderPlatform.instance = _FakePaths(sandbox.path);
     box = FakeBox();
   });
 
   tearDown(() async {
     await box.close();
+    // Best effort. A folder refresh the controller fired and did not await can
+    // still be writing here, and a failed cleanup of a temp directory is not
+    // something a test should fail on — the OS clears it either way.
+    try {
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    } catch (_) {}
   });
 
   DuckDownloadsController createController() {
@@ -45,6 +60,113 @@ void main() {
       initializePlatformServices: false,
     );
   }
+
+  group('filing files into folders', () {
+    DownloadItem file(String id, {String? folder}) => DownloadItem(
+      id: id,
+      url: 'https://example.com/$id',
+      title: id,
+      platform: 'Example',
+      type: DownloadType.video,
+      filePath: '/tmp/$id.mp4',
+      createdAt: DateTime.utc(2026),
+      status: DownloadStatus.completed,
+      progress: 100,
+      favorite: false,
+      folder: folder,
+    );
+
+    test('a filter narrows the library to one folder', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a', folder: 'Trips'));
+      await controller.debugPutDownload(file('b', folder: 'Work'));
+      await controller.debugPutDownload(file('c'));
+
+      expect(controller.viewed(controller.videos), hasLength(3));
+
+      controller.setFolderFilter('Trips');
+      expect(controller.viewed(controller.videos).map((e) => e.id), ['a']);
+
+      controller.setFolderFilter(null);
+      expect(controller.viewed(controller.videos), hasLength(3));
+    });
+
+    test('searching inside a folder searches that folder', () async {
+      // The filter narrows what you are looking at; the search is how you are
+      // looking at it. Applying them the other way round would search the
+      // whole library and then throw away the matches from elsewhere.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('cairo trip', folder: 'Trips'));
+      await controller.debugPutDownload(file('cairo work'));
+
+      controller.setFolderFilter('Trips');
+      controller.setLibraryQuery('cairo');
+
+      expect(
+        controller.viewed(controller.videos).map((e) => e.id),
+        ['cairo trip'],
+      );
+    });
+
+    test('counting a folder ignores what was deleted', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a', folder: 'Trips'));
+      await controller.debugPutDownload(file('b', folder: 'Trips'));
+      expect(controller.folderCount('Trips'), 2);
+
+      await controller.deleteDownload(
+        controller.videos.firstWhere((e) => e.id == 'b'),
+      );
+      expect(controller.folderCount('Trips'), 1);
+    });
+
+    test('renaming carries the rows with it', () async {
+      // The rows hold the name, so leaving them behind would empty the folder
+      // from the library's point of view while the files sat happily inside.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a', folder: 'Trips'));
+      await controller.createFolder('Trips');
+
+      await controller.renameFolder('Trips', 'Holidays');
+
+      expect(controller.folderCount('Trips'), 0);
+      expect(controller.folderCount('Holidays'), 1);
+    });
+
+    test('a filter follows its folder through a rename', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.createFolder('Trips');
+      controller.setFolderFilter('Trips');
+      await controller.renameFolder('Trips', 'Holidays');
+
+      expect(controller.folderFilter, 'Holidays');
+    });
+
+    test('deleting a folder keeps the files', () async {
+      // Deleting a folder is a filing decision, not a request to lose files.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a', folder: 'Trips'));
+      await controller.createFolder('Trips');
+
+      await controller.deleteFolder('Trips');
+
+      expect(controller.videos.map((e) => e.id), ['a']);
+      expect(controller.videos.single.folder, isNull);
+      expect(controller.folderFilter, isNull);
+    });
+  });
 
   group('acting on several files at once', () {
     DownloadItem file(String id) => DownloadItem(
@@ -757,4 +879,18 @@ void main() {
     );
     expect(controller.busy, isFalse);
   });
+}
+
+/// Points path_provider at a temp directory, so the folder and trash paths
+/// resolve to somewhere a test is allowed to write.
+class _FakePaths extends PathProviderPlatform with MockPlatformInterfaceMixin {
+  _FakePaths(this.root);
+  final String root;
+
+  @override
+  Future<String?> getApplicationDocumentsPath() async => root;
+  @override
+  Future<String?> getTemporaryPath() async => root;
+  @override
+  Future<String?> getApplicationSupportPath() async => root;
 }

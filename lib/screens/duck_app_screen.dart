@@ -2601,6 +2601,13 @@ class _LibraryViewState extends State<_LibraryView> {
                   },
           ),
           IconButton(
+            tooltip: l10n.translate('folderMoveTo'),
+            icon: Icon(Icons.drive_file_move_outline, color: _gold, size: 20),
+            onPressed: picked.isEmpty
+                ? null
+                : () => _showMoveToFolderSheet(context, picked),
+          ),
+          IconButton(
             tooltip: l10n.translate('trashDeleteNow'),
             icon: const Icon(
               Icons.delete_outline,
@@ -2617,6 +2624,253 @@ class _LibraryViewState extends State<_LibraryView> {
         ],
       ),
     );
+  }
+
+  /// The user's own folders, as a row of filters.
+  ///
+  /// Shown only once one exists. A row of chips holding nothing but "All
+  /// files" is a control that explains a feature the user has not used, in the
+  /// space where their files should be.
+  Widget _buildFolderChips(BuildContext context) {
+    if (_subTab != _LibrarySubTab.all && _subTab != _LibrarySubTab.favorites) {
+      return const SizedBox.shrink();
+    }
+    final folders = widget.controller.userFolders;
+    if (folders.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context);
+    final active = widget.controller.folderFilter;
+
+    return SizedBox(
+      height: 46,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(top: 10),
+        children: [
+          _folderChip(
+            label: l10n.translate('folderAll'),
+            selected: active == null,
+            onTap: () => widget.controller.setFolderFilter(null),
+          ),
+          for (final folder in folders)
+            _folderChip(
+              label: '$folder · ${widget.controller.folderCount(folder)}',
+              selected: active == folder,
+              onTap: () => widget.controller.setFolderFilter(folder),
+              onLongPress: () => _showFolderMenu(context, folder),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _folderChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    VoidCallback? onLongPress,
+  }) {
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(end: 8),
+      child: GestureDetector(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? _gold : _panel,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: selected ? _gold : _border),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? const Color(0xFF101112) : _text,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Rename or remove, on a long press — the two things a folder itself needs.
+  Future<void> _showFolderMenu(BuildContext context, String folder) async {
+    final l10n = AppLocalizations.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(Icons.drive_file_rename_outline, color: _gold),
+              title: Text(
+                l10n.translate('folderRename'),
+                style: TextStyle(color: _text),
+              ),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                final name = await _promptFolderName(
+                  context,
+                  l10n,
+                  initial: folder,
+                );
+                if (name == null) return;
+                await widget.controller.renameFolder(folder, name);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_delete_outlined, color: _danger),
+              title: Text(
+                l10n.translate('folderDelete'),
+                style: const TextStyle(color: _danger),
+              ),
+              subtitle: Text(
+                // Said before the tap, not after. Deleting a folder is a
+                // filing decision, and nobody should have to find out by
+                // trying it that their files survived.
+                l10n.translate('folderDeleteBody'),
+                style: TextStyle(color: _textMuted, fontSize: 12),
+              ),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                await widget.controller.deleteFolder(folder);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Where to put the files that are picked.
+  ///
+  /// Making a folder lives in the same sheet as choosing one, because "I want
+  /// these in a new folder" is one thought, and sending someone elsewhere to
+  /// create it first breaks it in half.
+  Future<void> _showMoveToFolderSheet(
+    BuildContext context,
+    List<DownloadItem> picked,
+  ) async {
+    final l10n = AppLocalizations.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Icon(Icons.create_new_folder_outlined, color: _gold),
+                title: Text(
+                  l10n.translate('folderNew'),
+                  style: TextStyle(color: _text, fontWeight: FontWeight.w700),
+                ),
+                onTap: () async {
+                  final name = await _promptFolderName(context, l10n);
+                  if (name == null) return;
+                  final created = await widget.controller.createFolder(name);
+                  if (created == null) return;
+                  await widget.controller.moveManyToFolder(picked, created);
+                  if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+                  _clearSelection();
+                },
+              ),
+              Divider(height: 1, color: _divider),
+              ListTile(
+                leading: Icon(Icons.folder_off_outlined, color: _textMuted),
+                title: Text(
+                  l10n.translate('folderNone'),
+                  style: TextStyle(color: _text),
+                ),
+                onTap: () async {
+                  await widget.controller.moveManyToFolder(picked, null);
+                  if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+                  _clearSelection();
+                },
+              ),
+              for (final folder in widget.controller.userFolders)
+                ListTile(
+                  leading: Icon(Icons.folder_outlined, color: _gold),
+                  title: Text(folder, style: TextStyle(color: _text)),
+                  trailing: Text(
+                    '${widget.controller.folderCount(folder)}',
+                    style: TextStyle(color: _textMuted, fontSize: 12),
+                  ),
+                  onTap: () async {
+                    await widget.controller.moveManyToFolder(picked, folder);
+                    if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+                    _clearSelection();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _promptFolderName(
+    BuildContext context,
+    AppLocalizations l10n, {
+    String initial = '',
+  }) async {
+    final field = TextEditingController(text: initial);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _panel,
+        title: Text(
+          l10n.translate('folderName'),
+          style: TextStyle(color: _text, fontWeight: FontWeight.w800),
+        ),
+        content: TextField(
+          controller: field,
+          autofocus: true,
+          style: TextStyle(color: _text),
+          cursorColor: _gold,
+          decoration: InputDecoration(
+            hintText: l10n.translate('folderName'),
+            hintStyle: TextStyle(color: _textMuted),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: _border),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: _gold),
+            ),
+          ),
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.translate('cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(field.text),
+            style: TextButton.styleFrom(foregroundColor: _gold),
+            child: Text(l10n.translate('folderNew')),
+          ),
+        ],
+      ),
+    );
+    field.dispose();
+    return name;
   }
 
   Widget _buildTabOption(_LibrarySubTab tab, String label, bool active) {
@@ -2758,6 +3012,7 @@ class _LibraryViewState extends State<_LibraryView> {
           const SizedBox(height: 8),
           _buildUnifiedSubTabBar(),
           _buildSearchAndSort(context),
+          _buildFolderChips(context),
           _buildSelectionBar(context, filteredItems),
           const SizedBox(height: 10),
           Expanded(

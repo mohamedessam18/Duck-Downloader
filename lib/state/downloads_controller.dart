@@ -22,6 +22,7 @@ import '../services/clipboard_service.dart';
 import '../services/crash_reporting_service.dart';
 import '../services/download_store.dart';
 import '../services/file_service.dart';
+import '../services/folder_service.dart';
 import '../models/meta_post.dart';
 import '../services/meta_post_service.dart';
 import '../services/platform_sessions.dart';
@@ -95,6 +96,7 @@ class DuckDownloadsController extends ChangeNotifier
        _meta = meta ?? MetaPostService() {
     unawaited(_loadYouTubeSession());
     unawaited(purgeExpiredTrash());
+    unawaited(refreshFolders());
     _downloads = _store.readDownloads();
     for (final item in _downloads.where((item) => item.isPrivate)) {
       _privateMetadata[item.id] = item;
@@ -952,8 +954,17 @@ class DuckDownloadsController extends ChangeNotifier
   void clearLibraryQuery() => setLibraryQuery('');
 
   /// A list as the user asked to see it.
-  List<DownloadItem> viewed(List<DownloadItem> items) =>
-      libraryView.apply(_withSizes(items));
+  ///
+  /// The folder filter applies before the search and the ordering, because it
+  /// narrows what the user is looking at rather than how they are looking at
+  /// it — searching inside a folder should search that folder.
+  List<DownloadItem> viewed(List<DownloadItem> items) {
+    final folder = folderFilter;
+    final scoped = folder == null
+        ? items
+        : items.where((item) => item.folder == folder).toList();
+    return libraryView.apply(_withSizes(scoped));
+  }
 
   /// Fills in sizes for rows saved before the field existed.
   ///
@@ -3359,6 +3370,105 @@ class DuckDownloadsController extends ChangeNotifier
       _mergePrivateMetadata();
     }
     notifyListeners();
+  }
+
+  final FolderService _folders = const FolderService();
+
+  /// The folders the user has made, in the order a person reads them.
+  List<String> userFolders = const [];
+
+  /// The folder the library is filtered to, or null for everything.
+  String? folderFilter;
+
+  Future<void> refreshFolders() async {
+    userFolders = await _folders.list();
+    notifyListeners();
+  }
+
+  void setFolderFilter(String? folder) {
+    if (folderFilter == folder) return;
+    folderFilter = folder;
+    notifyListeners();
+  }
+
+  /// How many library files are filed under [folder].
+  int folderCount(String folder) =>
+      _downloads.where((item) => !item.isDeleted && item.folder == folder).length;
+
+  Future<String?> createFolder(String name) async {
+    final created = await _folders.create(name);
+    if (created == null) {
+      setStatus('folderNameInvalid');
+      notifyListeners();
+      return null;
+    }
+    await refreshFolders();
+    return created;
+  }
+
+  /// Renames a folder and the rows that point at it, together.
+  ///
+  /// The rows carry the name, so leaving them behind would empty the folder
+  /// from the library's point of view while the files sat happily inside it.
+  Future<bool> renameFolder(String from, String to) async {
+    final renamed = await _folders.rename(from, to);
+    if (renamed == null) {
+      setStatus('folderNameTaken');
+      notifyListeners();
+      return false;
+    }
+    for (final item in _downloads.where((item) => item.folder == from).toList()) {
+      await _saveItem(
+        item.copyWith(
+          folder: renamed,
+          filePath: item.filePath == null
+              ? null
+              : item.filePath!.replaceFirst('/$from/', '/$renamed/'),
+        ),
+      );
+    }
+    if (folderFilter == from) folderFilter = renamed;
+    await refreshFolders();
+    return true;
+  }
+
+  /// Removes a folder, putting whatever was in it back where downloads live.
+  ///
+  /// Deleting a folder is a filing decision, not a request to lose files.
+  Future<void> deleteFolder(String name) async {
+    for (final item in _downloads.where((item) => item.folder == name).toList()) {
+      await moveToFolder(item, null);
+    }
+    await _folders.remove(name);
+    if (folderFilter == name) folderFilter = null;
+    await refreshFolders();
+  }
+
+  /// Files one download under [folder], or takes it back out when null.
+  Future<void> moveToFolder(DownloadItem item, String? folder) async {
+    final home = await _files.mediaDirectoryFor(item.type);
+    final moved = await _folders.move(
+      item.filePath,
+      folder: folder,
+      fallbackDir: home,
+    );
+    await _saveItem(
+      item.copyWith(
+        filePath: moved ?? item.filePath,
+        folder: folder,
+        clearFolder: folder == null,
+      ),
+    );
+    await refreshFolders();
+  }
+
+  Future<void> moveManyToFolder(
+    Iterable<DownloadItem> items,
+    String? folder,
+  ) async {
+    for (final item in items.toList()) {
+      await moveToFolder(item, folder);
+    }
   }
 
   /// Deletes several files in one go.

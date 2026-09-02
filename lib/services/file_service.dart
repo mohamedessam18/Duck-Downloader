@@ -19,18 +19,7 @@ class DuckFileService {
     required String filename,
     required DownloadType type,
   }) async {
-    final root = await getApplicationDocumentsDirectory();
-    final folder = Directory(
-      p.join(
-        root.path,
-        'Duck Downloader',
-        type == DownloadType.audio
-            ? 'Audios'
-            : type == DownloadType.image
-            ? 'Images'
-            : 'Videos',
-      ),
-    );
+    final folder = Directory(await mediaDirectoryFor(type));
     await folder.create(recursive: true);
     final ext = p.extension(filename);
     final base = p.basenameWithoutExtension(filename);
@@ -48,6 +37,24 @@ class DuckFileService {
 
     await _dio.download(url, filePath);
     return filePath;
+  }
+
+  /// Where downloads of this kind normally live.
+  ///
+  /// Named because more than one thing needs it now: saving a download, and
+  /// taking one back out of a folder the user filed it under. Two copies of
+  /// this path would be two places for it to drift.
+  Future<String> mediaDirectoryFor(DownloadType type) async {
+    final root = await getApplicationDocumentsDirectory();
+    return p.join(
+      root.path,
+      'Duck Downloader',
+      type == DownloadType.audio
+          ? 'Audios'
+          : type == DownloadType.image
+          ? 'Images'
+          : 'Videos',
+    );
   }
 
   Future<void> deleteFile(String? filePath) async {

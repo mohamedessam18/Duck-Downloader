@@ -115,6 +115,7 @@ class DownloadItem {
     this.deletedAt,
     this.trashedPath,
     this.originalPath,
+    this.folder,
   });
 
   final String id;
@@ -155,6 +156,14 @@ class DownloadItem {
   final String? trashedPath;
   final String? originalPath;
 
+  /// The folder the user filed this under, or null for none.
+  ///
+  /// A name, not a path. The file really lives in a directory of that name, so
+  /// the two could be derived from each other — but a file moved by something
+  /// outside the app would leave a path pointing nowhere, and a name is what
+  /// the library actually groups by.
+  final String? folder;
+
   bool get isDeleted => deletedAt != null;
 
   bool get isVideo => type == DownloadType.video;
@@ -184,7 +193,9 @@ class DownloadItem {
     DateTime? deletedAt,
     String? trashedPath,
     String? originalPath,
+    String? folder,
     bool clearDeleted = false,
+    bool clearFolder = false,
   }) {
     return DownloadItem(
       id: id ?? this.id,
@@ -214,6 +225,7 @@ class DownloadItem {
       deletedAt: clearDeleted ? null : (deletedAt ?? this.deletedAt),
       trashedPath: clearDeleted ? null : (trashedPath ?? this.trashedPath),
       originalPath: clearDeleted ? null : (originalPath ?? this.originalPath),
+      folder: clearFolder ? null : (folder ?? this.folder),
     );
   }
 
@@ -241,6 +253,7 @@ class DownloadItem {
       'deletedAt': deletedAt?.toIso8601String(),
       'trashedPath': trashedPath,
       'originalPath': originalPath,
+      'folder': folder,
     };
   }
 
@@ -276,6 +289,7 @@ class DownloadItem {
       deletedAt: DateTime.tryParse(json['deletedAt']?.toString() ?? ''),
       trashedPath: json['trashedPath'] as String?,
       originalPath: json['originalPath'] as String?,
+      folder: json['folder'] as String?,
     );
   }
 }
