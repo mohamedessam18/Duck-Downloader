@@ -111,6 +111,7 @@ class DownloadItem {
     this.filePath,
     this.artist,
     this.album,
+    this.fileSizeBytes,
   });
 
   final String id;
@@ -131,6 +132,14 @@ class DownloadItem {
   final String? externalSaveError;
   final String? artist;
   final String? album;
+
+  /// How big the file is, recorded when it finished downloading.
+  ///
+  /// Stored rather than measured. The library read it off the disk inside
+  /// `build`, once per row, on every rebuild — a synchronous stat per visible
+  /// file for the lifetime of the screen. Null on rows saved before this
+  /// existed, which the library fills in the first time it needs them.
+  final int? fileSizeBytes;
 
   bool get isVideo => type == DownloadType.video;
   bool get isAudio => type == DownloadType.audio;
@@ -155,6 +164,7 @@ class DownloadItem {
     Object? externalSaveError = _preserveExternalSaveError,
     String? artist,
     String? album,
+    int? fileSizeBytes,
   }) {
     return DownloadItem(
       id: id ?? this.id,
@@ -178,6 +188,7 @@ class DownloadItem {
           : externalSaveError as String?,
       artist: artist ?? this.artist,
       album: album ?? this.album,
+      fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
     );
   }
 
@@ -201,6 +212,7 @@ class DownloadItem {
       'externalSaveError': externalSaveError,
       'artist': artist,
       'album': album,
+      'fileSizeBytes': fileSizeBytes,
     };
   }
 
@@ -232,6 +244,7 @@ class DownloadItem {
       externalSaveError: json['externalSaveError'] as String?,
       artist: json['artist'] as String?,
       album: json['album'] as String?,
+      fileSizeBytes: _parseNum(json['fileSizeBytes'])?.toInt(),
     );
   }
 }

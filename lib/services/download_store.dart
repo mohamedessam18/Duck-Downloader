@@ -226,6 +226,13 @@ class DownloadStore {
     return _box.put('playbackVolume', volume.clamp(0.0, 1.0));
   }
 
+  String? readLibrarySort() => _box.get('librarySort') as String?;
+
+  Future<void> writeLibrarySort(String name) {
+    if (!isUsable) return Future<void>.value();
+    return _box.put('librarySort', name);
+  }
+
   List<Playlist> readPlaylists() {
     final raw = _box.get('playlists', defaultValue: const <dynamic>[]);
     if (raw is! List) return const [];

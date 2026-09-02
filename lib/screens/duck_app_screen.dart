@@ -23,6 +23,7 @@ import 'device_folder_sheet.dart';
 import '../widgets/duck_empty_state.dart';
 import '../widgets/duck_motion.dart';
 import '../state/downloads_controller.dart';
+import '../state/library_view_mode.dart';
 import '../services/device_media_service.dart';
 import '../services/download_store.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -2180,6 +2181,13 @@ class _LibraryView extends StatefulWidget {
 
 class _LibraryViewState extends State<_LibraryView> {
   _LibrarySubTab _subTab = _LibrarySubTab.all;
+
+  /// Its own controller, seeded from the query already in flight, so leaving
+  /// the tab and coming back does not silently show a filtered list with an
+  /// empty box.
+  late final TextEditingController _searchController = TextEditingController(
+    text: widget.controller.libraryView.query,
+  );
   bool _useGridLayout = true;
   Offset? _dragPillOffset;
   bool _isDraggingPill = false;
@@ -2396,6 +2404,98 @@ class _LibraryViewState extends State<_LibraryView> {
       );
     }
 
+
+  /// A search field and an order picker, on the tabs that show a file list.
+  ///
+  /// Not on Folders or Playlists: those list containers rather than files, and
+  /// a search box that quietly searches something else is worse than none.
+  Widget _buildSearchAndSort(BuildContext context) {
+    if (_subTab != _LibrarySubTab.all && _subTab != _LibrarySubTab.favorites) {
+      return const SizedBox.shrink();
+    }
+    final l10n = AppLocalizations.of(context);
+    final view = widget.controller.libraryView;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: 42,
+              child: TextField(
+                controller: _searchController,
+                onChanged: widget.controller.setLibraryQuery,
+                style: TextStyle(color: _text, fontSize: 14),
+                cursorColor: _gold,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: l10n.translate('librarySearchHint'),
+                  hintStyle: TextStyle(color: _textMuted, fontSize: 14),
+                  prefixIcon: Icon(Icons.search, color: _textMuted, size: 20),
+                  suffixIcon: view.isSearching
+                      ? IconButton(
+                          icon: Icon(Icons.close, color: _textMuted, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            widget.controller.clearLibraryQuery();
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: _panel,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(999),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          PopupMenuButton<LibrarySort>(
+            tooltip: l10n.translate('sortBy'),
+            color: _panel,
+            initialValue: view.sort,
+            onSelected: widget.controller.setLibrarySort,
+            itemBuilder: (context) => [
+              for (final sort in LibrarySort.values)
+                PopupMenuItem(
+                  value: sort,
+                  child: Row(
+                    children: [
+                      Icon(
+                        sort == view.sort
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        color: sort == view.sort ? _gold : _textMuted,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        l10n.translate(sort.labelKey),
+                        style: TextStyle(color: _text, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+            child: Container(
+              height: 42,
+              width: 42,
+              decoration: BoxDecoration(
+                color: _panel,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Icon(Icons.sort, color: _gold, size: 20),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTabOption(_LibrarySubTab tab, String label, bool active) {
     return Expanded(
       child: GestureDetector(
@@ -2421,9 +2521,11 @@ class _LibraryViewState extends State<_LibraryView> {
   Widget build(BuildContext context) {
     List<DownloadItem> filteredItems = [];
     if (_subTab == _LibrarySubTab.all) {
-      filteredItems = widget.items;
+      filteredItems = widget.controller.viewed(widget.items);
     } else if (_subTab == _LibrarySubTab.favorites) {
-      filteredItems = widget.items.where((item) => item.favorite).toList();
+      filteredItems = widget.controller.viewed(
+        widget.items.where((item) => item.favorite).toList(),
+      );
     }
 
     return Padding(
@@ -2528,6 +2630,7 @@ class _LibraryViewState extends State<_LibraryView> {
           ),
           const SizedBox(height: 8),
           _buildUnifiedSubTabBar(),
+          _buildSearchAndSort(context),
           const SizedBox(height: 10),
           Expanded(
             child: _subTab == _LibrarySubTab.folders

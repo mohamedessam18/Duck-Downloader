@@ -32,6 +32,7 @@ import '../services/trim_service.dart';
 import '../services/share_bridge.dart';
 import '../services/youtube_explode_service.dart';
 import 'duck_status.dart';
+import 'library_view_mode.dart';
 import 'playback_session.dart';
 import '../services/vault_encryption_service.dart';
 import '../services/conversion_service.dart';
@@ -128,6 +129,14 @@ class DuckDownloadsController extends ChangeNotifier
       });
     }
     playbackVolume = _store.readPlaybackVolume();
+    final storedSort = _store.readLibrarySort();
+    if (storedSort != null) {
+      libraryView = libraryView.copyWith(
+        sort: LibrarySort.values
+            .where((value) => value.name == storedSort)
+            .firstOrNull,
+      );
+    }
     unawaited(_configureAudioSession());
     _playerStateSubscription = audioPlayer.playerStateStream.listen((state) {
       // Only a track the user chose advances to the next one. A video's
@@ -913,6 +922,78 @@ class DuckDownloadsController extends ChangeNotifier
     // after a restart.
     _pumpDownloadQueue();
     notifyListeners();
+  }
+
+  /// How the user is looking at the library right now.
+  ///
+  /// One object rather than a query string and a sort field kept separately,
+  /// because every list applies both and applying only one is the bug that
+  /// shape invites.
+  LibraryView libraryView = const LibraryView();
+
+  void setLibraryQuery(String query) {
+    if (libraryView.query == query) return;
+    libraryView = libraryView.copyWith(query: query);
+    notifyListeners();
+  }
+
+  void setLibrarySort(LibrarySort sort) {
+    if (libraryView.sort == sort) return;
+    libraryView = libraryView.copyWith(sort: sort);
+    unawaited(_store.writeLibrarySort(sort.name));
+    notifyListeners();
+  }
+
+  /// Clears the search but keeps the order, which is a setting rather than a
+  /// thing the user is in the middle of doing.
+  void clearLibraryQuery() => setLibraryQuery('');
+
+  /// A list as the user asked to see it.
+  List<DownloadItem> viewed(List<DownloadItem> items) =>
+      libraryView.apply(_withSizes(items));
+
+  /// Fills in sizes for rows saved before the field existed.
+  ///
+  /// One stat per file, once, rather than one per row per rebuild — which is
+  /// what the library did when it read the size inside `build`.
+  List<DownloadItem> _withSizes(List<DownloadItem> items) {
+    var changed = false;
+    final filled = [
+      for (final item in items)
+        if (item.fileSizeBytes != null || item.filePath == null) item
+        else () {
+          final measured = _measure(item.filePath!);
+          if (measured == null) return item;
+          changed = true;
+          final sized = item.copyWith(fileSizeBytes: measured);
+          _sizeBackfill[item.id] = sized;
+          return sized;
+        }(),
+    ];
+    if (changed) unawaited(_persistSizeBackfill());
+    return filled;
+  }
+
+  final Map<String, DownloadItem> _sizeBackfill = {};
+
+  Future<void> _persistSizeBackfill() async {
+    final pending = Map<String, DownloadItem>.from(_sizeBackfill);
+    _sizeBackfill.clear();
+    for (final item in pending.values) {
+      if (item.isPrivate) continue;
+      await _store.upsert(item);
+    }
+    _downloads = _store.readDownloads();
+    _mergePrivateMetadata();
+  }
+
+  static int? _measure(String path) {
+    try {
+      final file = File(path);
+      return file.existsSync() ? file.lengthSync() : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   List<DownloadItem> get downloads => List.unmodifiable(_downloads);
@@ -3685,11 +3766,22 @@ class DuckDownloadsController extends ChangeNotifier
     _lastProgressPersist.remove(id);
   }
 
-  Future<void> _saveItem(DownloadItem item) async {
+  Future<void> _saveItem(DownloadItem rawItem) async {
     // A late callback from a stream that outlived the controller. Its storage
     // is closed, so writing here throws inside a stream handler nobody is
     // listening to.
     if (_disposed) return;
+
+    // Recorded once, here, rather than at each of the six places a download
+    // can finish — and rather than measured off the disk inside `build`, which
+    // is what the library used to do for every visible row on every frame.
+    var item = rawItem;
+    if (item.status == DownloadStatus.completed &&
+        item.filePath != null &&
+        item.fileSizeBytes == null) {
+      final measured = _measure(item.filePath!);
+      if (measured != null) item = item.copyWith(fileSizeBytes: measured);
+    }
     if (item.isPrivate && !VaultEncryptionService.isUnlocked) {
       throw StateError(
         'Unlock the Secure Vault before saving private content.',
