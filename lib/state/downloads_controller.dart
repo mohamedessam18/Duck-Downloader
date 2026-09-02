@@ -4258,10 +4258,14 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
-  void setAudioSpeed(double speed) {
-    audioPlayer.setSpeed(speed);
-    notifyListeners();
-  }
+  /// The rate the video is playing at, carried across at the handoff.
+  ///
+  /// Kept here rather than pushed straight onto the audio player. That player
+  /// is shared and silent while the video is on screen, so setting its speed
+  /// then changes nothing anyone can hear and leaves a value behind for
+  /// whatever holds it next — which is the shape of the bug this whole
+  /// ownership exists to end.
+  double videoPlaybackSpeed = 1.0;
 
   // ── Background Video Audio ───────────────────────────────────────────────
   // When a video is playing and the screen locks / app is backgrounded,
@@ -4362,6 +4366,9 @@ class DuckDownloadsController extends ChangeNotifier
     try {
       _backgroundVideoActive = true;
       await audioPlayer.seek(position);
+      // Match the picture the user was watching. Without this the sound jumps
+      // back to normal speed the moment the screen goes off.
+      await playback.setSpeed(videoPlaybackSpeed);
       await playback.unmute(); // instant — the source is already loaded
       await audioPlayer.play();
       backgroundAudioError = null;

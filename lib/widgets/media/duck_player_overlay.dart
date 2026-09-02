@@ -261,6 +261,9 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   /// player currently reports — the two diverge the moment the screen turns off.
   bool _wasPlayingBeforeBackground = false;
 
+  /// What the platform was last told, so it is only told again on a change.
+  bool? _lastReportedPlaying;
+
   void _videoListener() {
     final video = _video;
     if (video == null) return;
@@ -271,9 +274,16 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     if (_currentLifecycleState == AppLifecycleState.resumed) {
       _wasPlayingBeforeBackground = isPlaying;
     }
-    try {
-      _channel.invokeMethod('setVideoPlaying', {'playing': isPlaying});
-    } catch (_) {}
+    // Only when it changes. This listener fires several times a second while
+    // a video plays, and each call crossed the platform channel to rebuild the
+    // picture-in-picture parameters — work Android was being asked to redo
+    // continuously to arrive at the same answer.
+    if (isPlaying != _lastReportedPlaying) {
+      _lastReportedPlaying = isPlaying;
+      try {
+        _channel.invokeMethod('setVideoPlaying', {'playing': isPlaying});
+      } catch (_) {}
+    }
     widget.controller.saveVideoResumePosition(
       widget.item.id,
       video.value.position,
@@ -290,20 +300,22 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
       if (remaining.inSeconds <= 15 && !_showUpNext) {
         _showUpNext = true;
         _upNextCountdown = 10;
+        _upNextTimer?.cancel();
         _upNextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
           if (!mounted) {
             timer.cancel();
             return;
           }
-          setState(() {
-            if (_upNextCountdown > 0) {
-              _upNextCountdown--;
-            } else {
-              timer.cancel();
-              _showUpNext = false;
-              widget.controller.playNextVideo();
-            }
-          });
+          if (_upNextCountdown > 0) {
+            setState(() { _upNextCountdown--; });
+            return;
+          }
+          timer.cancel();
+          setState(() { _showUpNext = false; });
+          // Outside setState. That callback is meant to describe what changed,
+          // and starting the next video from inside it runs a whole load while
+          // the framework is mid-rebuild.
+          widget.controller.playNextVideo();
         });
       } else if (remaining.inSeconds > 15 && _showUpNext) {
         _showUpNext = false;
@@ -2183,19 +2195,30 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   Future<void> _reloadVideoFromDisk() async {
     final path = widget.controller.playerItem?.filePath ?? widget.item.filePath;
     if (path == null || !widget.item.isVideo) return;
+    _video?.removeListener(_videoListener);
     await _video?.dispose();
     _video = VideoPlayerController.file(File(path))
-      ..initialize().then((_) async {
-        if (!mounted) return;
-        _video?.setPlaybackSpeed(_speed);
-        _video?.addListener(_videoListener);
-        setState(() {
-          _trimStart = 0.0;
-          _trimEnd = _video!.value.duration.inSeconds.toDouble();
-          _isTrimmingMode = false;
-        });
-        await _video?.play();
-      });
+      ..initialize()
+          .then((_) async {
+            if (!mounted) return;
+            _video?.setPlaybackSpeed(_speed);
+            _video?.addListener(_videoListener);
+            setState(() {
+              _error = null;
+              _trimStart = 0.0;
+              _trimEnd = _video!.value.duration.inSeconds.toDouble();
+              _isTrimmingMode = false;
+            });
+            await _video?.play();
+          })
+          // The first load has always had this; the reload after a trim did
+          // not, so a trim that produced a file the decoder refused left a
+          // blank player with no message and no way to retry.
+          .catchError((Object _) {
+            if (mounted) {
+              setState(() => _error = 'This file could not be played.');
+            }
+          });
   }
 
   Future<void> _performTrim() async {
@@ -2357,7 +2380,12 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
   Future<void> _setSpeed(double speed) async {
     _speed = speed;
     await _video?.setPlaybackSpeed(speed);
-    widget.controller.setAudioSpeed(speed);
+    // Deliberately not written to the audio player here. That player is shared
+    // and owned by PlaybackSession; the standby copy is silent while the video
+    // is on screen, so setting its speed now changes nothing a user can hear
+    // and leaves a value behind for whatever holds it next. The handoff
+    // carries the speed across at the moment it starts mattering.
+    widget.controller.videoPlaybackSpeed = speed;
     setState(() {});
   }
 
@@ -2365,7 +2393,8 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     final filePath = widget.item.filePath;
     if (filePath == null) return;
     setState(() => _error = null);
-    _video?.dispose();
+    _video?.removeListener(_videoListener);
+    await _video?.dispose();
     _video = VideoPlayerController.file(File(filePath))
       ..initialize()
           .then((_) async {

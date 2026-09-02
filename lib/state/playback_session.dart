@@ -90,6 +90,12 @@ class PlaybackSession {
 
   Future<void> setLoop(LoopMode loop) => _player.setLoopMode(loop);
 
+  /// Only the holder may change the rate, and only while it holds it.
+  Future<void> setSpeed(double speed) async {
+    if (_intent == null) return;
+    await _player.setSpeed(speed);
+  }
+
   /// Gives the player back, at rest and audible.
   Future<void> release() async {
     _intent = null;

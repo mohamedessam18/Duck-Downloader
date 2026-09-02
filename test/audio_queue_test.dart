@@ -139,6 +139,44 @@ void main() {
     });
   });
 
+  group('the video hands its speed over, not its side effects', () {
+    test('changing video speed leaves the shared player alone', () async {
+      // The audio player is silent while a video is on screen, so setting its
+      // rate then changes nothing anyone can hear — and leaves a value behind
+      // for whatever holds it next.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.playback.acquire(PlaybackIntent.videoStandby);
+      controller.videoPlaybackSpeed = 2.0;
+
+      expect(controller.audioPlayer.speed, 1.0);
+    });
+
+    test('the speed arrives when the sound does', () async {
+      // Otherwise the sound snaps back to normal speed the moment the screen
+      // goes off.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.playback.acquire(PlaybackIntent.videoStandby);
+      controller.videoPlaybackSpeed = 1.5;
+      await controller.playback.setSpeed(controller.videoPlaybackSpeed);
+
+      expect(controller.audioPlayer.speed, 1.5);
+    });
+
+    test('a released player takes no orders', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.playback.release();
+      await controller.playback.setSpeed(2.0);
+
+      expect(controller.audioPlayer.speed, 1.0);
+    });
+  });
+
   group('an interruption reaches the video too', () {
     test('a registered handler is called, and only while registered', () async {
       // Unplugging headphones does not change the app lifecycle, so nothing
