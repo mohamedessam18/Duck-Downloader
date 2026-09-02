@@ -112,6 +112,9 @@ class DownloadItem {
     this.artist,
     this.album,
     this.fileSizeBytes,
+    this.deletedAt,
+    this.trashedPath,
+    this.originalPath,
   });
 
   final String id;
@@ -141,6 +144,19 @@ class DownloadItem {
   /// existed, which the library fills in the first time it needs them.
   final int? fileSizeBytes;
 
+  /// When this was deleted, or null while it is still in the library.
+  ///
+  /// The row survives the delete so the file can come back with its title,
+  /// thumbnail and favourite intact — restoring a file but not what the app
+  /// knew about it is only half a restore.
+  final DateTime? deletedAt;
+
+  /// Where the file is waiting, and where it should go back to.
+  final String? trashedPath;
+  final String? originalPath;
+
+  bool get isDeleted => deletedAt != null;
+
   bool get isVideo => type == DownloadType.video;
   bool get isAudio => type == DownloadType.audio;
   bool get isImage => type == DownloadType.image;
@@ -165,6 +181,10 @@ class DownloadItem {
     String? artist,
     String? album,
     int? fileSizeBytes,
+    DateTime? deletedAt,
+    String? trashedPath,
+    String? originalPath,
+    bool clearDeleted = false,
   }) {
     return DownloadItem(
       id: id ?? this.id,
@@ -189,6 +209,11 @@ class DownloadItem {
       artist: artist ?? this.artist,
       album: album ?? this.album,
       fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
+      // An explicit flag rather than passing null, which copyWith reads as
+      // "leave it alone" — the one shape that cannot express a restore.
+      deletedAt: clearDeleted ? null : (deletedAt ?? this.deletedAt),
+      trashedPath: clearDeleted ? null : (trashedPath ?? this.trashedPath),
+      originalPath: clearDeleted ? null : (originalPath ?? this.originalPath),
     );
   }
 
@@ -213,6 +238,9 @@ class DownloadItem {
       'artist': artist,
       'album': album,
       'fileSizeBytes': fileSizeBytes,
+      'deletedAt': deletedAt?.toIso8601String(),
+      'trashedPath': trashedPath,
+      'originalPath': originalPath,
     };
   }
 
@@ -245,6 +273,9 @@ class DownloadItem {
       artist: json['artist'] as String?,
       album: json['album'] as String?,
       fileSizeBytes: _parseNum(json['fileSizeBytes'])?.toInt(),
+      deletedAt: DateTime.tryParse(json['deletedAt']?.toString() ?? ''),
+      trashedPath: json['trashedPath'] as String?,
+      originalPath: json['originalPath'] as String?,
     );
   }
 }

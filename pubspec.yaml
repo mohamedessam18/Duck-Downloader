@@ -52,6 +52,10 @@ dependencies:
 
 dev_dependencies:
   hive_test: ^1.0.1
+  # Used only to point path_provider at a temp directory in tests, so the
+  # trash can be exercised against a real filesystem instead of a mock.
+  path_provider_platform_interface: ^2.1.2
+  plugin_platform_interface: ^2.1.8
   flutter_test:
     sdk: flutter
 

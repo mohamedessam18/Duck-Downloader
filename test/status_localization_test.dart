@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// is a failing test rather than a silent English string in an Arabic app.
 const _statusKeys = <String>[
   'statusSignInRequired', 'statusSignedInRetrying', 'accountsCleared',
+  'trashRestored', 'trashRestoreFailed',
   'statusTapDuck',
   'statusChooseImages', 'statusVaultIndexRebuilt', 'statusUnlockVaultFirst',
   'statusUnlockVaultBeforeMove', 'statusFileNotLocal', 'statusMovedToVault',

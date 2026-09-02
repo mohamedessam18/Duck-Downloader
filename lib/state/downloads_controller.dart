@@ -28,6 +28,7 @@ import '../services/platform_sessions.dart';
 import '../services/premium_entitlement.dart';
 import '../services/premium_manager.dart';
 import '../services/media_save_service.dart';
+import '../services/trash_service.dart';
 import '../services/trim_service.dart';
 import '../services/share_bridge.dart';
 import '../services/youtube_explode_service.dart';
@@ -92,6 +93,7 @@ class DuckDownloadsController extends ChangeNotifier
        _ytExplode = ytExplode ?? YouTubeExplodeService(),
        _meta = meta ?? MetaPostService() {
     unawaited(_loadYouTubeSession());
+    unawaited(purgeExpiredTrash());
     _downloads = _store.readDownloads();
     for (final item in _downloads.where((item) => item.isPrivate)) {
       _privateMetadata[item.id] = item;
@@ -1299,7 +1301,10 @@ class DuckDownloadsController extends ChangeNotifier
     }
     final list = _downloads
         .where(
-          (item) => item.isPrivate && item.status == DownloadStatus.completed,
+          (item) =>
+              item.isPrivate &&
+              item.status == DownloadStatus.completed &&
+              !item.isDeleted,
         )
         .toList();
     list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -1333,7 +1338,10 @@ class DuckDownloadsController extends ChangeNotifier
           (item) =>
               item.type == type &&
               item.status == DownloadStatus.completed &&
-              !item.isPrivate,
+              !item.isPrivate &&
+              // A file the user deleted must not still be in their library,
+              // whatever the app is keeping in order to undo it.
+              !item.isDeleted,
         )
         .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -3279,15 +3287,116 @@ class DuckDownloadsController extends ChangeNotifier
     await _controlDownload(item: item, action: 'cancel');
   }
 
+  final TrashService _trash = const TrashService();
+
+  /// Everything waiting in the trash, newest deletion first.
+  List<DownloadItem> get trashedItems {
+    final list = _downloads.where((item) => item.isDeleted).toList()
+      ..sort((a, b) => b.deletedAt!.compareTo(a.deletedAt!));
+    return list;
+  }
+
+  /// How many days are left before [item] is erased.
+  int daysLeftInTrash(DownloadItem item) {
+    final deletedAt = item.deletedAt;
+    if (deletedAt == null) return 0;
+    final left = TrashService.retention - DateTime.now().difference(deletedAt);
+    return left.isNegative ? 0 : left.inDays + 1;
+  }
+
+  /// Moves a download to the trash instead of destroying it.
+  ///
+  /// The row is kept, not dropped, so restoring brings back the title, the
+  /// thumbnail and the favourite along with the file. Restoring the bytes and
+  /// losing everything the app knew about them is only half a restore.
   Future<void> deleteDownload(DownloadItem item) async {
     _finishDownload(item.id);
-    await _files.deleteFile(item.filePath);
+    if (playerItem?.id == item.id) playerItem = null;
+
+    final trashedPath = await _trash.moveIn(item.filePath, id: item.id);
+    final deleted = item.copyWith(
+      deletedAt: DateTime.now(),
+      trashedPath: trashedPath,
+      originalPath: item.filePath,
+      status: DownloadStatus.completed,
+    );
+
+    // A private file's row lives in the encrypted index, and it stays there:
+    // moving it to the trash must not spill a vault filename into the plain
+    // store, which is the one place they are never allowed to appear.
+    if (deleted.isPrivate) {
+      _privateMetadata[item.id] = deleted;
+      await _persistPrivateMetadata();
+      _mergePrivateMetadata();
+    } else {
+      await _store.upsert(deleted);
+      _downloads = _store.readDownloads();
+      _mergePrivateMetadata();
+    }
+    notifyListeners();
+  }
+
+  /// Puts a file back where it came from.
+  Future<bool> restoreFromTrash(DownloadItem item) async {
+    if (!item.isDeleted) return false;
+    final restoredPath = await _trash.moveOut(
+      item.trashedPath,
+      item.originalPath,
+    );
+    if (restoredPath == null) {
+      setStatus('trashRestoreFailed');
+      notifyListeners();
+      return false;
+    }
+
+    final restored = item.copyWith(
+      filePath: restoredPath,
+      clearDeleted: true,
+    );
+    if (restored.isPrivate) {
+      _privateMetadata[item.id] = restored;
+      await _persistPrivateMetadata();
+      _mergePrivateMetadata();
+    } else {
+      await _store.upsert(restored);
+      _downloads = _store.readDownloads();
+      _mergePrivateMetadata();
+    }
+    setStatus('trashRestored');
+    notifyListeners();
+    return true;
+  }
+
+  /// Erases one item for good.
+  Future<void> deleteForever(DownloadItem item) async {
+    await _trash.erase(item.trashedPath ?? item.filePath);
     _privateMetadata.remove(item.id);
     await _store.delete(item.id);
     _downloads = _store.readDownloads();
     await _persistPrivateMetadata();
-    if (playerItem?.id == item.id) playerItem = null;
+    _mergePrivateMetadata();
     notifyListeners();
+  }
+
+  Future<void> emptyTrash() async {
+    for (final item in trashedItems) {
+      await deleteForever(item);
+    }
+  }
+
+  /// Erases whatever has run out of time, and anything the trash still holds
+  /// that no row claims.
+  Future<void> purgeExpiredTrash() async {
+    final now = DateTime.now();
+    for (final item in trashedItems) {
+      if (now.difference(item.deletedAt!) >= TrashService.retention) {
+        await deleteForever(item);
+      }
+    }
+    await _trash.sweepOrphans({
+      for (final item in trashedItems)
+        if (item.trashedPath != null) item.trashedPath!,
+    });
   }
 
   Future<void> shareDownload(DownloadItem item) =>
