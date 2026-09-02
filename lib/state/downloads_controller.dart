@@ -1087,6 +1087,38 @@ class DuckDownloadsController extends ChangeNotifier
   @visibleForTesting
   void debugRequestPauseEverything() => _requestPauseEverything();
 
+  /// Replays one interruption exactly as the audio session delivers it.
+  @visibleForTesting
+  void debugHandleInterruption({
+    required bool begin,
+    required AudioInterruptionType type,
+  }) {
+    if (_ownAudioActivity) return;
+    if (begin) {
+      switch (type) {
+        case AudioInterruptionType.pause:
+          _wasPlayingBeforeInterruption = audioPlayer.playing;
+          audioPlayer.pause();
+          _requestPauseEverything();
+        case AudioInterruptionType.unknown:
+          _wasPlayingBeforeInterruption = audioPlayer.playing;
+          audioPlayer.pause();
+        case AudioInterruptionType.duck:
+          _preDuckVolume ??= audioPlayer.volume;
+          audioPlayer.setVolume(_preDuckVolume! * 0.2);
+      }
+    }
+  }
+
+  /// True while the app is churning its own audio focus. Tests only.
+  @visibleForTesting
+  bool get debugOwnAudioActivity => _ownAudioActivity;
+
+  /// Runs the preload's start-the-service dance. Tests only.
+  @visibleForTesting
+  Future<void> debugWithoutSelfInterruption(Future<void> Function() action) =>
+      _withoutSelfInterruption(action);
+
   void addBackInterceptor(bool Function() handler) {
     _backInterceptors.add(handler);
   }
@@ -4172,6 +4204,32 @@ class DuckDownloadsController extends ChangeNotifier
   /// Whether the interruption that is running now had anything to interrupt.
   bool _wasPlayingBeforeInterruption = false;
 
+  /// True while this app is deliberately churning audio focus itself.
+  ///
+  /// Starting a video preloads its audio and plays it for an instant to bring
+  /// the background service up while that is still allowed. Android reports
+  /// the resulting focus change back as an interruption, and acting on it
+  /// paused the video a second after it started — the app interrupting itself
+  /// and believing it.
+  bool _ownAudioActivity = false;
+
+  /// Runs [action] without treating its focus changes as an interruption.
+  ///
+  /// The window closes a beat after the work, because the focus callback
+  /// arrives after the call that caused it rather than during it.
+  Future<T> _withoutSelfInterruption<T>(Future<T> Function() action) async {
+    _ownAudioActivity = true;
+    try {
+      return await action();
+    } finally {
+      unawaited(
+        Future<void>.delayed(const Duration(seconds: 1), () {
+          _ownAudioActivity = false;
+        }),
+      );
+    }
+  }
+
   Future<void> _configureAudioSession() async {
     try {
       final session = await AudioSession.instance;
@@ -4180,6 +4238,7 @@ class DuckDownloadsController extends ChangeNotifier
 
       // 1. Auto-pause on headphone disconnect
       session.becomingNoisyEventStream.listen((_) {
+        if (_ownAudioActivity) return;
         audioPlayer.pause();
         // And the video, which is the whole reason this event exists. The
         // note here used to say the overlay handled it "via lifecycle", but
@@ -4191,13 +4250,23 @@ class DuckDownloadsController extends ChangeNotifier
 
       // 2. Handle phone calls and system interruptions
       session.interruptionEventStream.listen((event) {
+        if (_ownAudioActivity) return;
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.pause:
-            case AudioInterruptionType.unknown:
               _wasPlayingBeforeInterruption = audioPlayer.playing;
               audioPlayer.pause();
+              // A call, an alarm, another app taking over. The picture stops
+              // too.
               _requestPauseEverything();
+              break;
+            case AudioInterruptionType.unknown:
+              // Deliberately does not stop the video. "Unknown" is the
+              // catch-all the platform uses for focus changes it cannot
+              // classify, including ones this app caused, and it is far too
+              // vague a signal to interrupt what someone is watching.
+              _wasPlayingBeforeInterruption = audioPlayer.playing;
+              audioPlayer.pause();
               break;
             case AudioInterruptionType.duck:
               // Only the first duck records the volume to come back to. A
@@ -4322,9 +4391,11 @@ class DuckDownloadsController extends ChangeNotifier
       // notification is ongoing, so the service is not torn down. By the time
       // the screen locks there is nothing left to start: the handoff only has
       // to seek and unmute, which is why it is instant.
-      await audioPlayer.play();
-      await audioPlayer.pause();
-      await audioPlayer.seek(Duration.zero);
+      await _withoutSelfInterruption(() async {
+        await audioPlayer.play();
+        await audioPlayer.pause();
+        await audioPlayer.seek(Duration.zero);
+      });
 
       _backgroundVideoPreloaded = true;
       playingItem = item;

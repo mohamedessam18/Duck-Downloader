@@ -1,4 +1,5 @@
 import 'package:duck_downloader/models/download_models.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:duck_downloader/services/api_client.dart';
 import 'package:duck_downloader/services/clipboard_service.dart';
@@ -174,6 +175,83 @@ void main() {
       await controller.playback.setSpeed(2.0);
 
       expect(controller.audioPlayer.speed, 1.0);
+    });
+  });
+
+  group('the app does not interrupt itself', () {
+    test('an unclassified focus change never stops the video', () async {
+      // The reported bug. Starting a video preloads its audio and plays it for
+      // an instant to bring the background service up while that is still
+      // allowed; Android reports the resulting focus change back as an
+      // interruption of type "unknown", and acting on it paused the video a
+      // second after it started.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      var videoPauses = 0;
+      controller.addPausePlaybackHandler(() => videoPauses++);
+
+      controller.debugHandleInterruption(
+        begin: true,
+        type: AudioInterruptionType.unknown,
+      );
+
+      expect(videoPauses, 0);
+    });
+
+    test('a real interruption still stops the video', () async {
+      // A call, an alarm, another app taking over.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      var videoPauses = 0;
+      controller.addPausePlaybackHandler(() => videoPauses++);
+
+      controller.debugHandleInterruption(
+        begin: true,
+        type: AudioInterruptionType.pause,
+      );
+
+      expect(videoPauses, 1);
+    });
+
+    test('focus churn the app caused is ignored entirely', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      var videoPauses = 0;
+      controller.addPausePlaybackHandler(() => videoPauses++);
+
+      await controller.debugWithoutSelfInterruption(() async {
+        // Exactly what the preload does: play for an instant, then stop.
+        controller.debugHandleInterruption(
+          begin: true,
+          type: AudioInterruptionType.pause,
+        );
+      });
+
+      expect(videoPauses, 0, reason: 'the app must not interrupt itself');
+    });
+
+    test('the guard closes again afterwards', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugWithoutSelfInterruption(() async {});
+      expect(controller.debugOwnAudioActivity, isTrue);
+
+      // The focus callback lands after the call that caused it, so the window
+      // stays open a beat — but it does close.
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      expect(controller.debugOwnAudioActivity, isFalse);
+
+      var videoPauses = 0;
+      controller.addPausePlaybackHandler(() => videoPauses++);
+      controller.debugHandleInterruption(
+        begin: true,
+        type: AudioInterruptionType.pause,
+      );
+      expect(videoPauses, 1);
     });
   });
 
