@@ -32,6 +32,7 @@ import '../services/trim_service.dart';
 import '../services/share_bridge.dart';
 import '../services/youtube_explode_service.dart';
 import 'duck_status.dart';
+import 'playback_session.dart';
 import '../services/vault_encryption_service.dart';
 import '../services/conversion_service.dart';
 import '../services/cobalt_service.dart';
@@ -126,10 +127,16 @@ class DuckDownloadsController extends ChangeNotifier
         unawaited(_recoverInterruptedDownloads());
       });
     }
+    playbackVolume = _store.readPlaybackVolume();
     unawaited(_configureAudioSession());
     _playerStateSubscription = audioPlayer.playerStateStream.listen((state) {
+      // Only a track the user chose advances to the next one. A video's
+      // standby copy reaching the end used to land here too, and with an audio
+      // queue left over from earlier it started an unrelated song — a video
+      // finishing behind a locked screen turning into music nobody asked for.
       if (state.processingState == ProcessingState.completed &&
-          playingItem != null) {
+          playingItem != null &&
+          playback.isMusic) {
         if (sleepTimerLabel == 'End of track') {
           cancelSleepTimer();
           return; // Don't auto-advance
@@ -150,6 +157,27 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   final AudioPlayer audioPlayer = AudioPlayer();
+
+  /// The only thing allowed to set volume, speed or loop on [audioPlayer].
+  ///
+  /// Music and a video's standby audio are one player — the background plugin
+  /// permits no second instance — so each handover has to leave every shared
+  /// property in the state the next holder needs. See [PlaybackSession].
+  late final PlaybackSession playback = PlaybackSession(
+    player: audioPlayer,
+    preferredVolume: () => playbackVolume,
+  );
+
+  /// The level the user chose, kept across restarts.
+  double playbackVolume = 1.0;
+
+  /// Records a new level and applies it, if the user is the one listening.
+  Future<void> setPlaybackVolume(double volume) async {
+    playbackVolume = volume.clamp(0.0, 1.0);
+    await _store.writePlaybackVolume(playbackVolume);
+    await playback.applyPreferredVolume();
+    notifyListeners();
+  }
   static const _channel = MethodChannel('duck_downloader/media');
   final AudioPlayer _sfxPlayer = AudioPlayer();
   StreamSubscription? _intentSub;
@@ -3919,6 +3947,9 @@ class DuckDownloadsController extends ChangeNotifier
       playerItem = item;
       notifyListeners();
       try {
+        // Takes the player for music, which is what puts the volume, speed and
+        // loop mode back where music needs them — whatever the video left.
+        await playback.acquire(PlaybackIntent.music, loop: _playerLoopMode());
         await _ensureAudioBackgroundReady();
         if (audioBackgroundReady) {
           await audioPlayer.setAudioSource(
@@ -3937,10 +3968,6 @@ class DuckDownloadsController extends ChangeNotifier
           await audioPlayer.setFilePath(playablePath);
         }
         await _applyPlayerLoopMode();
-        // Said out loud rather than inherited. This player is shared with the
-        // video overlay, which mutes it on purpose, and a track that starts at
-        // whatever the last feature left behind is a track nobody can hear.
-        await audioPlayer.setVolume(1.0);
         await audioPlayer.play();
       } catch (error) {
         playingItem = null;
@@ -4099,11 +4126,15 @@ class DuckDownloadsController extends ChangeNotifier
     };
   }
 
-  Future<void> _applyPlayerLoopMode() async {
-    await audioPlayer.setLoopMode(
-      _loopMode == LoopMode.one ? LoopMode.one : LoopMode.off,
-    );
-  }
+  /// What the player itself is told, which is not what the app calls it.
+  ///
+  /// The player drives one file at a time, so LoopMode.all there would loop
+  /// that file forever and the track would never end — repeat-all is the
+  /// queue's job, not the player's.
+  LoopMode _playerLoopMode() =>
+      _loopMode == LoopMode.one ? LoopMode.one : LoopMode.off;
+
+  Future<void> _applyPlayerLoopMode() => playback.setLoop(_playerLoopMode());
 
   Duration videoResumePosition(String id) {
     final ms = _videoResumePositions[id];
@@ -4259,7 +4290,8 @@ class DuckDownloadsController extends ChangeNotifier
         await _ensureAudioBackgroundReady();
       }
 
-      await audioPlayer.setVolume(0.0); // silent — video provides audio
+      // Silent on purpose: the video is providing the sound.
+      await playback.acquire(PlaybackIntent.videoStandby);
 
       await audioPlayer.setAudioSource(
         AudioSource.file(
@@ -4330,7 +4362,7 @@ class DuckDownloadsController extends ChangeNotifier
     try {
       _backgroundVideoActive = true;
       await audioPlayer.seek(position);
-      await audioPlayer.setVolume(1.0); // unmute — instant!
+      await playback.unmute(); // instant — the source is already loaded
       await audioPlayer.play();
       backgroundAudioError = null;
       debugPrint('BG AUDIO: playing from $position');
@@ -4353,7 +4385,7 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> deactivateBackgroundAudio() async {
     if (!_backgroundVideoActive) return;
     _backgroundVideoActive = false;
-    await audioPlayer.setVolume(0.0); // mute — instant
+    await playback.mute();
     await audioPlayer.pause(); // pause, don't stop (keeps source loaded)
     notifyListeners();
   }
@@ -4364,14 +4396,7 @@ class DuckDownloadsController extends ChangeNotifier
     _backgroundVideoActive = false;
     _backgroundVideoPreloaded = false;
     playingItem = null;
-    await audioPlayer.stop();
-    // Hand the player back at a volume something else can be heard at.
-    //
-    // The video path mutes this player and lets the video's own track be the
-    // sound. Stopping it left the volume at zero, so the next song loaded into
-    // the same player played perfectly and silently — which reads as audio
-    // being broken after you watch a video, and is exactly what it was.
-    await audioPlayer.setVolume(1.0);
+    await playback.release();
     notifyListeners();
   }
 

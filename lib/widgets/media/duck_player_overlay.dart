@@ -1889,7 +1889,11 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                     StreamBuilder<double>(
                       stream: audio.volumeStream,
                       builder: (context, snapshot) {
-                        final vol = snapshot.data ?? audio.volume;
+                        // The slider shows what the user chose, not what the
+                        // player happens to be at — a video holding the player
+                        // keeps it silent, and a slider pinned to zero for
+                        // that reason would look broken.
+                        final vol = widget.controller.playbackVolume;
                         return Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           child: Row(
@@ -1905,7 +1909,14 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
                                   thumbColor: Colors.white,
                                   onChanged: (val) {
                                     _resetHideTimer();
-                                    audio.setVolume(val.inMilliseconds / 1000.0);
+                                    // Recorded as a preference, not poked into
+                                    // the player: it has to survive the video
+                                    // borrowing it, and a restart.
+                                    unawaited(
+                                      widget.controller.setPlaybackVolume(
+                                        val.inMilliseconds / 1000.0,
+                                      ),
+                                    );
                                   },
                                 ),
                               ),

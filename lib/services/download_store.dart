@@ -209,6 +209,23 @@ class DownloadStore {
     });
   }
 
+  /// The volume the user last chose, as a fraction of full.
+  ///
+  /// Persisted because the player is shared: watching a video mutes it, and
+  /// handing it back means handing back the level its owner set — which the
+  /// app has to still know after a restart, or the slider is a control that
+  /// forgets itself.
+  double readPlaybackVolume() {
+    final value = _box.get('playbackVolume');
+    if (value is num) return value.toDouble().clamp(0.0, 1.0);
+    return 1.0;
+  }
+
+  Future<void> writePlaybackVolume(double volume) {
+    if (!isUsable) return Future<void>.value();
+    return _box.put('playbackVolume', volume.clamp(0.0, 1.0));
+  }
+
   List<Playlist> readPlaylists() {
     final raw = _box.get('playlists', defaultValue: const <dynamic>[]);
     if (raw is! List) return const [];

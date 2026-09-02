@@ -10,6 +10,7 @@ import 'package:duck_downloader/services/purchase_repository.dart';
 import 'package:duck_downloader/services/subscription_service.dart';
 import 'package:duck_downloader/services/trim_service.dart';
 import 'package:duck_downloader/state/downloads_controller.dart';
+import 'package:duck_downloader/state/playback_session.dart';
 import 'package:duck_downloader/widgets/media/media_thumb.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -44,32 +45,97 @@ void main() {
     );
   }
 
-  group('the two players share one volume', () {
-    test('closing a video hands the player back audible', () async {
-      // The reported bug, in three steps. Watching a video mutes this player
-      // on purpose — the video's own track is the sound — and closing the
-      // video used to stop it without undoing that. The next song then played
-      // perfectly and silently, which reads as audio being broken after you
-      // watch a video.
+  group('one player, handed between two features', () {
+    test('closing a video hands it back at the level the user set', () async {
+      // The reported bug. Watching a video mutes this player on purpose — the
+      // video's own track is the sound — and closing it used to stop playback
+      // without undoing that, so the next song played perfectly and silently.
       final controller = createController();
       addTearDown(controller.dispose);
 
-      await controller.audioPlayer.setVolume(0.0);
+      await controller.setPlaybackVolume(0.4);
+      await controller.playback.acquire(PlaybackIntent.videoStandby);
       expect(controller.audioPlayer.volume, 0.0);
 
-      await controller.stopBackgroundVideoAudio();
+      await controller.playback.release();
 
+      // Their level, not a hardcoded full volume. The video borrowed the
+      // player; it does not get to overrule what its owner set.
+      expect(controller.audioPlayer.volume, closeTo(0.4, 0.001));
+    });
+
+    test('every shared property comes back, not just the volume', () async {
+      // Volume was the one that got noticed. Loop and speed sit on the same
+      // object and can each do exactly the same thing.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.audioPlayer.setSpeed(2.0);
+      await controller.audioPlayer.setLoopMode(LoopMode.one);
+
+      await controller.playback.acquire(PlaybackIntent.videoStandby);
+      await controller.playback.release();
+
+      expect(controller.audioPlayer.speed, 1.0);
+      expect(controller.audioPlayer.loopMode, LoopMode.off);
       expect(controller.audioPlayer.volume, 1.0);
     });
 
-    test('it is safe to close a video twice', () async {
+    test('taking it for music makes it audible whatever came before', () async {
       final controller = createController();
       addTearDown(controller.dispose);
 
-      await controller.stopBackgroundVideoAudio();
-      await controller.stopBackgroundVideoAudio();
+      await controller.playback.acquire(PlaybackIntent.videoStandby);
+      expect(controller.audioPlayer.volume, 0.0);
 
+      await controller.playback.acquire(PlaybackIntent.music);
       expect(controller.audioPlayer.volume, 1.0);
+      expect(controller.playback.isMusic, isTrue);
+    });
+
+    test('the video keeps it silent however the slider moves', () async {
+      // Otherwise moving the slider during a video plays the same audio twice,
+      // half a second apart.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.playback.acquire(PlaybackIntent.videoStandby);
+      await controller.setPlaybackVolume(0.8);
+
+      expect(controller.audioPlayer.volume, 0.0);
+      expect(controller.playbackVolume, 0.8);
+    });
+
+    test('locking the screen unmutes to the level the user set', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.setPlaybackVolume(0.6);
+      await controller.playback.acquire(PlaybackIntent.videoStandby);
+      await controller.playback.unmute();
+
+      expect(controller.audioPlayer.volume, closeTo(0.6, 0.001));
+    });
+
+    test('nobody holding it is a released player', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      expect(controller.playback.intent, isNull);
+      await controller.playback.acquire(PlaybackIntent.music);
+      expect(controller.playback.intent, PlaybackIntent.music);
+      await controller.playback.release();
+      expect(controller.playback.intent, isNull);
+    });
+
+    test('the chosen level survives a restart', () async {
+      final store = DownloadStore(box);
+      await store.writePlaybackVolume(0.35);
+
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      expect(controller.playbackVolume, closeTo(0.35, 0.001));
     });
   });
 
