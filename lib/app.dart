@@ -58,6 +58,17 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
     );
   }
 
+  /// The player's layer, created once and never replaced.
+  ///
+  /// An OverlayEntry rebuilt on every frame is a subtree torn down and rebuilt
+  /// on every frame, and the player holds a video decoder.
+  late final OverlayEntry _mediaOverlay = OverlayEntry(
+    builder: (_) => ListenableBuilder(
+      listenable: controller,
+      builder: (_, _) => MediaOverlayRouter(controller: controller),
+    ),
+  );
+
   /// Leaves the intro for good.
   ///
   /// The flag is written before the rebuild so a crash between the two cannot
@@ -108,27 +119,27 @@ class _DuckDownloaderAppState extends State<DuckDownloaderApp> {
           ? OnboardingScreen(onFinished: _completeOnboarding)
           : SplashScreen(controller: controller),
       builder: (context, child) {
-        return AnimatedBuilder(
-          animation: controller,
-          builder: (context, child) {
-            return Stack(
-              children: [
-                if (child != null) child,
-                if (controller.playerItem != null)
-                  Material(
-                    type: MaterialType.transparency,
-                    child: Overlay(
-                      initialEntries: [
-                        OverlayEntry(
-                          builder: (_) => MediaOverlayRouter(controller: controller),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            );
-          },
-          child: child,
+        return Stack(
+          children: [
+            if (child != null) child,
+            // Always mounted, and built once.
+            //
+            // This used to be created inside an AnimatedBuilder and added to
+            // the Stack only while something was playing, with a fresh
+            // OverlayEntry each time. Two consequences. Closing the player
+            // tore the whole Overlay down while widgets inside it still
+            // depended on inherited state from it, which is the
+            // `_dependents.isEmpty` assertion and the red screen. And the
+            // AnimatedBuilder rebuilt the entire app on every
+            // notifyListeners — several times a second while a video plays.
+            //
+            // MediaOverlayRouter already returns an empty box when nothing is
+            // open, so it can decide for itself and listen for itself.
+            Material(
+              type: MaterialType.transparency,
+              child: Overlay(initialEntries: [_mediaOverlay]),
+            ),
+          ],
         );
       },
     );
