@@ -281,8 +281,18 @@ class DownloadStore {
   }
 
   Future<void> writeVideoResumePosition(String id, int milliseconds) {
+    if (!isUsable) return Future<void>.value();
     final positions = readVideoResumePositions();
     positions[id] = milliseconds;
+    return _box.put('videoResumePositions', positions);
+  }
+
+  /// Drops the entry rather than storing a zero, so the map does not grow a
+  /// row for every video anyone ever finished.
+  Future<void> clearVideoResumePosition(String id) {
+    if (!isUsable) return Future<void>.value();
+    final positions = readVideoResumePositions();
+    if (positions.remove(id) == null) return Future<void>.value();
     return _box.put('videoResumePositions', positions);
   }
 

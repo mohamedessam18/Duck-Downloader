@@ -46,6 +46,121 @@ void main() {
     );
   }
 
+  group('where a video is left off', () {
+    const id = 'clip-1';
+
+    test('leaving in the middle comes back to the middle', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 2),
+        duration: const Duration(minutes: 10),
+      );
+
+      expect(controller.videoResumePosition(id), const Duration(minutes: 2));
+    });
+
+    test('watching it to the end comes back to the start', () async {
+      // The reported bug: a finished video reopened at its final second.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 5),
+        duration: const Duration(minutes: 10),
+      );
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 10),
+        duration: const Duration(minutes: 10),
+      );
+
+      expect(controller.videoResumePosition(id), Duration.zero);
+    });
+
+    test('the credits count as finished', () async {
+      // The position is only written every few seconds, and people leave
+      // during the credits rather than sitting through the last frame — so the
+      // last point ever recorded is short of the end either way.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 9, seconds: 56),
+        duration: const Duration(minutes: 10),
+      );
+
+      expect(controller.videoResumePosition(id), Duration.zero);
+    });
+
+    test('stopping just before the tail still resumes', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 9, seconds: 30),
+        duration: const Duration(minutes: 10),
+      );
+
+      expect(
+        controller.videoResumePosition(id),
+        const Duration(minutes: 9, seconds: 30),
+      );
+    });
+
+    test('finishing forgets a position already stored', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 4),
+        duration: const Duration(minutes: 10),
+      );
+      expect(controller.videoResumePosition(id), const Duration(minutes: 4));
+
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 10),
+        duration: const Duration(minutes: 10),
+      );
+      expect(controller.videoResumePosition(id), Duration.zero);
+    });
+
+    test('an unknown length is saved as before', () async {
+      // Callers that cannot supply one must not lose the feature.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.saveVideoResumePosition(id, const Duration(minutes: 3));
+      expect(controller.videoResumePosition(id), const Duration(minutes: 3));
+    });
+
+    test('one video finishing does not forget another', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.saveVideoResumePosition(
+        'other',
+        const Duration(minutes: 1),
+        duration: const Duration(minutes: 10),
+      );
+      controller.saveVideoResumePosition(
+        id,
+        const Duration(minutes: 10),
+        duration: const Duration(minutes: 10),
+      );
+
+      expect(controller.videoResumePosition('other'), const Duration(minutes: 1));
+      expect(controller.videoResumePosition(id), Duration.zero);
+    });
+  });
+
   group('one player, handed between two features', () {
     test('closing a video hands it back at the level the user set', () async {
       // The reported bug. Watching a video mutes this player on purpose — the

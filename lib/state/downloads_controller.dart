@@ -4174,13 +4174,41 @@ class DuckDownloadsController extends ChangeNotifier
     return Duration(milliseconds: ms);
   }
 
-  void saveVideoResumePosition(String id, Duration position) {
+  /// How close to the end counts as having watched it.
+  ///
+  /// Not just `position >= duration`. The position is only written every few
+  /// seconds, and someone who reaches the credits usually leaves rather than
+  /// sitting through the last frame — so the last point ever recorded is a few
+  /// seconds short of the end either way. Treating that as "still watching"
+  /// is what reopened a finished video at its final second.
+  static const _watchedTailSeconds = 8;
+
+  void saveVideoResumePosition(
+    String id,
+    Duration position, {
+    Duration? duration,
+  }) {
     final ms = position.inMilliseconds;
     if (ms <= 0) return;
+
+    if (duration != null && duration > Duration.zero) {
+      final remaining = duration - position;
+      if (remaining.inSeconds <= _watchedTailSeconds) {
+        clearVideoResumePosition(id);
+        return;
+      }
+    }
+
     final previous = _videoResumePositions[id];
     if (previous != null && (ms - previous).abs() < 3000) return;
     _videoResumePositions[id] = ms;
     unawaited(_store.writeVideoResumePosition(id, ms));
+  }
+
+  /// Forgets where a video was left, so it opens at the start again.
+  void clearVideoResumePosition(String id) {
+    if (_videoResumePositions.remove(id) == null) return;
+    unawaited(_store.clearVideoResumePosition(id));
   }
 
   Future<void> _initializePlatformServices() async {

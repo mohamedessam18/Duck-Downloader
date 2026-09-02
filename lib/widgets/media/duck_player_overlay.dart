@@ -287,6 +287,10 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
     widget.controller.saveVideoResumePosition(
       widget.item.id,
       video.value.position,
+      // Handed the length so it can tell "left off here" from "watched it".
+      // Without that, a video reopened at its final second, because the last
+      // position ever written was the one nearest the end.
+      duration: video.value.duration,
     );
     // Re-apply speed on Android every time the video starts playing
     // (Android may reset speed after seek/buffer events)
@@ -556,7 +560,11 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
 
     _backgroundHandoffActive = true;
     _savedPositionForHandoff = video.value.position;
-    widget.controller.saveVideoResumePosition(widget.item.id, _savedPositionForHandoff);
+    widget.controller.saveVideoResumePosition(
+      widget.item.id,
+      _savedPositionForHandoff,
+      duration: video.value.duration,
+    );
 
     // Activate pre-loaded audio: seek + unmute + play (nearly instant)
     await widget.controller.ensureAndActivateBackgroundAudio(widget.item, _savedPositionForHandoff);
