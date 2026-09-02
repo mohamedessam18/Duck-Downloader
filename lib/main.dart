@@ -65,7 +65,13 @@ Future<void> main() async {
     await JustAudioBackground.init(
       androidNotificationChannelId: 'com.duck.downloader.audio',
       androidNotificationChannelName: 'Duck Audio Playback',
-      androidNotificationOngoing: true,
+      // Not "ongoing". That flag means exactly one thing — the user cannot
+      // swipe it away — and it is why the media notification stayed on the
+      // shade after the video was closed and the player stopped. Android 13
+      // and up already refuse to let a media notification be dismissed while
+      // something is actually playing, so the flag bought nothing and cost
+      // that.
+      androidNotificationOngoing: false,
     );
   } catch (error, stackTrace) {
     reportError(error, stackTrace, reason: 'audio-background-init');
