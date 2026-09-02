@@ -15,6 +15,7 @@ import 'package:duck_downloader/state/playback_session.dart';
 import 'package:duck_downloader/widgets/media/media_thumb.dart';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
@@ -32,6 +33,14 @@ void main() {
   setUp(() async {
     sandbox = await Directory.systemTemp.createTemp('duck-audio-queue-test');
     PathProviderPlatform.instance = _FakePaths(sandbox.path);
+    // just_audio reaches for its platform side on a background future the
+    // controller cannot catch, so without a stand-in the plugin — not the
+    // behaviour under test — fails the test.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('com.ryanheise.just_audio.methods'),
+          (call) async => <String, dynamic>{},
+        );
     box = FakeBox();
   });
 
@@ -60,6 +69,93 @@ void main() {
       initializePlatformServices: false,
     );
   }
+
+  group('a playlist decides what plays next', () {
+    DownloadItem clip(String id, {DownloadType type = DownloadType.video}) =>
+        DownloadItem(
+          id: id,
+          url: 'https://example.com/$id',
+          title: id,
+          platform: 'Example',
+          type: type,
+          filePath: '/tmp/$id',
+          createdAt: DateTime.utc(2026),
+          status: DownloadStatus.completed,
+          progress: 100,
+          favorite: false,
+        );
+
+    test('the next video comes from the playlist, not the library', () async {
+      // The bug: video passed no queue, so up-next was built from every video
+      // on the phone. Opening a lesson from a course playlist and letting it
+      // finish took you somewhere else entirely.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      for (final id in ['lesson-1', 'lesson-2', 'unrelated']) {
+        await controller.debugPutDownload(clip(id));
+      }
+      // Built in a known order rather than derived from the library, whose
+      // own order is by date — and these all share one.
+      final byId = {for (final item in controller.videos) item.id: item};
+      final playlist = [byId['lesson-1']!, byId['lesson-2']!];
+
+      await controller.openPlayer(playlist.first, queueItems: playlist);
+      controller.buildVideoQueue(playlist.first);
+
+      expect(controller.hasNextVideo, isTrue);
+      controller.playNextVideo();
+      // Opening is async, so let it land before asking what is playing.
+      await pumpEventQueue();
+      expect(controller.playerItem?.id, 'lesson-2');
+      // And it stops at the end of the playlist rather than wandering on.
+      expect(controller.hasNextVideo, isFalse);
+    });
+
+    test('opening from the library still walks the library', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      for (final id in ['a', 'b']) {
+        await controller.debugPutDownload(clip(id));
+      }
+
+      await controller.openPlayer(controller.videos.first);
+      controller.buildVideoQueue(controller.videos.first);
+
+      expect(controller.hasNextVideo, isTrue);
+    });
+
+    test('a one-item playlist has nowhere to go, and says so', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(clip('only'));
+      await controller.debugPutDownload(clip('other'));
+      final single = [controller.videos.firstWhere((e) => e.id == 'only')];
+
+      await controller.openPlayer(single.first, queueItems: single);
+      controller.buildVideoQueue(single.first);
+
+      expect(controller.hasNextVideo, isFalse);
+    });
+
+    test('audio keeps working the way it already did', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      for (final id in ['song-1', 'song-2', 'elsewhere']) {
+        await controller.debugPutDownload(clip(id, type: DownloadType.audio));
+      }
+      final byId = {for (final item in controller.audios) item.id: item};
+      final playlist = [byId['song-1']!, byId['song-2']!];
+
+      await controller.openPlayer(playlist.first, queueItems: playlist);
+      await controller.playItem(playlist.first);
+
+      expect(controller.hasNextTrack, isTrue);
+    });
+  });
 
   group('filing files into folders', () {
     DownloadItem file(String id, {String? folder}) => DownloadItem(

@@ -5048,14 +5048,19 @@ class _PlaylistItemsView extends StatelessWidget {
                     children: [
                       Expanded(
                         child: InkWell(
+                          // The playlist decides what plays next, whichever
+                          // kind of file it holds. Video used to pass nothing
+                          // here, so the next video came from the library at
+                          // large and the playlist stopped mattering the
+                          // moment one finished.
                           onTap: () => controller.openPlayer(
                             item,
                             galleryItems: type == DownloadType.image
                                 ? items
                                 : null,
-                            queueItems: type == DownloadType.audio
-                                ? items
-                                : null,
+                            queueItems: type == DownloadType.image
+                                ? null
+                                : items,
                           ),
                           child: Row(
                             children: [

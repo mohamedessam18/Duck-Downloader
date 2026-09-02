@@ -443,7 +443,12 @@ class DuckDownloadsController extends ChangeNotifier
   DownloadItem? playerItem;
   String? _playerTempPath;
   List<DownloadItem>? playerGalleryItems;
-  List<DownloadItem>? _audioQueueSource;
+  /// The list the player should move through, when the caller named one.
+  ///
+  /// Was `_queueSource`: only music read it, so opening a video from a
+  /// playlist built its up-next from the whole library instead — the playlist
+  /// you were standing in was ignored the moment the video ended.
+  List<DownloadItem>? _queueSource;
   final Set<String> controlPendingIds = {};
   final Map<String, StreamSubscription> _downloadSubscriptions = {};
 
@@ -2082,7 +2087,7 @@ class DuckDownloadsController extends ChangeNotifier
       unawaited(_clearPlayerTemp());
       playerItem = item;
       playerGalleryItems = galleryItems;
-      _audioQueueSource = queueItems;
+      _queueSource = queueItems;
       notifyListeners();
       return;
     }
@@ -2107,7 +2112,7 @@ class DuckDownloadsController extends ChangeNotifier
 
     playerItem = playableItem;
     playerGalleryItems = galleryItems;
-    _audioQueueSource = queueItems;
+    _queueSource = queueItems;
     notifyListeners();
   }
 
@@ -2140,7 +2145,7 @@ class DuckDownloadsController extends ChangeNotifier
     unawaited(_clearPlayerTemp());
     playerItem = null;
     playerGalleryItems = null;
-    _audioQueueSource = null;
+    _queueSource = null;
     // Before the notify, not after. Releasing the standby copy is a platform
     // call and finishes some frames later, and every one of those frames drew
     // a mini player for a video that had just been closed.
@@ -4409,7 +4414,7 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void _buildAudioQueue(DownloadItem item, {bool forceReshuffle = false}) {
-    final source = _audioQueueSource ?? audios;
+    final source = _queueSource ?? audios;
     final sourceKey = source.map((entry) => entry.id).join('|');
     final sourceChanged = sourceKey != _lastQueueSourceKey;
     _lastQueueSourceKey = sourceKey;
@@ -4467,7 +4472,10 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   void buildVideoQueue(DownloadItem item) {
-    final source = playerGalleryItems ?? videos;
+    // The list the player was opened with wins. A playlist that does not
+    // decide what plays next is not a playlist, it is a folder with a
+    // different icon.
+    final source = _queueSource ?? playerGalleryItems ?? videos;
     _videoQueue = source
         .where((entry) => entry.filePath != null && entry.isVideo)
         .toList();
@@ -4485,7 +4493,7 @@ class DuckDownloadsController extends ChangeNotifier
       openPlayer(
         _videoQueue[_videoQueueIndex],
         galleryItems: playerGalleryItems,
-        queueItems: _audioQueueSource,
+        queueItems: _queueSource,
       ),
     );
   }
@@ -4497,7 +4505,7 @@ class DuckDownloadsController extends ChangeNotifier
       openPlayer(
         _videoQueue[_videoQueueIndex],
         galleryItems: playerGalleryItems,
-        queueItems: _audioQueueSource,
+        queueItems: _queueSource,
       ),
     );
   }
