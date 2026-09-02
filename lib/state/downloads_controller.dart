@@ -184,7 +184,17 @@ class DuckDownloadsController extends ChangeNotifier
   bool showAdOnOpen = false;
   late final StreamSubscription<PlayerState> _playerStateSubscription;
   late final StreamSubscription<Duration> _playerPositionSubscription;
+  /// The track the user is listening to. Audio only.
+  ///
+  /// A video's silent standby copy used to be written here too, which is how a
+  /// video ended up in the audio mini player labelled as a file — the field
+  /// meant "loaded into the audio player", and the app read it as "what the
+  /// user is listening to". Those are not the same thing, so they are not the
+  /// same field any more.
   DownloadItem? playingItem;
+
+  /// The video whose audio is loaded and waiting for the screen to lock.
+  DownloadItem? backgroundVideoItem;
   List<DownloadItem> _audioQueue = [];
   int _audioQueueIndex = 0;
   List<DownloadItem> _videoQueue = [];
@@ -2021,6 +2031,11 @@ class DuckDownloadsController extends ChangeNotifier
     playerItem = null;
     playerGalleryItems = null;
     _audioQueueSource = null;
+    // Before the notify, not after. Releasing the standby copy is a platform
+    // call and finishes some frames later, and every one of those frames drew
+    // a mini player for a video that had just been closed.
+    backgroundVideoItem = null;
+    unawaited(stopBackgroundVideoAudio());
     notifyListeners();
   }
 
@@ -4426,7 +4441,7 @@ class DuckDownloadsController extends ChangeNotifier
       });
 
       _backgroundVideoPreloaded = true;
-      playingItem = item;
+      backgroundVideoItem = item;
       backgroundAudioError = null;
       debugPrint('BG AUDIO: preloaded and session started for ${item.title}');
     } catch (e) {
@@ -4501,7 +4516,7 @@ class DuckDownloadsController extends ChangeNotifier
   Future<void> stopBackgroundVideoAudio() async {
     _backgroundVideoActive = false;
     _backgroundVideoPreloaded = false;
-    playingItem = null;
+    backgroundVideoItem = null;
     await playback.release();
     notifyListeners();
   }

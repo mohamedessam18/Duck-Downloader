@@ -46,6 +46,65 @@ void main() {
     );
   }
 
+  group('a video is not a track', () {
+    DownloadItem video(String id) => DownloadItem(
+      id: id,
+      url: 'https://example.com/$id',
+      title: 'A video',
+      platform: 'Example',
+      type: DownloadType.video,
+      filePath: '/tmp/$id.mp4',
+      createdAt: DateTime.utc(2026),
+      status: DownloadStatus.completed,
+      progress: 100,
+      favorite: false,
+    );
+
+    test('the standby copy is not what the user is listening to', () async {
+      // A video's silent standby used to be written into playingItem, which
+      // is what the mini player reads — so a paused video sat in the audio bar
+      // labelled "Audio file".
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.backgroundVideoItem = video('clip');
+
+      expect(controller.playingItem, isNull);
+    });
+
+    test('closing the player leaves no bar behind', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      controller.backgroundVideoItem = video('clip');
+      controller.playerItem = video('clip');
+
+      controller.closePlayer();
+
+      // Cleared in the same turn as the notify, not some frames later when the
+      // platform call finishes — every one of those frames drew the bar.
+      expect(controller.backgroundVideoItem, isNull);
+      expect(controller.playingItem, isNull);
+      expect(controller.playerItem, isNull);
+    });
+
+    test('closing does not disturb a track that is actually playing', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      final song = video('song').copyWith(type: DownloadType.audio);
+      controller.playingItem = song;
+      controller.playerItem = song;
+
+      controller.closePlayer();
+
+      // The bar is meant to survive closing the full player — that is the
+      // whole point of it.
+      expect(controller.playingItem, isNotNull);
+      expect(controller.playerItem, isNull);
+    });
+  });
+
   group('where a video is left off', () {
     const id = 'clip-1';
 

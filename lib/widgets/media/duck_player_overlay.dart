@@ -198,7 +198,7 @@ class _DuckPlayerOverlayState extends State<DuckPlayerOverlay>
               _video?.addListener(_videoListener);
               var resume = widget.controller.videoResumePosition(widget.item.id);
               if (widget.controller.isBackgroundVideoActive &&
-                  widget.controller.playingItem?.id == widget.item.id) {
+                  widget.controller.backgroundVideoItem?.id == widget.item.id) {
                 resume = widget.controller.audioPlayer.position;
                 await widget.controller.stopBackgroundVideoAudio();
               }

@@ -88,7 +88,14 @@ class MiniPlayer extends StatelessWidget {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                item.artist ?? 'Audio file',
+                                // Asked, not assumed. This bar was written for
+                                // music and described whatever it was handed
+                                // as an audio file — so a paused video sat in
+                                // it labelled "Audio file", which is what it
+                                // looked like to the user: the app losing
+                                // track of what their file was.
+                                item.artist ??
+                                    (item.isVideo ? 'Video' : 'Audio file'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style:
