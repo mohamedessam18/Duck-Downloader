@@ -22,6 +22,9 @@ class AppLocalizations {
     'en': {
       'appName': 'Duck Downloader',
       'trashTitle': 'Recently deleted',
+      'selectAll': 'Select all',
+      'selectNone': 'Clear selection',
+      'share': 'Share',
       'trashTitleVideos': 'Deleted videos',
       'trashTitleAudios': 'Deleted audio',
       'trashTitleImages': 'Deleted images',
@@ -244,6 +247,9 @@ class AppLocalizations {
     'ar': {
       'appName': 'Duck Downloader',
       'trashTitle': 'المحذوفات',
+      'selectAll': 'اختار الكل',
+      'selectNone': 'ألغِ الاختيار',
+      'share': 'مشاركة',
       'trashTitleVideos': 'الفيديوهات المحذوفة',
       'trashTitleAudios': 'الصوتيات المحذوفة',
       'trashTitleImages': 'الصور المحذوفة',

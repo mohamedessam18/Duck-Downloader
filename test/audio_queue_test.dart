@@ -46,6 +46,76 @@ void main() {
     );
   }
 
+  group('acting on several files at once', () {
+    DownloadItem file(String id) => DownloadItem(
+      id: id,
+      url: 'https://example.com/$id',
+      title: id,
+      platform: 'Example',
+      type: DownloadType.video,
+      filePath: '/tmp/$id.mp4',
+      createdAt: DateTime.utc(2026),
+      status: DownloadStatus.completed,
+      progress: 100,
+      favorite: false,
+    );
+
+    test('deleting several leaves none of them behind', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      for (final id in ['a', 'b', 'c']) {
+        await controller.debugPutDownload(file(id));
+      }
+
+      await controller.deleteMany(
+        controller.videos.where((item) => item.id != 'b'),
+      );
+
+      expect(controller.videos.map((e) => e.id), ['b']);
+      expect(controller.trashedItems.map((e) => e.id).toSet(), {'a', 'c'});
+    });
+
+    test('one tap has one outcome, not a flip each', () async {
+      // Half favourited and half not: making them all favourites is what the
+      // user asked for. Toggling each row would leave the set exactly as
+      // mixed as it started.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a'));
+      await controller.debugPutDownload(file('b').copyWith(favorite: true));
+
+      await controller.favoriteMany(controller.videos, true);
+
+      expect(controller.videos.every((item) => item.favorite), isTrue);
+    });
+
+    test('and it can take them all back off', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a').copyWith(favorite: true));
+      await controller.debugPutDownload(file('b').copyWith(favorite: true));
+
+      await controller.favoriteMany(controller.videos, false);
+
+      expect(controller.videos.any((item) => item.favorite), isFalse);
+    });
+
+    test('an empty selection does nothing at all', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+      await controller.debugPutDownload(file('a'));
+
+      await controller.deleteMany(const []);
+      await controller.favoriteMany(const [], true);
+
+      expect(controller.videos, hasLength(1));
+      expect(controller.trashedItems, isEmpty);
+    });
+  });
+
   group('deleting actually removes it from the library', () {
     DownloadItem file(String id, {String path = ''}) => DownloadItem(
       id: id,

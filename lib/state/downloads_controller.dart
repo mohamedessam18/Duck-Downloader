@@ -3357,6 +3357,34 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
+  /// Deletes several files in one go.
+  ///
+  /// Sequential on purpose. Each one moves a file and rewrites the stored
+  /// list, and running those together is how rows went missing when downloads
+  /// first ran three at a time.
+  Future<void> deleteMany(Iterable<DownloadItem> items) async {
+    for (final item in items.toList()) {
+      await deleteDownload(item);
+    }
+  }
+
+  Future<void> favoriteMany(Iterable<DownloadItem> items, bool favorite) async {
+    for (final item in items.toList()) {
+      if (item.favorite == favorite) continue;
+      await toggleFavorite(item);
+    }
+  }
+
+  /// Shares several files as one sheet, rather than one sheet each.
+  Future<void> shareMany(Iterable<DownloadItem> items) async {
+    final paths = [
+      for (final item in items)
+        if (item.filePath != null) item.filePath!,
+    ];
+    if (paths.isEmpty) return;
+    await _files.shareFiles(paths);
+  }
+
   /// Puts a file back where it came from.
   Future<bool> restoreFromTrash(DownloadItem item) async {
     if (!item.isDeleted) return false;

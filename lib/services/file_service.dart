@@ -61,6 +61,14 @@ class DuckFileService {
     await SharePlus.instance.share(ShareParams(files: [XFile(filePath)]));
   }
 
+  /// One sheet for several files, rather than one sheet each.
+  Future<void> shareFiles(List<String> filePaths) async {
+    if (filePaths.isEmpty) return;
+    await SharePlus.instance.share(
+      ShareParams(files: [for (final path in filePaths) XFile(path)]),
+    );
+  }
+
   String _sanitizeFilename(String value, {int maxLength = 60}) {
     var sanitized = value
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')

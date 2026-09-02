@@ -2189,6 +2189,26 @@ class _LibraryViewState extends State<_LibraryView> {
   late final TextEditingController _searchController = TextEditingController(
     text: widget.controller.libraryView.query,
   );
+
+  /// Which rows the user has picked out.
+  ///
+  /// Ids rather than items, because the list is rebuilt from storage after
+  /// every action — holding the objects would keep a selection pointing at
+  /// rows that no longer exist.
+  final Set<String> _selected = {};
+
+  bool get _isSelecting => _selected.isNotEmpty;
+
+  void _toggleSelected(DownloadItem item) {
+    setState(() {
+      if (!_selected.remove(item.id)) _selected.add(item.id);
+    });
+  }
+
+  void _clearSelection() => setState(_selected.clear);
+
+  List<DownloadItem> _selectedFrom(List<DownloadItem> items) =>
+      items.where((item) => _selected.contains(item.id)).toList();
   bool _useGridLayout = true;
   Offset? _dragPillOffset;
   bool _isDraggingPill = false;
@@ -2507,6 +2527,98 @@ class _LibraryViewState extends State<_LibraryView> {
     _ => DownloadType.image,
   };
 
+  /// What you can do with what you have picked.
+  ///
+  /// Above the list rather than floating over it: these actions change the
+  /// rows underneath, and a bar covering the bottom two would hide half of
+  /// what a delete is about to take.
+  Widget _buildSelectionBar(BuildContext context, List<DownloadItem> shown) {
+    if (!_isSelecting) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context);
+    final picked = _selectedFrom(shown);
+    final allPicked = picked.length == shown.length && shown.isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: _panel,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _gold.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: l10n.translate('cancel'),
+            icon: Icon(Icons.close, color: _textMuted, size: 20),
+            onPressed: _clearSelection,
+          ),
+          Text(
+            '${picked.length}',
+            style: TextStyle(
+              color: _gold,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: l10n.translate(allPicked ? 'selectNone' : 'selectAll'),
+            icon: Icon(
+              allPicked ? Icons.deselect : Icons.select_all,
+              color: _gold,
+              size: 20,
+            ),
+            onPressed: () => setState(() {
+              if (allPicked) {
+                _selected.clear();
+              } else {
+                _selected.addAll(shown.map((item) => item.id));
+              }
+            }),
+          ),
+          IconButton(
+            tooltip: l10n.translate('favorites'),
+            icon: Icon(Icons.favorite_border, color: _gold, size: 20),
+            onPressed: picked.isEmpty
+                ? null
+                : () async {
+                    // Whatever most of them are not, they all become — so one
+                    // tap has one outcome rather than flipping each row.
+                    final makeFavourite = picked.any((item) => !item.favorite);
+                    await widget.controller.favoriteMany(picked, makeFavourite);
+                    _clearSelection();
+                  },
+          ),
+          IconButton(
+            tooltip: l10n.translate('share'),
+            icon: Icon(Icons.ios_share, color: _gold, size: 20),
+            onPressed: picked.isEmpty
+                ? null
+                : () async {
+                    await widget.controller.shareMany(picked);
+                    _clearSelection();
+                  },
+          ),
+          IconButton(
+            tooltip: l10n.translate('trashDeleteNow'),
+            icon: const Icon(
+              Icons.delete_outline,
+              color: _danger,
+              size: 20,
+            ),
+            onPressed: picked.isEmpty
+                ? null
+                : () async {
+                    await widget.controller.deleteMany(picked);
+                    _clearSelection();
+                  },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTabOption(_LibrarySubTab tab, String label, bool active) {
     return Expanded(
       child: GestureDetector(
@@ -2646,6 +2758,7 @@ class _LibraryViewState extends State<_LibraryView> {
           const SizedBox(height: 8),
           _buildUnifiedSubTabBar(),
           _buildSearchAndSort(context),
+          _buildSelectionBar(context, filteredItems),
           const SizedBox(height: 10),
           Expanded(
             child: _subTab == _LibrarySubTab.folders
@@ -2689,10 +2802,13 @@ class _LibraryViewState extends State<_LibraryView> {
                         index: index,
                         child: Pressable(
                         pressedScale: 0.94,
-                        onTap: () => widget.controller.openPlayer(
-                          item,
-                          galleryItems: filteredItems,
-                        ),
+                        onLongPress: () => _toggleSelected(item),
+                        onTap: () => _isSelecting
+                            ? _toggleSelected(item)
+                            : widget.controller.openPlayer(
+                                item,
+                                galleryItems: filteredItems,
+                              ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(10),
                           child: Stack(
@@ -2705,7 +2821,7 @@ class _LibraryViewState extends State<_LibraryView> {
                                 height: double.infinity,
                                 radius: 10,
                               ),
-                              if (item.favorite)
+                              if (item.favorite && !_isSelecting)
                                 const Positioned(
                                   top: 6,
                                   right: 6,
@@ -2714,6 +2830,10 @@ class _LibraryViewState extends State<_LibraryView> {
                                     color: _danger,
                                     size: 16,
                                   ),
+                                ),
+                              if (_isSelecting)
+                                _SelectionVeil(
+                                  selected: _selected.contains(item.id),
                                 ),
                             ],
                           ),
@@ -2733,6 +2853,10 @@ class _LibraryViewState extends State<_LibraryView> {
                         queueItems: widget.title == 'AUDIOS'
                             ? filteredItems
                             : null,
+                        selectionActive: _isSelecting,
+                        selected: _selected.contains(filteredItems[index].id),
+                        onToggleSelected: () =>
+                            _toggleSelected(filteredItems[index]),
                       ),
                     ),
                     separatorBuilder: (_, _) =>
@@ -2999,6 +3123,9 @@ class _DownloadRow extends StatelessWidget {
     required this.controller,
     this.galleryItems,
     this.queueItems,
+    this.selectionActive = false,
+    this.selected = false,
+    this.onToggleSelected,
   });
 
   final DownloadItem item;
@@ -3006,17 +3133,18 @@ class _DownloadRow extends StatelessWidget {
   final List<DownloadItem>? galleryItems;
   final List<DownloadItem>? queueItems;
 
+  /// True once anything is selected, which is what turns a tap into a pick
+  /// rather than an open.
+  final bool selectionActive;
+  final bool selected;
+  final VoidCallback? onToggleSelected;
+
   String _getFileSize(DownloadItem item) {
-    if (item.filePath == null) return '0.0 MB';
-    try {
-      final file = File(item.filePath!);
-      if (file.existsSync()) {
-        final bytes = file.lengthSync();
-        final mb = bytes / (1024 * 1024);
-        return '${mb.toStringAsFixed(1)} MB';
-      }
-    } catch (_) {}
-    return '0.0 MB';
+    // The recorded size, not a fresh stat. This ran inside `build`, once per
+    // visible row on every frame, for as long as the screen was open.
+    final bytes = item.fileSizeBytes;
+    if (bytes == null) return '0.0 MB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   Widget _buildGridIcon() {
@@ -3061,13 +3189,27 @@ class _DownloadRow extends StatelessWidget {
         children: [
           Expanded(
             child: InkWell(
-              onTap: () => controller.openPlayer(
-                item,
-                galleryItems: galleryItems,
-                queueItems: queueItems,
-              ),
+              onLongPress: onToggleSelected,
+              onTap: () => selectionActive
+                  ? onToggleSelected?.call()
+                  : controller.openPlayer(
+                      item,
+                      galleryItems: galleryItems,
+                      queueItems: queueItems,
+                    ),
               child: Row(
                 children: [
+                  if (selectionActive)
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(end: 6),
+                      child: Icon(
+                        selected
+                            ? Icons.check_circle
+                            : Icons.radio_button_unchecked,
+                        color: selected ? _gold : _textMuted,
+                        size: 22,
+                      ),
+                    ),
                   _Thumb(
                     url: item.thumbnail,
                     filePath: item.filePath,
@@ -6795,6 +6937,36 @@ class _TrashButton extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// The tick over a picked thumbnail.
+///
+/// A wash rather than a badge alone: on a grid of photographs a small mark in
+/// a corner disappears into whatever is behind it, and a selection you cannot
+/// read at a glance is one you undo by accident.
+class _SelectionVeil extends StatelessWidget {
+  const _SelectionVeil({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: selected
+            ? _gold.withValues(alpha: 0.28)
+            : Colors.black.withValues(alpha: 0.28),
+        border: selected ? Border.all(color: _gold, width: 2) : null,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        selected ? Icons.check_circle : Icons.radio_button_unchecked,
+        color: selected ? _gold : Colors.white70,
+        size: 26,
+      ),
     );
   }
 }
