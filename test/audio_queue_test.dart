@@ -46,6 +46,97 @@ void main() {
     );
   }
 
+  group('deleting actually removes it from the library', () {
+    DownloadItem file(String id, {String path = ''}) => DownloadItem(
+      id: id,
+      url: 'https://example.com/$id',
+      title: id,
+      platform: 'Example',
+      type: DownloadType.video,
+      filePath: path.isEmpty ? '/tmp/$id.mp4' : path,
+      createdAt: DateTime.utc(2026),
+      status: DownloadStatus.completed,
+      progress: 100,
+      favorite: false,
+    );
+
+    test('a deleted file leaves the list and lands in the trash', () async {
+      // The report: deleting appeared to do nothing. The store merged updates
+      // from a hand-written list of fields, `deletedAt` was not on it, so the
+      // flag was written and immediately dropped — the row came back
+      // undeleted and the file stayed in the library.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('clip'));
+      expect(controller.videos.map((e) => e.id), contains('clip'));
+
+      await controller.deleteDownload(controller.videos.first);
+
+      expect(controller.videos.map((e) => e.id), isNot(contains('clip')));
+      expect(controller.trashedItems.map((e) => e.id), contains('clip'));
+    });
+
+    test('restoring puts it back in the list', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('clip'));
+      await controller.deleteDownload(controller.videos.first);
+      expect(controller.videos, isEmpty);
+
+      await controller.restoreFromTrash(controller.trashedItems.first);
+
+      expect(controller.videos.map((e) => e.id), contains('clip'));
+      expect(controller.trashedItems, isEmpty);
+    });
+
+    test('deleting for good leaves no row at all', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('clip'));
+      await controller.deleteDownload(controller.videos.first);
+      await controller.deleteForever(controller.trashedItems.first);
+
+      expect(controller.videos, isEmpty);
+      expect(controller.trashedItems, isEmpty);
+      expect(controller.downloads.map((e) => e.id), isNot(contains('clip')));
+    });
+
+    test('the days left count down and reach the last day', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      final justDeleted = file('a').copyWith(deletedAt: DateTime.now());
+      expect(controller.daysLeftInTrash(justDeleted), 7);
+
+      final nearlyGone = file('b').copyWith(
+        deletedAt: DateTime.now().subtract(const Duration(days: 6, hours: 23)),
+      );
+      expect(controller.daysLeftInTrash(nearlyGone), 1);
+
+      final overdue = file('c').copyWith(
+        deletedAt: DateTime.now().subtract(const Duration(days: 9)),
+      );
+      expect(controller.daysLeftInTrash(overdue), 0);
+    });
+
+    test('deleting one file does not disturb another', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('keep'));
+      await controller.debugPutDownload(file('drop'));
+
+      await controller.deleteDownload(
+        controller.videos.firstWhere((e) => e.id == 'drop'),
+      );
+
+      expect(controller.videos.map((e) => e.id), ['keep']);
+    });
+  });
+
   group('a video is not a track', () {
     DownloadItem video(String id) => DownloadItem(
       id: id,

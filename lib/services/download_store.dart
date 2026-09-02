@@ -175,25 +175,19 @@ class DownloadStore {
     final items = readDownloads();
     final index = items.indexWhere((existing) => existing.id == item.id);
     if (index >= 0) {
-      items[index] = items[index].copyWith(
-        url: item.url,
-        title: item.title,
-        thumbnail: item.thumbnail,
-        platform: item.platform,
-        quality: item.quality,
-        type: item.type,
-        filePath: item.filePath,
-        createdAt: item.createdAt,
-        status: item.status,
-        progress: item.progress,
-        favorite: item.favorite,
-        savedToGallery: item.savedToGallery,
-        savedToMusic: item.savedToMusic,
-        isPrivate: item.isPrivate,
-        externalSaveError: item.externalSaveError,
-        artist: item.artist,
-        album: item.album,
-      );
+      // The row is replaced, not merged field by field.
+      //
+      // It used to copy a hand-written list of fields onto the stored row, and
+      // that list is impossible to keep correct: every field added to
+      // DownloadItem after it was written silently failed to save. That is not
+      // hypothetical — deleting a file stopped working the moment `deletedAt`
+      // existed, because the flag was written and then dropped here, so the
+      // row came back undeleted and the file never left the library.
+      //
+      // Callers build the new row from the current one, so the item they pass
+      // is already the whole truth. Merging it with itself only created
+      // somewhere for a field to go missing.
+      items[index] = item;
     } else {
       items.insert(0, item);
     }

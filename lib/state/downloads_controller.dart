@@ -1176,6 +1176,15 @@ class DuckDownloadsController extends ChangeNotifier
     }
   }
 
+  /// Puts one row straight into the library. Tests only.
+  @visibleForTesting
+  Future<void> debugPutDownload(DownloadItem item) async {
+    await _store.upsert(item);
+    _downloads = _store.readDownloads();
+    _mergePrivateMetadata();
+    notifyListeners();
+  }
+
   /// Fires the same request the audio session does. Tests only.
   @visibleForTesting
   void debugRequestPauseEverything() => _requestPauseEverything();
@@ -3339,14 +3348,19 @@ class DuckDownloadsController extends ChangeNotifier
   /// Puts a file back where it came from.
   Future<bool> restoreFromTrash(DownloadItem item) async {
     if (!item.isDeleted) return false;
-    final restoredPath = await _trash.moveOut(
-      item.trashedPath,
-      item.originalPath,
-    );
-    if (restoredPath == null) {
-      setStatus('trashRestoreFailed');
-      notifyListeners();
-      return false;
+
+    // A row whose file was already gone when it was deleted has nothing to
+    // move back — but the row itself is real and the user asked for it. Give
+    // it back pointing where it used to, which is a state the library already
+    // knows how to show.
+    String? restoredPath = item.originalPath ?? item.filePath;
+    if (item.trashedPath != null) {
+      restoredPath = await _trash.moveOut(item.trashedPath, item.originalPath);
+      if (restoredPath == null) {
+        setStatus('trashRestoreFailed');
+        notifyListeners();
+        return false;
+      }
     }
 
     final restored = item.copyWith(
