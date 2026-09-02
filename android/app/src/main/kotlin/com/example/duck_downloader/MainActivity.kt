@@ -195,6 +195,36 @@ class MainActivity : AudioServiceFragmentActivity() {
                             result.success(saveMedia(path, filename, mimeType, false))
                         }
                     }
+                    // Filing a download into one of the user's own folders.
+                    // Those live in the phone's media collections, not in the
+                    // app's private storage, so the folder is visible in a
+                    // file manager — which is the whole point of it.
+                    "moveIntoFolder" -> {
+                        val path = call.argument<String>("path")
+                        val filename = call.argument<String>("filename")
+                        val mimeType = call.argument<String>("mimeType")
+                        val kind = call.argument<String>("kind")
+                        val folder = call.argument<String>("folder")
+                        if (path == null || filename == null || mimeType == null) {
+                            result.error("bad_args", "path, filename and mimeType are required", null)
+                            return@setMethodCallHandler
+                        }
+                        result.success(
+                            MediaSaver.moveIntoFolder(
+                                this,
+                                path,
+                                filename,
+                                mimeType,
+                                when (kind) {
+                                    "audio" -> MediaSaver.Kind.AUDIO
+                                    "image" -> MediaSaver.Kind.IMAGE
+                                    else -> MediaSaver.Kind.VIDEO
+                                },
+                                folder,
+                            ),
+                        )
+                    }
+
                     "saveImage" -> {
                         val path = call.argument<String>("path")
                         val filename = call.argument<String>("filename")

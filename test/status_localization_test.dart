@@ -10,7 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 const _statusKeys = <String>[
   'statusSignInRequired', 'statusSignedInRetrying', 'accountsCleared',
   'trashRestored', 'trashRestoreFailed',
-  'folderNameInvalid', 'folderNameTaken',
+  'folderNameInvalid', 'folderNameTaken', 'folderVaultRefused',
+  'folderMoveFailed',
   'statusTapDuck',
   'statusChooseImages', 'statusVaultIndexRebuilt', 'statusUnlockVaultFirst',
   'statusUnlockVaultBeforeMove', 'statusFileNotLocal', 'statusMovedToVault',

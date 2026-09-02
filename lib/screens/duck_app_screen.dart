@@ -2603,7 +2603,11 @@ class _LibraryViewState extends State<_LibraryView> {
           IconButton(
             tooltip: l10n.translate('folderMoveTo'),
             icon: Icon(Icons.drive_file_move_outline, color: _gold, size: 20),
-            onPressed: picked.isEmpty
+            // Folders live in the phone's own file manager, so a vault file
+            // filed into one would put its name there. The controller refuses
+            // it too; this keeps the button from offering something that
+            // cannot happen.
+            onPressed: picked.isEmpty || picked.any((item) => item.isPrivate)
                 ? null
                 : () => _showMoveToFolderSheet(context, picked),
           ),

@@ -227,6 +227,27 @@ class DownloadStore {
     return _box.put('librarySort', name);
   }
 
+  /// The folders the user has made, by name.
+  ///
+  /// Kept here rather than read off the disk. A folder is a name the user
+  /// chose; the directory behind it is created by the media store when the
+  /// first file goes in, so an empty one has nothing to enumerate — and
+  /// listing shared storage to find out would need a permission this does not
+  /// otherwise want.
+  List<String> readUserFolders() {
+    final raw = _box.get('userFolders');
+    if (raw is! List) return const [];
+    return [
+      for (final value in raw)
+        if (value is String && value.trim().isNotEmpty) value,
+    ];
+  }
+
+  Future<void> writeUserFolders(List<String> folders) {
+    if (!isUsable) return Future<void>.value();
+    return _box.put('userFolders', folders);
+  }
+
   List<Playlist> readPlaylists() {
     final raw = _box.get('playlists', defaultValue: const <dynamic>[]);
     if (raw is! List) return const [];

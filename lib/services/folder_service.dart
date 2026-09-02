@@ -1,23 +1,28 @@
-import 'dart:io';
-
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+
+import '../models/download_models.dart';
 
 /// Folders the user makes, holding files that really move.
 ///
-/// The Folders tab already lists what is on the phone; this is the other kind
-/// — somewhere to put things, rather than a report of where they landed. A
-/// download moved into one moves on disk, so it stays put after a restart,
-/// after a reinstall of the library index, and when looked at from anywhere
-/// else.
+/// The Folders tab lists what is already on the phone; this is the other kind
+/// — somewhere to put things, rather than a report of where they landed.
 ///
-/// They live under the app's own documents directory. Shared storage would put
-/// the user's own filing in the same place as the gallery's, and Duck has no
-/// business creating folders in someone's photo library.
+/// They live inside the media collections the phone already shows, beside the
+/// downloads Duck saves there: `Movies/Duck Downloader/<folder>` and its
+/// siblings for music and pictures. The first version put them in the app's
+/// private directory, which produced a "real folder" only the app that made it
+/// could see — not what anybody means by the word, and the first thing anyone
+/// noticed.
+///
+/// A folder is a name the user chose. The directory behind it is created by
+/// the media store when the first file goes in, so nothing here enumerates
+/// shared storage or asks for a permission to do it.
 class FolderService {
-  const FolderService();
+  const FolderService({MethodChannel? channel})
+    : _channel = channel ?? const MethodChannel('duck_downloader/media');
 
-  static const _root = 'Folders';
+  final MethodChannel _channel;
 
   /// Characters a folder name may not carry, because a path cannot.
   static final _illegal = RegExp(r'[<>:"/\\|?*\x00-\x1F]');
@@ -29,118 +34,63 @@ class FolderService {
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim()
         // A leading dot hides the folder from the file browsers the user might
-        // open it in, which is not what naming a folder is for.
+        // open it in, which is the opposite of the point.
         .replaceAll(RegExp(r'^\.+'), '')
         .trim();
     if (cleaned.isEmpty) return null;
     return cleaned.length <= 60 ? cleaned : cleaned.substring(0, 60).trim();
   }
 
-  Future<Directory> _rootDir() async {
-    final documents = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(documents.path, 'Duck Downloader', _root));
-    if (!await dir.exists()) await dir.create(recursive: true);
-    return dir;
-  }
+  static String _mimeFor(DownloadItem item) => switch (item.type) {
+    DownloadType.audio => 'audio/mpeg',
+    DownloadType.image => 'image/jpeg',
+    DownloadType.video => 'video/mp4',
+  };
 
-  /// The folders that exist, by name, in the order a person reads them.
-  Future<List<String>> list() async {
-    try {
-      final root = await _rootDir();
-      final names = <String>[];
-      await for (final entity in root.list()) {
-        if (entity is Directory) names.add(p.basename(entity.path));
-      }
-      names.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-      return names;
-    } catch (_) {
-      return const [];
-    }
-  }
+  static String _kindFor(DownloadItem item) => switch (item.type) {
+    DownloadType.audio => 'audio',
+    DownloadType.image => 'image',
+    DownloadType.video => 'video',
+  };
 
-  /// Makes a folder and returns its name, or null when the name is unusable.
-  Future<String?> create(String rawName) async {
-    final name = sanitiseName(rawName);
-    if (name == null) return null;
-    final root = await _rootDir();
-    final dir = Directory(p.join(root.path, name));
-    if (!await dir.exists()) await dir.create();
-    return name;
-  }
-
-  /// Renames a folder, leaving the files inside it where they are.
+  /// Files [item] under [folder], or back out to the plain download folder
+  /// when [folder] is null.
   ///
-  /// Returns the new name, or null when it could not be done — a name already
-  /// taken, or one that sanitises to nothing.
-  Future<String?> rename(String from, String rawTo) async {
-    final to = sanitiseName(rawTo);
-    if (to == null || to == from) return null;
-    final root = await _rootDir();
-    final source = Directory(p.join(root.path, from));
-    final target = Directory(p.join(root.path, to));
-    if (!await source.exists() || await target.exists()) return null;
-    await source.rename(target.path);
-    return to;
-  }
+  /// Returns where the file now lives, or null when nothing moved. The file is
+  /// moved, not copied: one file, in one place, which is the only way the
+  /// storage screen can tell the truth.
+  Future<String?> move(DownloadItem item, {required String? folder}) async {
+    final path = item.filePath;
+    if (path == null) return null;
 
-  /// Removes a folder. Its files are moved out first by the caller.
-  Future<void> remove(String name) async {
+    // Never. A vault file is encrypted precisely so its name does not appear
+    // anywhere outside the app, and these folders are visible in the phone's
+    // own file manager. This is checked here as well as in the UI because the
+    // UI is where the rule is easy to forget.
+    if (item.isPrivate) return null;
+
+    final name = folder == null ? null : sanitiseName(folder);
+    if (folder != null && name == null) return null;
+
     try {
-      final root = await _rootDir();
-      final dir = Directory(p.join(root.path, name));
-      if (await dir.exists()) await dir.delete(recursive: true);
-    } catch (_) {}
-  }
-
-  /// Moves a file into [folder], or back out when [folder] is null.
-  ///
-  /// Returns where the file ended up, or null when there was nothing to move.
-  /// [fallbackDir] is where "out" means — the place downloads normally live.
-  Future<String?> move(
-    String? filePath, {
-    required String? folder,
-    required String fallbackDir,
-  }) async {
-    if (filePath == null) return null;
-    final source = File(filePath);
-    if (!await source.exists()) return null;
-
-    final Directory destination;
-    if (folder == null) {
-      destination = Directory(fallbackDir);
-    } else {
-      final name = sanitiseName(folder);
-      if (name == null) return null;
-      destination = Directory(p.join((await _rootDir()).path, name));
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'moveIntoFolder',
+        {
+          'path': path,
+          'filename': p.basename(path),
+          'mimeType': _mimeFor(item),
+          'kind': _kindFor(item),
+          'folder': name,
+        },
+      );
+      final moved = result?['path'] as String?;
+      return (moved == null || moved.isEmpty) ? null : moved;
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      // Every platform but Android, and the tests. Nothing moves rather than
+      // something breaking.
+      return null;
     }
-    await destination.create(recursive: true);
-
-    final target = await _freePath(
-      p.join(destination.path, p.basename(filePath)),
-    );
-    if (target == filePath) return filePath;
-    try {
-      return (await source.rename(target)).path;
-    } on FileSystemException {
-      // Renaming across devices fails; a file saved to external storage lands
-      // here. Copy, then remove the original.
-      await source.copy(target);
-      await source.delete();
-      return target;
-    }
-  }
-
-  /// Never overwrites. Two downloads can share a filename, and filing one
-  /// away is not a reason to destroy the other.
-  static Future<String> _freePath(String desired) async {
-    if (!await File(desired).exists()) return desired;
-    final dir = p.dirname(desired);
-    final ext = p.extension(desired);
-    final base = p.basenameWithoutExtension(desired);
-    for (var n = 1; n < 1000; n++) {
-      final candidate = p.join(dir, '$base ($n)$ext');
-      if (!await File(candidate).exists()) return candidate;
-    }
-    return p.join(dir, '$base ${DateTime.now().millisecondsSinceEpoch}$ext');
   }
 }

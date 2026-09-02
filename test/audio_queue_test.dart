@@ -27,6 +27,7 @@ void main() {
 
   late FakeBox box;
   late Directory sandbox;
+  final moveRequests = <Map<String, dynamic>>[];
 
   // A fresh directory per test, not per file: folders are real directories,
   // and one test's leftovers are the next one's name collision.
@@ -40,6 +41,27 @@ void main() {
         .setMockMethodCallHandler(
           const MethodChannel('com.ryanheise.just_audio.methods'),
           (call) async => <String, dynamic>{},
+        );
+    // Filing a download now crosses to the platform, because the folders live
+    // in the phone's media collections rather than in the app's own storage.
+    // Answering here lets the tests check what was asked for.
+    moveRequests.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('duck_downloader/media'),
+          (call) async {
+            if (call.method != 'moveIntoFolder') return null;
+            final args = Map<String, dynamic>.from(call.arguments as Map);
+            moveRequests.add(args);
+            final folder = args['folder'] as String?;
+            final name = args['filename'];
+            return {
+              'success': true,
+              'path': folder == null
+                  ? '/storage/Movies/Duck Downloader/$name'
+                  : '/storage/Movies/Duck Downloader/$folder/$name',
+            };
+          },
         );
     box = FakeBox();
   });
@@ -171,6 +193,83 @@ void main() {
       favorite: false,
       folder: folder,
     );
+
+    test('a filed file lands where the phone can see it', () async {
+      // The report: a "real folder" that only Duck could see. These live in
+      // the media collections the phone already shows, beside the downloads
+      // Duck saves there.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('clip'));
+      await controller.createFolder('Trips');
+      await controller.moveToFolder(controller.videos.single, 'Trips');
+
+      expect(moveRequests.single['folder'], 'Trips');
+      expect(
+        controller.videos.single.filePath,
+        '/storage/Movies/Duck Downloader/Trips/clip.mp4',
+      );
+      expect(controller.videos.single.folder, 'Trips');
+    });
+
+    test('taking it out puts it back beside the other downloads', () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('clip', folder: 'Trips'));
+      await controller.moveToFolder(controller.videos.single, null);
+
+      expect(moveRequests.single['folder'], isNull);
+      expect(controller.videos.single.folder, isNull);
+      expect(
+        controller.videos.single.filePath,
+        '/storage/Movies/Duck Downloader/clip.mp4',
+      );
+    });
+
+    test('a vault file is never filed anywhere visible', () async {
+      // These folders sit in the phone's own file manager, and a vault file
+      // appearing there by name is the single thing the vault exists to
+      // prevent. Checked in the controller as well as the UI, because the UI
+      // is where the rule is easy to forget.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(
+        file('secret').copyWith(isPrivate: true),
+      );
+      final secret = controller.downloads.firstWhere((e) => e.id == 'secret');
+
+      await controller.moveToFolder(secret, 'Trips');
+
+      expect(moveRequests, isEmpty, reason: 'nothing left the app');
+      expect(
+        controller.downloads.firstWhere((e) => e.id == 'secret').folder,
+        isNull,
+      );
+    });
+
+    test('renaming re-files everything, because the files really moved',
+        () async {
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a', folder: 'Trips'));
+      await controller.debugPutDownload(file('b', folder: 'Trips'));
+      await controller.createFolder('Trips');
+      moveRequests.clear();
+
+      await controller.renameFolder('Trips', 'Holidays');
+
+      expect(moveRequests, hasLength(2));
+      expect(
+        moveRequests.every((request) => request['folder'] == 'Holidays'),
+        isTrue,
+      );
+      expect(controller.folderCount('Holidays'), 2);
+      expect(controller.userFolders, ['Holidays']);
+    });
 
     test('a filter narrows the library to one folder', () async {
       final controller = createController();

@@ -3386,7 +3386,7 @@ class DuckDownloadsController extends ChangeNotifier
   String? folderFilter;
 
   Future<void> refreshFolders() async {
-    userFolders = await _folders.list();
+    userFolders = _store.readUserFolders();
     notifyListeners();
   }
 
@@ -3397,43 +3397,61 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   /// How many library files are filed under [folder].
-  int folderCount(String folder) =>
-      _downloads.where((item) => !item.isDeleted && item.folder == folder).length;
+  int folderCount(String folder) => _downloads
+      .where((item) => !item.isDeleted && item.folder == folder)
+      .length;
+
+  Future<void> _writeFolders(List<String> next) async {
+    next.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    userFolders = next;
+    await _store.writeUserFolders(next);
+    notifyListeners();
+  }
 
   Future<String?> createFolder(String name) async {
-    final created = await _folders.create(name);
-    if (created == null) {
+    final cleaned = FolderService.sanitiseName(name);
+    if (cleaned == null) {
       setStatus('folderNameInvalid');
       notifyListeners();
       return null;
     }
-    await refreshFolders();
-    return created;
+    if (userFolders.contains(cleaned)) return cleaned;
+    await _writeFolders([...userFolders, cleaned]);
+    return cleaned;
   }
 
-  /// Renames a folder and the rows that point at it, together.
+  /// Renames a folder, and re-files everything in it.
   ///
-  /// The rows carry the name, so leaving them behind would empty the folder
-  /// from the library's point of view while the files sat happily inside it.
+  /// The files really live in a directory of that name, so the rename is not
+  /// a label change: each one moves. Slower than renaming a directory would
+  /// be, and the only way that works when the directory lives in the phone's
+  /// media collections rather than in the app's own storage.
   Future<bool> renameFolder(String from, String to) async {
-    final renamed = await _folders.rename(from, to);
-    if (renamed == null) {
+    final cleaned = FolderService.sanitiseName(to);
+    if (cleaned == null) {
+      setStatus('folderNameInvalid');
+      notifyListeners();
+      return false;
+    }
+    if (cleaned == from) return true;
+    if (userFolders.contains(cleaned)) {
       setStatus('folderNameTaken');
       notifyListeners();
       return false;
     }
-    for (final item in _downloads.where((item) => item.folder == from).toList()) {
-      await _saveItem(
-        item.copyWith(
-          folder: renamed,
-          filePath: item.filePath == null
-              ? null
-              : item.filePath!.replaceFirst('/$from/', '/$renamed/'),
-        ),
-      );
+
+    await _writeFolders([
+      for (final folder in userFolders)
+        if (folder != from) folder,
+      cleaned,
+    ]);
+    for (final item in _downloads
+        .where((item) => item.folder == from)
+        .toList()) {
+      await moveToFolder(item, cleaned);
     }
-    if (folderFilter == from) folderFilter = renamed;
-    await refreshFolders();
+    if (folderFilter == from) folderFilter = cleaned;
+    notifyListeners();
     return true;
   }
 
@@ -3441,30 +3459,46 @@ class DuckDownloadsController extends ChangeNotifier
   ///
   /// Deleting a folder is a filing decision, not a request to lose files.
   Future<void> deleteFolder(String name) async {
-    for (final item in _downloads.where((item) => item.folder == name).toList()) {
+    for (final item in _downloads
+        .where((item) => item.folder == name)
+        .toList()) {
       await moveToFolder(item, null);
     }
-    await _folders.remove(name);
+    await _writeFolders([
+      for (final folder in userFolders)
+        if (folder != name) folder,
+    ]);
     if (folderFilter == name) folderFilter = null;
-    await refreshFolders();
+    notifyListeners();
   }
 
   /// Files one download under [folder], or takes it back out when null.
+  ///
+  /// A vault file is never filed. These folders sit in the phone's own media
+  /// collections, so filing one there would put its name in a file manager —
+  /// which is the single thing the vault exists to prevent.
   Future<void> moveToFolder(DownloadItem item, String? folder) async {
-    final home = await _files.mediaDirectoryFor(item.type);
-    final moved = await _folders.move(
-      item.filePath,
-      folder: folder,
-      fallbackDir: home,
-    );
+    if (item.isPrivate) {
+      setStatus('folderVaultRefused');
+      notifyListeners();
+      return;
+    }
+    final moved = await _folders.move(item, folder: folder);
+    if (moved == null) {
+      setStatus('folderMoveFailed');
+      notifyListeners();
+      return;
+    }
     await _saveItem(
       item.copyWith(
-        filePath: moved ?? item.filePath,
+        filePath: moved,
         folder: folder,
         clearFolder: folder == null,
+        // The file is somewhere else now, so the size on record is the only
+        // thing that still knows how big it was.
+        fileSizeBytes: item.fileSizeBytes,
       ),
     );
-    await refreshFolders();
   }
 
   Future<void> moveManyToFolder(
