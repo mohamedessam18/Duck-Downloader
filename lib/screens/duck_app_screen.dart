@@ -3017,7 +3017,16 @@ class _LibraryViewState extends State<_LibraryView> {
           const SizedBox(height: 10),
           Expanded(
             child: _subTab == _LibrarySubTab.folders
-                ? _buildFoldersTab()
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: _buildMyFolders(),
+                      ),
+                      Expanded(child: _buildFoldersTab()),
+                    ],
+                  )
                 : _subTab == _LibrarySubTab.playlists
                 ? _buildPlaylistsTab()
                 : filteredItems.isEmpty
@@ -3121,6 +3130,116 @@ class _LibraryViewState extends State<_LibraryView> {
           ),
         ],
       ),
+    );
+  }
+
+  /// The user's own folders, above the phone's.
+  ///
+  /// A tab called Folders that does not show the folders you made is the
+  /// wrong answer to the obvious question. The two are kept apart and
+  /// labelled, because one is a place you chose to put things and the other
+  /// is a report of where the phone already keeps them.
+  Widget _buildMyFolders() {
+    final l10n = AppLocalizations.of(context);
+    final folders = widget.controller.userFolders;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                l10n.translate('myFolders').toUpperCase(),
+                style: TextStyle(
+                  color: _textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.3,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () async {
+                final name = await _promptFolderName(context, l10n);
+                if (name == null) return;
+                await widget.controller.createFolder(name);
+              },
+              style: TextButton.styleFrom(foregroundColor: _gold),
+              icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+              label: Text(l10n.translate('folderNew')),
+            ),
+          ],
+        ),
+        if (folders.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              // Says how, not just that there are none. The only way to fill a
+              // folder is to select files and move them, and nothing else on
+              // this screen would tell you that.
+              l10n.translate('folderEmptyBody'),
+              style: TextStyle(color: _textMuted, fontSize: 12.5, height: 1.5),
+            ),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final folder in folders)
+                GestureDetector(
+                  onTap: () {
+                    widget.controller.setFolderFilter(folder);
+                    setState(() => _subTab = _LibrarySubTab.all);
+                  },
+                  onLongPress: () => _showFolderMenu(context, folder),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _panel,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: _border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.folder_outlined, color: _gold, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          folder,
+                          style: TextStyle(
+                            color: _text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${widget.controller.folderCount(folder)}',
+                          style: TextStyle(color: _textMuted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        const SizedBox(height: 18),
+        Text(
+          l10n.translate('deviceFolders').toUpperCase(),
+          style: TextStyle(
+            color: _textMuted,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
     );
   }
 
