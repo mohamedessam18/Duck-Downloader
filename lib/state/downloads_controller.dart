@@ -34,6 +34,7 @@ import '../services/share_bridge.dart';
 import '../services/youtube_explode_service.dart';
 import 'duck_status.dart';
 import 'library_view_mode.dart';
+import 'storage_summary.dart';
 import 'playback_session.dart';
 import '../services/vault_encryption_service.dart';
 import '../services/conversion_service.dart';
@@ -3297,6 +3298,9 @@ class DuckDownloadsController extends ChangeNotifier
   }
 
   final TrashService _trash = const TrashService();
+
+  /// What the app is holding, and where it went.
+  StorageSummary get storageSummary => StorageSummary.of(_withSizes(_downloads));
 
   /// Everything waiting in the trash, newest deletion first.
   List<DownloadItem> get trashedItems => trashedOf(null);
