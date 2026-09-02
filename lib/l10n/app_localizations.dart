@@ -22,6 +22,9 @@ class AppLocalizations {
     'en': {
       'appName': 'Duck Downloader',
       'trashTitle': 'Recently deleted',
+      'trashTitleVideos': 'Deleted videos',
+      'trashTitleAudios': 'Deleted audio',
+      'trashTitleImages': 'Deleted images',
       'trashEmpty': 'Nothing here',
       'trashEmptyBody': 'Files you delete wait here for 7 days.',
       'trashRestore': 'Restore',
@@ -241,6 +244,9 @@ class AppLocalizations {
     'ar': {
       'appName': 'Duck Downloader',
       'trashTitle': 'المحذوفات',
+      'trashTitleVideos': 'الفيديوهات المحذوفة',
+      'trashTitleAudios': 'الصوتيات المحذوفة',
+      'trashTitleImages': 'الصور المحذوفة',
       'trashEmpty': 'مفيش حاجة هنا',
       'trashEmptyBody': 'الملفات اللي بتمسحها بتستنى هنا ٧ أيام.',
       'trashRestore': 'استرجاع',

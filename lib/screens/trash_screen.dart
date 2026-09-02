@@ -13,9 +13,17 @@ import '../widgets/duck_motion.dart';
 /// download that took ten minutes to fetch and it was gone. This is the other
 /// half of that change: somewhere to notice the mistake.
 class TrashScreen extends StatefulWidget {
-  const TrashScreen({super.key, required this.controller});
+  const TrashScreen({super.key, required this.controller, this.only});
 
   final DuckDownloadsController controller;
+
+  /// Show only deleted files of this kind, or all of them when null.
+  ///
+  /// One trash with a filter over it, not a bin per media type. The files are
+  /// the same files; a video deleted from the Videos tab and then looked for
+  /// under Recently deleted in Settings has to be the same row, or the app has
+  /// two answers to where it went.
+  final DownloadType? only;
 
   @override
   State<TrashScreen> createState() => _TrashScreenState();
@@ -40,7 +48,7 @@ class _TrashScreenState extends State<TrashScreen> {
           ListenableBuilder(
             listenable: widget.controller,
             builder: (context, _) {
-              final items = widget.controller.trashedItems;
+              final items = widget.controller.trashedOf(widget.only);
               return CustomScrollView(
                 slivers: [
                   SliverAppBar(
@@ -49,7 +57,14 @@ class _TrashScreenState extends State<TrashScreen> {
                     foregroundColor: colors.text,
                     elevation: 0,
                     title: Text(
-                      l10n.translate('trashTitle'),
+                      l10n.translate(
+                        switch (widget.only) {
+                          DownloadType.video => 'trashTitleVideos',
+                          DownloadType.audio => 'trashTitleAudios',
+                          DownloadType.image => 'trashTitleImages',
+                          null => 'trashTitle',
+                        },
+                      ),
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     actions: [
@@ -132,7 +147,9 @@ class _TrashScreenState extends State<TrashScreen> {
         ],
       ),
     );
-    if (confirmed == true) await widget.controller.emptyTrash();
+    // Empties what is on screen, not everything. Someone looking at deleted
+    // videos who taps this is asking about those.
+    if (confirmed == true) await widget.controller.emptyTrash(only: widget.only);
   }
 }
 

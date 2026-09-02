@@ -24,6 +24,7 @@ import '../widgets/duck_empty_state.dart';
 import '../widgets/duck_motion.dart';
 import '../state/downloads_controller.dart';
 import '../state/library_view_mode.dart';
+import 'trash_screen.dart';
 import '../services/device_media_service.dart';
 import '../services/download_store.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -2496,6 +2497,16 @@ class _LibraryViewState extends State<_LibraryView> {
     );
   }
 
+  /// Which kind of file this page is about.
+  ///
+  /// Derived from the title the same way the vault button already does it,
+  /// rather than threaded in as a second source of the same fact.
+  DownloadType get _mediaTypeOfTab => switch (widget.title.toUpperCase()) {
+    'VIDEOS' => DownloadType.video,
+    'AUDIOS' => DownloadType.audio,
+    _ => DownloadType.image,
+  };
+
   Widget _buildTabOption(_LibrarySubTab tab, String label, bool active) {
     return Expanded(
       child: GestureDetector(
@@ -2591,6 +2602,10 @@ class _LibraryViewState extends State<_LibraryView> {
                               () => _useGridLayout = !_useGridLayout,
                             ),
                           ),
+                        _TrashButton(
+                          controller: widget.controller,
+                          only: _mediaTypeOfTab,
+                        ),
                         IconButton(
                           icon: Icon(
                             Icons.lock_outline,
@@ -6719,6 +6734,67 @@ class _RingtoneCutterSheetState extends State<_RingtoneCutterSheet> {
           );
         },
       ),
+    );
+  }
+}
+
+/// Opens the trash, showing only what this page is about.
+///
+/// Carries a count, because a bin that looks identical whether it holds
+/// nothing or holds the file you are looking for is a button nobody presses.
+class _TrashButton extends StatelessWidget {
+  const _TrashButton({required this.controller, required this.only});
+
+  final DuckDownloadsController controller;
+  final DownloadType only;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final count = controller.trashCount(only);
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              tooltip: AppLocalizations.of(context).translate('trashTitle'),
+              icon: Icon(Icons.delete_outline, color: _gold, size: 24),
+              onPressed: () => Navigator.of(context).push(
+                DuckPageRoute(
+                  builder: (_) =>
+                      TrashScreen(controller: controller, only: only),
+                ),
+              ),
+            ),
+            if (count > 0)
+              Positioned(
+                right: 4,
+                top: 4,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _gold,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      count > 99 ? '99+' : '$count',
+                      style: const TextStyle(
+                        color: Color(0xFF101112),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

@@ -104,6 +104,53 @@ void main() {
       expect(controller.downloads.map((e) => e.id), isNot(contains('clip')));
     });
 
+    test('each page sees only its own deleted files', () async {
+      // One trash with a filter over it, not a bin per media type. A video
+      // deleted from the Videos tab and then looked for under Recently deleted
+      // in Settings has to be the same row.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a-video'));
+      await controller.debugPutDownload(
+        file('a-song').copyWith(type: DownloadType.audio),
+      );
+      await controller.debugPutDownload(
+        file('a-photo').copyWith(type: DownloadType.image),
+      );
+
+      for (final item in [...controller.videos, ...controller.audios, ...controller.images]) {
+        await controller.deleteDownload(item);
+      }
+
+      expect(controller.trashedOf(DownloadType.video).map((e) => e.id), ['a-video']);
+      expect(controller.trashedOf(DownloadType.audio).map((e) => e.id), ['a-song']);
+      expect(controller.trashedOf(DownloadType.image).map((e) => e.id), ['a-photo']);
+      // And the unfiltered view is still the whole thing.
+      expect(controller.trashedItems, hasLength(3));
+      expect(controller.trashCount(null), 3);
+      expect(controller.trashCount(DownloadType.video), 1);
+    });
+
+    test('emptying a filtered view leaves the other kinds alone', () async {
+      // Someone looking at deleted videos who taps empty is asking about
+      // those, not about everything they have ever deleted.
+      final controller = createController();
+      addTearDown(controller.dispose);
+
+      await controller.debugPutDownload(file('a-video'));
+      await controller.debugPutDownload(
+        file('a-song').copyWith(type: DownloadType.audio),
+      );
+      await controller.deleteDownload(controller.videos.first);
+      await controller.deleteDownload(controller.audios.first);
+
+      await controller.emptyTrash(only: DownloadType.video);
+
+      expect(controller.trashedOf(DownloadType.video), isEmpty);
+      expect(controller.trashedOf(DownloadType.audio).map((e) => e.id), ['a-song']);
+    });
+
     test('the days left count down and reach the last day', () async {
       final controller = createController();
       addTearDown(controller.dispose);

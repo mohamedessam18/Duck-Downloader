@@ -3299,11 +3299,23 @@ class DuckDownloadsController extends ChangeNotifier
   final TrashService _trash = const TrashService();
 
   /// Everything waiting in the trash, newest deletion first.
-  List<DownloadItem> get trashedItems {
-    final list = _downloads.where((item) => item.isDeleted).toList()
+  List<DownloadItem> get trashedItems => trashedOf(null);
+
+  /// The same trash, narrowed to one kind of file.
+  ///
+  /// A filter rather than a second bin. The Videos tab and the Settings entry
+  /// look at one set of rows, so a file cannot be in the trash according to
+  /// one screen and gone according to the other.
+  List<DownloadItem> trashedOf(DownloadType? type) {
+    final list = _downloads
+        .where((item) => item.isDeleted && (type == null || item.type == type))
+        .toList()
       ..sort((a, b) => b.deletedAt!.compareTo(a.deletedAt!));
     return list;
   }
+
+  /// How many deleted files of this kind are waiting.
+  int trashCount(DownloadType? type) => trashedOf(type).length;
 
   /// How many days are left before [item] is erased.
   int daysLeftInTrash(DownloadItem item) {
@@ -3392,8 +3404,8 @@ class DuckDownloadsController extends ChangeNotifier
     notifyListeners();
   }
 
-  Future<void> emptyTrash() async {
-    for (final item in trashedItems) {
+  Future<void> emptyTrash({DownloadType? only}) async {
+    for (final item in trashedOf(only)) {
       await deleteForever(item);
     }
   }
